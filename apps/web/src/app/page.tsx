@@ -91,7 +91,7 @@ export default function Home() {
               </h2>
               <p className="text-lg text-slate-600">
                 Upload a reference video, your clips, and a song. Our AI parses
-                the reference's editing style and applies it to your footage.
+                the reference&apos;s editing style and applies it to your footage.
               </p>
             </div>
 

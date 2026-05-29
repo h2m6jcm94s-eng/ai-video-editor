@@ -37,7 +37,7 @@ export function TimelinePreview({ project, cutList }: TimelinePreviewProps) {
           </span>
           <span className="flex items-center space-x-1">
             <Music className="w-4 h-4" />
-            <span>{Math.round(cutList.globals?.tempo_bpm ?? 120)} BPM</span>
+            <span>{Math.round(cutList.globals?.tempoBpm ?? 120)} BPM</span>
           </span>
         </div>
       </div>
