@@ -7,8 +7,15 @@ import os
 import tempfile
 from typing import Optional
 import numpy as np
-import librosa
-import soundfile as sf
+
+try:
+    import librosa
+    import soundfile as sf
+    _HAS_LIBROSA = True
+except ImportError:
+    librosa = None  # type: ignore[assignment]
+    sf = None  # type: ignore[assignment]
+    _HAS_LIBROSA = False
 
 from shared_py.models import BeatGrid, BeatSegment
 

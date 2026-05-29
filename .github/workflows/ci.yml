@@ -25,6 +25,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @ai-video-editor/shared-types build
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm build
@@ -44,6 +45,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @ai-video-editor/shared-types build
       - run: pnpm --filter @ai-video-editor/api typecheck
       - name: Run tests with coverage
         run: pnpm --filter @ai-video-editor/api test:coverage
@@ -77,11 +79,11 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: ${{ env.UV_VERSION }}
-      - run: uv sync --dev
-      - run: uv run ruff check services/ || true
-      - run: uv run mypy services/ --ignore-missing-imports || true
+      - run: uv sync --no-install-project --dev
+      - run: uv run --no-project ruff check services/ || true
+      - run: uv run --no-project mypy services/ --ignore-missing-imports || true
       - name: Run Python tests with coverage
-        run: uv run pytest tests/ -v --tb=short --cov=services/shared-py/src --cov-report=xml:coverage-python.xml -m "not requires_anthropic and not requires_google and not requires_groq and not requires_openai and not requires_kimi and not requires_qwen and not requires_openrouter"
+        run: uv run --no-project pytest tests/ -v --tb=short --cov=services/shared-py/src --cov-report=xml:coverage-python.xml -m "not requires_anthropic and not requires_google and not requires_groq and not requires_openai and not requires_kimi and not requires_qwen and not requires_openrouter"
       - name: Upload Python coverage to Codecov
         uses: codecov/codecov-action@v4
         with:

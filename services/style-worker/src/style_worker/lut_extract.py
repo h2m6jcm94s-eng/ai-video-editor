@@ -7,7 +7,13 @@ import os
 import tempfile
 from typing import Optional, Tuple
 import numpy as np
-import cv2
+
+try:
+    import cv2
+    _HAS_CV2 = True
+except ImportError:
+    cv2 = None  # type: ignore[assignment]
+    _HAS_CV2 = False
 
 try:
     from color_matcher import ColorMatcher
