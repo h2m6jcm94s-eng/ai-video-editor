@@ -33,7 +33,7 @@
     "@types/node": "^20.12.0",
     "@types/uuid": "^9.0.0",
     "drizzle-kit": "^0.22.0",
-    "eslint": "^8.57.0",
+    "eslint": "^10.4.0",
     "tsx": "^4.11.0",
     "typescript": "^5.4.0",
     "vitest": "^4.1.7"
