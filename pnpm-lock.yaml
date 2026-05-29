@@ -88,8 +88,8 @@ importers:
         specifier: ^5.0.0
         version: 5.7.6(next@14.2.35(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       '@uppy/aws-s3':
-        specifier: ^4.0.0
-        version: 4.3.2(@uppy/core@4.5.3)
+        specifier: ^5.1.0
+        version: 5.1.0(@uppy/core@4.5.3)
       '@uppy/core':
         specifier: ^4.0.0
         version: 4.5.3
@@ -1240,10 +1240,10 @@ packages:
     peerDependencies:
       '@uppy/core': ^4.5.2
 
-  '@uppy/aws-s3@4.3.2':
-    resolution: {integrity: sha512-w3LrMUEI9pXVcn5LZ5oNL92hyocMu8mxfDSVVQIAQKxR+TPi57FfusDBqBB5T33UvxJH8EUGt9a04tuU/LpKqw==}
+  '@uppy/aws-s3@5.1.0':
+    resolution: {integrity: sha512-UBz+shrtDbnOf11AboDrkc9Fq2Cdf8HbFftE+gqfxig6fkv5rHpHhBCLkl8wCGAq+X/CxdqvvNhm/OM23Uzw2w==}
     peerDependencies:
-      '@uppy/core': ^4.5.2
+      '@uppy/core': ^5.2.0
 
   '@uppy/box@3.3.2':
     resolution: {integrity: sha512-4hRXPWy48Gpgyegd7lBPMYQTplfFEq1uaHe9ZltHu53LBeXasuGeZuprMbhIQ/7Sl/7UQwiAU0te9uv/ypoXGg==}
@@ -1254,6 +1254,11 @@ packages:
     resolution: {integrity: sha512-hfUsReHM5COhn+5d7CdZgZaG8BtDvtwj7vjXzg8qmgKI901mYUm/Zh420iOKT7eHiofKVTNoa7oijeGrqUEnyg==}
     peerDependencies:
       '@uppy/core': ^4.5.2
+
+  '@uppy/companion-client@5.1.1':
+    resolution: {integrity: sha512-DzrOWTbIZHvtgAFXBMYHk2wD27NjpBSVhY2tEiEIUhPd2CxbFRZjHM/N3HOt3VwZEAP471QWFLlJRWPcIY3A2Q==}
+    peerDependencies:
+      '@uppy/core': ^5.1.1
 
   '@uppy/components@0.3.2':
     resolution: {integrity: sha512-RHEV2Ru/SU1J8EoLabUX8GXQ59Q5+/FhSL5vIpicaVj++Neei58WYKj4iNWsigE4xE45jtHfYTV9IlXc+fJXaQ==}
@@ -1380,6 +1385,9 @@ packages:
 
   '@uppy/utils@6.2.2':
     resolution: {integrity: sha512-9mYJtbcngv2HOJIECkyfmdXTI5dW/ObCyvWP1Iti3E5bKtsa4sMmbx5Yh/tGCj8k/lBNhfvWyZuYnvnjmzNLSQ==}
+
+  '@uppy/utils@7.2.0':
+    resolution: {integrity: sha512-6lC246qszMv6bTyl/+QyHwrudgeguWkA94ME1wHn+a6uRAvmtAEaUManIfGqTJfoKvWAiCJqdJPl5xRJjhAloQ==}
 
   '@uppy/webcam@4.3.2':
     resolution: {integrity: sha512-x0qhTWb7AjkfS9Q12J2xhnTdccZ6sMuBh14LpXtXjaFe4Q1Uf191YmFwT7SCKn7lcasZYw3Tug0G5yQkqvg9uQ==}
@@ -4371,11 +4379,11 @@ snapshots:
       '@uppy/utils': 6.2.2
       preact: 10.29.2
 
-  '@uppy/aws-s3@4.3.2(@uppy/core@4.5.3)':
+  '@uppy/aws-s3@5.1.0(@uppy/core@4.5.3)':
     dependencies:
-      '@uppy/companion-client': 4.5.2(@uppy/core@4.5.3)
+      '@uppy/companion-client': 5.1.1(@uppy/core@4.5.3)
       '@uppy/core': 4.5.3
-      '@uppy/utils': 6.2.2
+      '@uppy/utils': 7.2.0
 
   '@uppy/box@3.3.2(@uppy/core@4.5.3)':
     dependencies:
@@ -4389,6 +4397,13 @@ snapshots:
     dependencies:
       '@uppy/core': 4.5.3
       '@uppy/utils': 6.2.2
+      namespace-emitter: 2.0.1
+      p-retry: 6.2.1
+
+  '@uppy/companion-client@5.1.1(@uppy/core@4.5.3)':
+    dependencies:
+      '@uppy/core': 4.5.3
+      '@uppy/utils': 7.2.0
       namespace-emitter: 2.0.1
       p-retry: 6.2.1
 
@@ -4575,6 +4590,11 @@ snapshots:
       preact: 10.29.2
 
   '@uppy/utils@6.2.2':
+    dependencies:
+      lodash: 4.18.1
+      preact: 10.29.2
+
+  '@uppy/utils@7.2.0':
     dependencies:
       lodash: 4.18.1
       preact: 10.29.2
@@ -5267,7 +5287,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-module-utils@2.13.0(@typescript-eslint/parser@7.18.0(eslint@8.57.1)(typescript@5.9.3))(eslint-import-resolver-node@0.3.10)(eslint-import-resolver-typescript@3.10.1)(eslint@8.57.1):
+  eslint-module-utils@2.13.0(@typescript-eslint/parser@7.18.0(eslint@8.57.1)(typescript@5.9.3))(eslint-import-resolver-node@0.3.10)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0)(eslint@8.57.1))(eslint@8.57.1):
     dependencies:
       debug: 3.2.7
     optionalDependencies:
@@ -5289,7 +5309,7 @@ snapshots:
       doctrine: 2.1.0
       eslint: 8.57.1
       eslint-import-resolver-node: 0.3.10
-      eslint-module-utils: 2.13.0(@typescript-eslint/parser@7.18.0(eslint@8.57.1)(typescript@5.9.3))(eslint-import-resolver-node@0.3.10)(eslint-import-resolver-typescript@3.10.1)(eslint@8.57.1)
+      eslint-module-utils: 2.13.0(@typescript-eslint/parser@7.18.0(eslint@8.57.1)(typescript@5.9.3))(eslint-import-resolver-node@0.3.10)(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0)(eslint@8.57.1))(eslint@8.57.1)
       hasown: 2.0.4
       is-core-module: 2.16.2
       is-glob: 4.0.3
