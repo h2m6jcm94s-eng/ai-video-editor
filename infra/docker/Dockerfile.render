@@ -15,7 +15,6 @@ COPY services/render-worker ./render-worker
 COPY pyproject.toml .
 COPY uv.lock .
 
-RUN pip install --no-cache-dir uv && \
-    uv pip install --system -e ./shared-py -e ./render-worker
+RUN pip install --no-cache-dir ./shared-py ./render-worker
 
 CMD ["python", "-m", "render_worker"]
