@@ -9,6 +9,7 @@ COPY apps/api ./apps/api
 
 RUN corepack enable pnpm && \
     pnpm install --frozen-lockfile && \
+    pnpm --filter @ai-video-editor/shared-types build && \
     pnpm --filter @ai-video-editor/api build
 
 EXPOSE 4000

@@ -4,7 +4,6 @@
 """Extract LUT from reference video using color-matcher."""
 
 import os
-import tempfile
 from typing import Optional, Tuple
 import numpy as np
 

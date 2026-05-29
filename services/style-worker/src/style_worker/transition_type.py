@@ -21,7 +21,6 @@ def classify_transitions(
 ) -> List[ShotBoundary]:
     """Classify transition type for each boundary."""
     cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS)
 
     for boundary in boundaries:
         if not boundary.is_gradual:

@@ -14,4 +14,3 @@ def __getattr__(name):
         return detect_beats
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-__all__ = ["probe_video", "detect_shot_boundaries", "detect_beats"]

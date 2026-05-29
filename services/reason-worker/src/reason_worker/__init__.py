@@ -11,4 +11,3 @@ def __getattr__(name):
         return rank_clips_for_slots
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-__all__ = ["generate_cutlist", "rank_clips_for_slots"]
