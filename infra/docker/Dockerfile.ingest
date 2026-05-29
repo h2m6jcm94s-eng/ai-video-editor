@@ -15,6 +15,6 @@ COPY pyproject.toml .
 COPY uv.lock .
 
 RUN pip install --no-cache-dir uv && \
-    uv pip install -e ./shared-py -e ./ingest-worker
+    uv pip install --system -e ./shared-py -e ./ingest-worker
 
 CMD ["python", "-m", "ingest_worker"]
