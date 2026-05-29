@@ -10,11 +10,9 @@ import numpy as np
 
 try:
     import librosa
-    import soundfile as sf
     _HAS_LIBROSA = True
 except ImportError:
     librosa = None  # type: ignore[assignment]
-    sf = None  # type: ignore[assignment]
     _HAS_LIBROSA = False
 
 from shared_py.models import BeatGrid, BeatSegment

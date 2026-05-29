@@ -48,13 +48,11 @@ export async function buildApp() {
     },
   });
 
-  if (process.env.NODE_ENV !== "test") {
-    await app.register(rateLimit, {
-      max: 60,
-      timeWindow: "1 minute",
-      keyGenerator: (req) => req.userId ?? req.ip,
-    });
-  }
+  await app.register(rateLimit, {
+    max: process.env.NODE_ENV === "test" ? 10000 : 60,
+    timeWindow: "1 minute",
+    keyGenerator: (req) => req.userId ?? req.ip,
+  });
 
   await app.register(healthRoutes, { prefix: "/api/health" });
 

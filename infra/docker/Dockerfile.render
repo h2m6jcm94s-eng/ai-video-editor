@@ -4,7 +4,7 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsm6 \
     libxext6 \
-    libgl1-mesa-glx \
+    libgl1 \
     fonts-dejavu \
     && rm -rf /var/lib/apt/lists/*
 
@@ -16,6 +16,6 @@ COPY pyproject.toml .
 COPY uv.lock .
 
 RUN pip install --no-cache-dir uv && \
-    uv pip install -e ./shared-py -e ./render-worker
+    uv pip install --system -e ./shared-py -e ./render-worker
 
 CMD ["python", "-m", "render_worker"]

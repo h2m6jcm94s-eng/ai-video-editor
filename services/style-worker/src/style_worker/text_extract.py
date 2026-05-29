@@ -3,7 +3,6 @@
 # Commercial SaaS use is prohibited without written permission.
 """Extract text overlays using PaddleOCR + frame deduplication."""
 
-import os
 from typing import List
 import numpy as np
 
