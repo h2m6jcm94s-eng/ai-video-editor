@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ai-video-editor-tests"
+version = "0.1.0"
+description = "Comprehensive test suite for AI Video Editor backend"
+requires-python = ">=3.10"
+dependencies = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "httpx>=0.27.0",
+    "numpy>=1.26.0",
+    "pillow>=10.0.0",
+    "pydantic>=2.5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest-xdist>=3.5.0",
+    "pytest-timeout>=2.2.0",
+    "pytest-mock>=3.12.0",
+    "ruff>=0.1.0",
+    "mypy>=1.7.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [
+    "services/shared-py/src",
+    "services/ingest-worker/src",
+    "services/reason-worker/src",
+    "services/style-worker/src",
+    "services/render-worker/src",
+    "services/upscale-worker/src",
+]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--disable-warnings",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "ffmpeg: marks tests that require FFmpeg",
+    "optional: marks tests for optional dependencies",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+
+[tool.coverage.run]
+source = [
+    "services/shared-py/src",
+    "services/ingest-worker/src",
+    "services/reason-worker/src",
+    "services/style-worker/src",
+    "services/render-worker/src",
+    "services/upscale-worker/src",
+]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false

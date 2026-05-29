@@ -1,0 +1,16 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY package.json pnpm-workspace.yaml turbo.json ./
+COPY packages/shared-types ./packages/shared-types
+COPY packages/eslint-config ./packages/eslint-config
+COPY apps/api ./apps/api
+
+RUN corepack enable pnpm && \
+    pnpm install --frozen-lockfile && \
+    pnpm --filter @ai-video-editor/api build
+
+EXPOSE 4000
+
+CMD ["node", "apps/api/dist/index.js"]

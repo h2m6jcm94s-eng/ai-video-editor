@@ -1,0 +1,83 @@
+import { vi } from "vitest";
+
+// Mock Clerk
+vi.mock("@clerk/fastify", () => ({
+  createClerkClient: () => ({
+    authenticateRequest: vi.fn(async () => ({
+      isSignedIn: true,
+      toAuth: () => ({ userId: "test-user-id", sessionId: "test-session" }),
+    })),
+  }),
+}));
+
+// Mock DB
+const createChainableInsert = () =>
+  vi.fn().mockReturnValue({
+    values: vi.fn().mockReturnValue({
+      returning: vi.fn().mockResolvedValue([]),
+    }),
+  });
+
+const createChainableUpdate = () =>
+  vi.fn().mockReturnValue({
+    set: vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({
+        returning: vi.fn().mockResolvedValue([]),
+      }),
+    }),
+  });
+
+const createChainableDelete = () =>
+  vi.fn().mockReturnValue({
+    where: vi.fn().mockResolvedValue(undefined),
+  });
+
+vi.mock("../db", () => ({
+  db: {
+    query: {
+      projects: { findFirst: vi.fn(), findMany: vi.fn() },
+      assets: { findFirst: vi.fn(), findMany: vi.fn() },
+      renders: { findFirst: vi.fn(), findMany: vi.fn() },
+    },
+    insert: createChainableInsert(),
+    update: createChainableUpdate(),
+    delete: createChainableDelete(),
+    execute: vi.fn().mockResolvedValue([]),
+  },
+}));
+
+// Mock Storage
+vi.mock("../services/storage", () => ({
+  createPresignedUploadUrl: vi.fn(async () => ({ url: "https://r2.example.com/upload", fields: {} })),
+  createPresignedDownloadUrl: vi.fn(async () => "https://r2.example.com/download"),
+  deleteProjectAssets: vi.fn(async () => {}),
+  probeS3Connection: vi.fn(async () => {}),
+}));
+
+// Mock ioredis before queue/progress import it
+vi.mock("ioredis", () => ({
+  default: class MockRedis {
+    on = vi.fn();
+    subscribe = vi.fn().mockResolvedValue(undefined);
+    unsubscribe = vi.fn().mockResolvedValue(undefined);
+    quit = vi.fn().mockResolvedValue(undefined);
+    ping = vi.fn().mockResolvedValue("PONG");
+    zadd = vi.fn().mockResolvedValue(1);
+    zpopmin = vi.fn().mockResolvedValue([]);
+    publish = vi.fn().mockResolvedValue(1);
+    get = vi.fn().mockResolvedValue(null);
+    setex = vi.fn().mockResolvedValue("OK");
+  },
+}));
+
+// Mock Queue
+vi.mock("../services/queue", () => ({
+  enqueueJob: vi.fn(async () => {}),
+  probeRedis: vi.fn(async () => {}),
+}));
+
+// Mock Temporal
+vi.mock("../services/temporal", () => ({
+  startRenderWorkflow: vi.fn(async () => "wf-test-123"),
+  sendCutlistApprovedSignal: vi.fn(async () => {}),
+}));

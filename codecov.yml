@@ -1,0 +1,74 @@
+codecov:
+  require_ci_to_pass: true
+  notify:
+    wait_for_ci: true
+
+coverage:
+  precision: 2
+  round: down
+  range: "70...100"
+  status:
+    project:
+      default:
+        target: 70%
+        threshold: 5%
+        if_not_found: success
+        if_ci_failed: error
+      api:
+        target: 70%
+        flags: [api]
+      python:
+        target: 60%
+        flags: [python]
+    patch:
+      default:
+        target: 60%
+        threshold: 10%
+
+flags:
+  api:
+    paths: [apps/api/src/]
+    carryforward: true
+  python:
+    paths:
+      - services/shared-py/src/
+      - services/ingest-worker/src/
+      - services/style-worker/src/
+      - services/reason-worker/src/
+      - services/render-worker/src/
+      - services/upscale-worker/src/
+    carryforward: true
+
+component_management:
+  individual_components:
+    - component_id: api
+      name: "API (Fastify)"
+      paths: [apps/api/src/**]
+    - component_id: web
+      name: "Web (Next.js)"
+      paths: [apps/web/src/**]
+    - component_id: python_workers
+      name: "Python Workers"
+      paths: [services/**/src/**]
+    - component_id: temporal
+      name: "Temporal Workflows"
+      paths: [infra/temporal/**]
+
+ignore:
+  - "apps/api/src/db/migrations/**"
+  - "apps/api/src/__tests__/**"
+  - "apps/api/src/test/**"
+  - "apps/web/src/__tests__/**"
+  - "services/**/tests/**"
+  - "**/dist/**"
+  - "**/.next/**"
+  - "**/node_modules/**"
+  - "**/*.config.ts"
+  - "**/*.config.js"
+
+comment:
+  layout: "reach,diff,flags,components,files"
+  behavior: default
+  require_changes: true
+  require_base: false
+  require_head: true

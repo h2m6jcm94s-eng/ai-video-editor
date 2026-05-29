@@ -1,0 +1,21 @@
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libsm6 \
+    libxext6 \
+    libgl1-mesa-glx \
+    fonts-dejavu \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY services/shared-py ./shared-py
+COPY services/render-worker ./render-worker
+COPY pyproject.toml .
+COPY uv.lock .
+
+RUN pip install --no-cache-dir uv && \
+    uv pip install -e ./shared-py -e ./render-worker
+
+CMD ["python", "-m", "render_worker"]

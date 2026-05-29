@@ -1,0 +1,15 @@
+[project]
+name = "render-worker"
+version = "0.1.0"
+dependencies = [
+    "shared-py",
+    "ffmpeg-python>=0.2.0",
+    "av>=12.0.0",
+    "numpy>=1.26.0",
+    "pillow>=10.0.0",
+    "opencv-python>=4.9.0",
+    "scipy>=1.13.0",
+]
+
+[tool.uv.sources]
+shared-py = { workspace = true }

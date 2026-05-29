@@ -1,0 +1,318 @@
+language: en-US
+early_access: false
+
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  path_filters:
+    - "!**/node_modules/**"
+    - "!**/.venv/**"
+    - "!**/dist/**"
+    - "!**/.next/**"
+    - "!**/coverage/**"
+    - "!**/*.lock"
+    - "!**/migrations/**"
+  auto_review:
+    enabled: true
+    ignore_title_keywords: ["WIP", "Draft", "[skip ci]"]
+    drafts: false
+    base_branches: ["main", "develop"]
+  path_instructions:
+    # ── API: Middleware ────────────────────────────────────────────────────────
+    - path: "apps/api/src/middleware/**/*.ts"
+      instructions: |
+        This project has three middleware functions defined in src/middleware/:
+        - requireAuth (auth.ts): attaches request.userId (string) and request.auth (Clerk object)
+        - requireProjectOwnership (ownership.ts): looks up the project by params.id + userId,
+          returns 404 if not found, 403 if wrong user, attaches request.project
+        - validateBody(schema) (validate.ts): runs Zod safeParse, returns 422 with
+          { error: "Validation failed", code: "VALIDATION_ERROR", details: ZodIssue[] }
+
+        Flag any middleware that:
+        - Uses (request as any) instead of the typed FastifyRequest extension in types/fastify.d.ts
+        - Returns error shapes other than { error: string, code: string, details?: unknown }
+        - Reads process.env directly (must use env from src/env.ts instead)
+
+    # ── API: Routes ────────────────────────────────────────────────────────────
+    - path: "apps/api/src/routes/**/*.ts"
+      instructions: |
+        ARCHITECTURE: Every mutating route (POST/PATCH/DELETE) must have preHandlers in this order:
+        [requireAuth, requireProjectOwnership (if project-scoped), validateBody(schema)]
+
+        KNOWN SCHEMAS (from middleware/validate.ts):
+        - createProjectSchema: name (string 1-255), styleTier (full_style|style_transfer|no_style),
+          mode (auto|assisted)
+        - patchProjectSchema: name (string 1-255) optional — status/userId/renderAssetId are
+          server-set and must NEVER be patchable via this route
+        - presignedUploadSchema: projectId (UUID), filename, mimeType (from ALLOWED_MIMES),
+          type (reference|song|clip), partNumber?, uploadId?
+        - createRenderSchema: projectId (UUID), options (passthrough object)
+        - updateCutlistSchema: cutList.globals (total_duration, tempo required), cutList.slots[]
+          (slot_index, start_time, end_time required per slot)
+
+        RENDER ROUTE INVARIANTS:
+        - Must check project.referenceAssetId != null AND project.songAssetId != null before
+          starting workflow — return 422 "Project missing reference asset or song" if either is null
+        - Must return 409 if a render with status "queued" or "running" already exists for the project
+        - Temporal workflow ID format: render-{projectId}-{renderId}
+        - Must enqueue Redis job AFTER db.transaction() commits, not inside it
+
+        PROJECT DELETE:
+        - Must call deleteProjectAssets(projectId) after db.delete(projects) to clean R2 storage
+        - Use Promise.allSettled — log failures, never block the 200 response
+
+        ERROR CODES:
+        - 401 UNAUTHORIZED, 403 FORBIDDEN, 404 NOT_FOUND, 409 CONFLICT,
+          422 VALIDATION_ERROR, 500 INTERNAL_ERROR
+
+        Flag any route that:
+        - Uses request.body as { ... } instead of request.validatedBody after validateBody
+        - Uses (request as any) for userId or project
+        - Does raw SQL (only drizzle ORM allowed, except sql`SELECT 1` in health check)
+        - Does multi-step DB operations without db.transaction()
+        - Skips ownership check on project-scoped endpoints
+
+    # ── API: Database Schema ──────────────────────────────────────────────────
+    - path: "apps/api/src/db/**/*.ts"
+      instructions: |
+        Schema has 4 tables: users, projects, assets, renders.
+        Foreign keys: projects.userId → users.id (CASCADE DELETE)
+                      assets.projectId → projects.id (CASCADE DELETE)
+                      renders.projectId → projects.id (CASCADE DELETE)
+        Indexes: projects_user_idx (userId), assets_project_idx (projectId),
+                 renders_project_idx (projectId)
+
+        Projects.status enum: uploading | processing | complete | failed
+        Projects.styleTier enum: full_style | style_transfer | no_style
+        Projects.mode enum: auto | assisted
+        Assets.type enum: reference | song | clip
+        Renders.status enum: queued | running | complete | failed
+        Renders.stage: string (matches Temporal activity names)
+
+        Flag any migration that:
+        - Adds a NOT NULL column without a default (requires table rewrite on large tables)
+        - Removes cascade delete from an existing FK
+        - Drops an index on userId or projectId
+
+    # ── API: Services ─────────────────────────────────────────────────────────
+    - path: "apps/api/src/services/**/*.ts"
+      instructions: |
+        storage.ts: Uses AWS SDK v3 S3Client pointed at Cloudflare R2.
+        - Presigned upload URLs expire in 900s (15 min), download in 3600s (1 hr)
+        - probeS3Connection() is called at startup — do not remove it
+        - deleteObject(key) is used by project delete — keep signature stable
+
+        queue.ts: Redis via ioredis. probeRedis() is called at startup.
+        - enqueueJob(renderId) pushes to "render-jobs" list
+        - Never introduce a second Redis client in this file
+
+        temporal.ts: Lazy Temporal client (reconnects every 5 min on failure).
+        - startRenderWorkflow() is the only public function
+        - Workflow ID format must stay render-{projectId}-{renderId}
+
+        Flag any change that:
+        - Adds a second Redis or S3 client instance outside these service files
+        - Changes presigned URL expiry without updating .env.example docs
+        - Removes the startup probe calls from index.ts
+
+    # ── API: Environment ──────────────────────────────────────────────────────
+    - path: "apps/api/src/env.ts"
+      instructions: |
+        This file validates all env vars at startup via Zod and calls process.exit(1)
+        with a formatted ╔══ STARTUP FAILED ══╗ table if any are missing.
+        The exported `env` object is the ONLY way routes/services should read env vars.
+
+        Flag any change that:
+        - Adds process.env.SOMETHING_NEW to routes/services without adding it to the Zod schema here
+        - Weakens validation (e.g., removing .url() or .min() constraints)
+        - Removes the process.exit(1) on validation failure
+
+    # ── Web: API Client ───────────────────────────────────────────────────────
+    - path: "apps/web/src/lib/api.ts"
+      instructions: |
+        Central API client. All fetch calls in the app must go through these typed methods —
+        never raw fetch() in components or pages.
+
+        APIError class: extends Error with .status (HTTP code), .code (machine string),
+        .details (ZodIssue[] for 422s). Thrown on any non-2xx response.
+
+        Methods return strongly typed interfaces from src/types/api.ts:
+        - projects.*  → Promise<{ project: Project }> or Promise<{ projects: Project[] }>
+        - uploads.*   → Promise<{ asset: Asset }> or PresignResponse
+        - renders.*   → Promise<{ jobId: string }> or Promise<{ render: RenderJob }>
+        - progress.subscribe(jobId) → EventSource (SSE, not fetch)
+
+        Flag any change that:
+        - Adds a raw fetch() call anywhere in this file
+        - Returns unknown or Partial<unknown> instead of typed interfaces
+        - Swallows errors with .catch(() => ({ error: "..." })) instead of propagating
+        - Breaks the APIError throw contract (other components catch this specific class)
+
+    # ── Web: Types ────────────────────────────────────────────────────────────
+    - path: "apps/web/src/types/api.ts"
+      instructions: |
+        Single source of truth for frontend types. Must stay in sync with
+        apps/api/src/db/schema.ts field names and nullability.
+
+        Key interfaces:
+        - Project: id, name, status, styleTier, mode, referenceAssetId (null),
+          songAssetId (null), clipAssetIds (string[]), cutList (CutList | null)
+        - Asset: id, projectId, type, filename, mimeType, storageKey, storageUrl,
+          sizeBytes, durationSec (null), width (null), height (null), fps (null)
+        - RenderJob: id, projectId, status, stage (null), progress, workflowId (null),
+          errorMessage (null), startedAt (null), completedAt (null)
+        - CutList: globals (CutListGlobals), slots (Slot[]), overlays (Overlay[])
+          — must match the Pydantic models in services/shared-py/src/shared_py/models.py
+
+        Flag any change that:
+        - Makes a nullable field non-nullable without verifying the DB column changed
+        - Adds a field not present in the backend schema
+        - Renames fields (breaks JSON deserialization silently)
+
+    # ── Web: Components & Pages ───────────────────────────────────────────────
+    - path: "apps/web/src/**/*.tsx"
+      instructions: |
+        Error handling pattern: every async operation must be in try-catch.
+        Errors should be caught as APIError for typed access to .code and .message.
+        Generic Error should fall back to "Something went wrong".
+
+        error.tsx and global-error.tsx exist as Next.js error boundaries — do not remove them.
+
+        Flag any change that:
+        - Calls fetch() directly instead of api.* methods from src/lib/api.ts
+        - Uses unknown or any for API response types
+        - Has async event handlers without try-catch
+        - Removes the error boundary files
+
+    # ── Python: AI Providers ──────────────────────────────────────────────────
+    - path: "services/shared-py/src/shared_py/ai_providers/**/*.py"
+      instructions: |
+        PROVIDER CONTRACT (base.py defines the interface):
+        - generate_cutlist(beat_grid, shots, style, clips) → CutList
+        - classify_shot(frame_path) → ShotAnalysis
+        - analyze_style(frames) → StyleAnalysis
+
+        EVERY provider __init__ must:
+        1. Resolve API key: api_key arg OR os.environ.get("PROVIDER_API_KEY", "")
+        2. Raise ValueError("PROVIDER_API_KEY is not set — ...") if empty
+        3. This applies to: ANTHROPIC_API_KEY, GOOGLE_API_KEY, GROQ_API_KEY,
+           OPENAI_API_KEY, KIMI_API_KEY, QWEN_API_KEY, OPENROUTER_API_KEY
+
+        JSON RESPONSE HANDLING:
+        - Providers that support it must use response_format={"type": "json_object"}
+          (Groq, OpenAI, Qwen, OpenRouter support this; Kimi/Claude use tool-use or prompting)
+        - All providers must call _strip_markdown() before json.loads() as safety net
+        - On json.JSONDecodeError: raise ValueError with first 200 chars of raw response
+
+        RETRY PATTERN: 3 attempts max, raise on final failure (don't silently return None)
+
+        FACTORY: factory.py reads AI_PROVIDER env var (comma-separated chain).
+        - Tries each provider in order, catches Exception, logs warning, tries next
+        - Falls through to ProgrammaticProvider if chain exhausted
+        - Raises RuntimeError if chain exhausted AND "programmatic" not in chain
+
+        Flag any provider that:
+        - Doesn't check for empty API key in __init__
+        - Returns None instead of raising on final retry failure
+        - Imports heavy dependencies at module level (must be inside __init__ for lazy loading)
+
+    # ── Python: Workers ───────────────────────────────────────────────────────
+    - path: "services/**/src/**/*.py"
+      instructions: |
+        STARTUP: Every worker __main__ must call validate_startup(worker_name) from
+        shared_py.startup before any other initialization. This checks required env vars
+        (R2, Redis, DATABASE_URL) and warns about missing AI provider keys.
+
+        SUBPROCESS PATTERN: All subprocess.run() calls must follow this pattern:
+        ```python
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr.decode("utf-8", errors="replace")[:1000]
+            raise RuntimeError(f"FFmpeg {context} failed (exit {e.returncode}): {stderr}") from e
+        ```
+        The _run_ffmpeg() helper in render_worker/compiler.py implements this — use it as reference.
+
+        IST/UTC CONVERSION: Never inline IST-to-UTC math. Always use ist_to_utc() from
+        shared_py.utils. IST = UTC + 5:30, so UTC = IST - 5:30.
+
+        PYDANTIC MODELS: Use Pydantic v2. All domain objects (CutList, Slot, BeatGrid,
+        ShotAnalysis, StyleAnalysis, ClipScore) are defined in shared_py/models.py.
+        Never redefine these as plain dicts or dataclasses in worker code.
+
+        OPTIONAL DEPENDENCIES: If a library is optional (PaddleOCR, allin1, transnetv2),
+        import inside a try/except ImportError and return graceful fallback (not raise).
+        Log a warning so users know the feature is degraded.
+
+        AVE_ PREFIX: All env vars used by Python workers must use the AVE_ prefix
+        as defined in shared_py/config.py BaseSettings(env_prefix="AVE_").
+
+        Flag any code that:
+        - Uses subprocess.run(..., check=True) without try/except CalledProcessError
+        - Inlines 5.5 * 60 * 60 * 1000 or similar IST offset math
+        - Defines domain models as plain dicts instead of Pydantic models
+        - Reads os.environ directly for AVE_* vars (use shared_py.config.Settings instead)
+
+    # ── Temporal: Workflow ────────────────────────────────────────────────────
+    - path: "infra/temporal/**/*.py"
+      instructions: |
+        PIPELINE ORDER (10 stages, do not reorder):
+        1. probe_inputs      — 60s timeout,  3 attempts
+        2. detect_beats      — 120s timeout, 3 attempts
+        3. detect_shots      — 180s timeout, 3 attempts
+        4. analyze_reference_style — 300s,  2 attempts
+        5. embed_user_clips  — 300s timeout, 2 attempts
+        6. generate_cutlist_claude — 120s,  3 attempts
+        7. rank_clips_per_slot — 60s timeout, 2 attempts
+        8. [assisted mode only] wait for cutlist_approved signal — 24h timeout
+        9. render_720p       — 600s timeout, 2 attempts
+        10. upload_to_r2     — 120s timeout, 3 attempts
+        11. notify_user      — 30s timeout,  1 attempt (no retry)
+
+        WORKFLOW ID: Must be render-{projectId}-{renderId}. Never change this format
+        without updating the API's temporal.ts service simultaneously.
+
+        PROGRESS TRACKING: Progress updates sent via workflow signal (not query).
+        The API's progress.ts SSE route subscribes to Redis channel keyed by renderId.
+
+        CUTLIST SIGNAL: For assisted mode, the API sends cutlist_approved signal containing
+        the user-edited CutList after the user approves it in the UI. The workflow waits
+        on workflow.wait_condition() with a 24-hour timeout.
+
+        Flag any change that:
+        - Reorders pipeline stages
+        - Changes an activity timeout by more than 50% without explanation
+        - Changes the workflow ID format
+        - Removes the cutlist_approved signal handler for assisted mode
+
+    # ── CI/CD ─────────────────────────────────────────────────────────────────
+    - path: ".github/workflows/**/*.yml"
+      instructions: |
+        Package managers: pnpm (Node — version from .nvmrc or pinned in workflow),
+        uv (Python — version pinned to 0.4.x).
+
+        Test jobs must run BEFORE the docker build job (docker depends on: [test-js, test-api, test-py]).
+
+        test-api job must:
+        - Set NODE_ENV=test (disables rate-limit plugin in app.ts)
+        - Run vitest with --coverage flag
+        - Upload coverage to Codecov with flag: api
+
+        test-py job must:
+        - Run pytest on services/shared-py/tests/ (not just ruff/mypy)
+        - Upload coverage to Codecov with flag: python
+
+        security.yml must run: CodeQL (javascript, python), pnpm audit, pip-audit.
+        release.yml must trigger on v*.*.* tags only.
+
+        Flag any change that:
+        - Removes the dependency of docker job on test jobs
+        - Skips coverage upload
+        - Hard-codes secrets instead of using ${{ secrets.* }}
+
+chat:
+  auto_reply: true

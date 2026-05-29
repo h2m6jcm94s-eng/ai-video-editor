@@ -1,0 +1,128 @@
+"""Base AIProvider interface. All prompts are provider-agnostic."""
+
+from abc import ABC, abstractmethod
+from typing import Dict, Any, List
+from shared_py.models import CutList, ShotAnalysis, StyleAnalysis
+
+
+class AIProvider(ABC):
+    """Abstract base for all AI providers.
+
+    Prompts, schemas, and analysis context are identical across providers.
+    Only the transport layer (HTTP client / SDK) and response parsing differ.
+    """
+
+    name: str = "base"
+
+    # ------------------------------------------------------------------
+    # Prompt templates (shared across all providers)
+    # ------------------------------------------------------------------
+
+    SYSTEM_PROMPT_CUTLIST = (
+        "You are an expert video editor AI. You generate precise, beat-synced cut-lists. "
+        "Always return valid JSON matching the provided schema exactly. "
+        "Every cut must snap to the nearest beat. Every 4-8 cuts, force a longer shot at the nearest downbeat. "
+        "Dramatic transitions (flash, whip, dissolve) only at section boundaries. "
+        "Match energy_curve: low energy = wide/establishing shots, high energy = close-ups/action. "
+        "Do not request shot types the user doesn't have. Keep total duration under 60 seconds for the MVP."
+    )
+
+    SYSTEM_PROMPT_SHOT = (
+        "You are a cinematography expert AI. Analyze the provided video frames and return "
+        "a structured classification of the shot type, motion, subject, lighting, and camera movement."
+    )
+
+    SYSTEM_PROMPT_STYLE = (
+        "You are a film colorist and editor AI. Analyze the reference video description and "
+        "extract the color palette, contrast, saturation, brightness, pacing, mood, and detected camera motions."
+    )
+
+    @abstractmethod
+    def generate_cutlist(
+        self,
+        context: str,
+        schema: Dict[str, Any],
+        max_tokens: int = 4096,
+    ) -> CutList:
+        """Generate a cut-list from analysis context using the provider's native tool/schema enforcement."""
+        ...
+
+    @abstractmethod
+    def classify_shot(
+        self,
+        keyframes: List[Any],
+        schema: Dict[str, Any],
+    ) -> ShotAnalysis:
+        """Classify a single shot from keyframe images."""
+        ...
+
+    @abstractmethod
+    def analyze_style(
+        self,
+        reference_desc: str,
+    ) -> StyleAnalysis:
+        """Analyze overall style from a text description of the reference video."""
+        ...
+
+    def _build_cutlist_context(
+        self,
+        beat_grid: Any,
+        shot_boundaries: List[Any],
+        style_analysis: Dict[str, Any],
+        energy_curve: List[float],
+        available_shot_types: List[str],
+        total_duration: float = 30.0,
+    ) -> str:
+        """Build the rich text context used by ALL providers."""
+        lines = [
+            "# Reference Video Analysis",
+            "",
+            "## Beat Grid",
+            f"- BPM: {beat_grid.bpm if hasattr(beat_grid, 'bpm') else 'unknown'}",
+            f"- Time Signature: 4/4",
+            f"- Total Beats: {len(beat_grid.beats) if hasattr(beat_grid, 'beats') else 0}",
+            f"- Downbeats at: {[round(b, 2) for b in (beat_grid.downbeats if hasattr(beat_grid, 'downbeats') else [])[:8]]}...",
+            "",
+            "## Song Sections",
+        ]
+
+        segments = beat_grid.segments if hasattr(beat_grid, "segments") else []
+        for seg in segments:
+            lines.append(f"- {seg.label}: {seg.start:.2f}s - {seg.end:.2f}s")
+
+        lines.extend(["", "## Reference Shot Sequence"])
+        for i, shot in enumerate(shot_boundaries[:20]):
+            t_in = getattr(shot, "transition_in", "unknown")
+            lines.append(
+                f"- Shot {i+1}: {shot.start_s:.2f}s - {shot.end_s:.2f}s "
+                f"({'gradual' if getattr(shot, 'is_gradual', False) else 'cut'}, transition: {t_in})"
+            )
+
+        lines.extend([
+            "",
+            "## Style Analysis",
+            f"- Color Palette: {style_analysis.get('color_palette', [])}",
+            f"- Contrast: {style_analysis.get('contrast_level', 1.0):.2f}",
+            f"- Saturation: {style_analysis.get('saturation_level', 1.0):.2f}",
+            f"- Brightness: {style_analysis.get('brightness_level', 1.0):.2f}",
+            f"- Pacing: {style_analysis.get('pacing', 'medium')}",
+            f"- Mood: {style_analysis.get('mood', 'neutral')}",
+            f"- Detected Motions: {style_analysis.get('camera_motions', [])}",
+            "",
+            "## Energy Curve (10-point)",
+            str([round(e, 2) for e in energy_curve]),
+            "",
+            "## Available User Clip Shot Types",
+            str(available_shot_types),
+            "",
+            "## Instructions",
+            f"Generate a cut-list that matches the reference video's editing rhythm, pacing, and energy.",
+            f"- Total target duration: {total_duration}s",
+            "- Every cut must snap to the nearest beat",
+            "- Every 4-8 cuts, force a longer shot at the nearest downbeat",
+            "- Dramatic transitions (flash, whip, dissolve) only at section boundaries",
+            "- Match energy_curve: low energy = wide/establishing shots, high energy = close-ups/action",
+            "- Do not request shot types the user doesn't have",
+        ])
+
+        return "\n".join(lines)

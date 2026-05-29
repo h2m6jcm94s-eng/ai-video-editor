@@ -1,0 +1,18 @@
+[project]
+name = "ingest-worker"
+version = "0.1.0"
+dependencies = [
+    "shared-py",
+    "av>=12.0.0",
+    "ffmpeg-python>=0.2.0",
+    "numpy>=1.26.0",
+    "librosa>=0.10.1",
+    "soundfile>=0.12.1",
+    "scenedetect>=0.6.2",
+    "opencv-python>=4.9.0",
+    "pillow>=10.0.0",
+    "httpx>=0.27.0",
+]
+
+[tool.uv.sources]
+shared-py = { workspace = true }

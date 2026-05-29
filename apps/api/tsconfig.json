@@ -1,0 +1,11 @@
+{
+  "extends": "@ai-video-editor/shared-types/tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "resolveJsonModule": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*"],
+  "references": [{ "path": "../../packages/shared-types" }]
+}

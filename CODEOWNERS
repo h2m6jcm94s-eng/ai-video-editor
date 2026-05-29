@@ -1,0 +1,21 @@
+# Global fallback — requires review from at least one maintainer
+* @ai-video-editor/maintainers
+
+# API changes
+/apps/api/ @ai-video-editor/maintainers
+/apps/api/src/routes/ @ai-video-editor/maintainers
+
+# Frontend changes
+/apps/web/ @ai-video-editor/maintainers
+
+# Python workers
+/services/ @ai-video-editor/maintainers
+
+# Infrastructure / Temporal / Docker
+/infra/ @ai-video-editor/maintainers
+
+# Shared packages
+/packages/ @ai-video-editor/maintainers
+
+# CI/CD and repo health
+/.github/ @ai-video-editor/maintainers

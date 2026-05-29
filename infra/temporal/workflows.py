@@ -1,0 +1,161 @@
+"""Temporal workflow definitions for the AI video editor pipeline."""
+
+from temporalio import workflow
+from temporalio.common import RetryPolicy
+from dataclasses import dataclass
+from typing import List, Dict
+
+with workflow.unsafe.imports_passed_through():
+    from shared_py.models import CutList, BeatGrid, ShotBoundary
+
+
+@dataclass
+class VideoRenderInput:
+    project_id: str
+    reference_asset_id: str
+    song_asset_id: str
+    clip_asset_ids: List[str]
+    style_tier: str
+    mode: str
+    user_id: str
+
+
+@dataclass
+class AnalysisResult:
+    probe: dict
+    shots: List[dict]
+    beats: dict
+    energy_curve: List[float]
+    style_analysis: dict
+    lut_path: str = ""
+
+
+@workflow.defn
+class VideoRenderWorkflow:
+    """Main workflow for rendering a video with reference style matching."""
+
+    def __init__(self) -> None:
+        self._progress = 0
+        self._stage = "initialized"
+
+    @workflow.run
+    async def run(self, input: VideoRenderInput) -> str:
+        # 1. Probe inputs
+        self._stage = "probing"
+        self._progress = 5
+        await workflow.execute_activity(
+            "probe_inputs",
+            args=(input.reference_asset_id, input.song_asset_id, input.clip_asset_ids),
+            start_to_close_timeout=60,
+            retry_policy=RetryPolicy(maximum_attempts=3),
+        )
+
+        # 2. Detect beats
+        self._stage = "beat_detection"
+        self._progress = 15
+        beats = await workflow.execute_activity(
+            "detect_beats",
+            args=(input.song_asset_id,),
+            start_to_close_timeout=120,
+            retry_policy=RetryPolicy(maximum_attempts=3),
+        )
+
+        # 3. Detect shots
+        self._stage = "shot_detection"
+        self._progress = 25
+        shots = await workflow.execute_activity(
+            "detect_shots",
+            args=(input.reference_asset_id,),
+            start_to_close_timeout=180,
+            retry_policy=RetryPolicy(maximum_attempts=3),
+        )
+
+        # 4. Analyze style
+        self._stage = "style_analysis"
+        self._progress = 40
+        style = await workflow.execute_activity(
+            "analyze_reference_style",
+            args=(input.reference_asset_id, input.style_tier),
+            start_to_close_timeout=300,
+            retry_policy=RetryPolicy(maximum_attempts=2),
+        )
+
+        # 5. Embed clips
+        self._stage = "embedding"
+        self._progress = 55
+        await workflow.execute_activity(
+            "embed_user_clips",
+            args=(input.clip_asset_ids,),
+            start_to_close_timeout=300,
+            retry_policy=RetryPolicy(maximum_attempts=2),
+        )
+
+        # 6. Generate cut-list
+        self._stage = "cutlist_generation"
+        self._progress = 70
+        cutlist = await workflow.execute_activity(
+            "generate_cutlist_claude",
+            args=(beats, shots, style, input.style_tier),
+            start_to_close_timeout=120,
+            retry_policy=RetryPolicy(maximum_attempts=3),
+        )
+
+        # 7. Rank clips
+        self._stage = "ranking"
+        self._progress = 75
+        rankings = await workflow.execute_activity(
+            "rank_clips_per_slot",
+            args=(cutlist, input.clip_asset_ids),
+            start_to_close_timeout=60,
+            retry_policy=RetryPolicy(maximum_attempts=2),
+        )
+
+        # If assisted mode, wait for user signal
+        if input.mode == "assisted":
+            self._stage = "awaiting_review"
+            self._progress = 80
+            cutlist = await workflow.wait_for_external_signal(
+                "cutlist_approved",
+                CutList,
+                timeout=3600 * 24,  # 24 hours
+            )
+
+        # 8. Render
+        self._stage = "rendering"
+        self._progress = 85
+        output_path = await workflow.execute_activity(
+            "render_720p",
+            args=(cutlist, input.clip_asset_ids, style.get("lut_path")),
+            start_to_close_timeout=600,
+            retry_policy=RetryPolicy(maximum_attempts=2),
+        )
+
+        # 9. Upload
+        self._stage = "uploading"
+        self._progress = 95
+        await workflow.execute_activity(
+            "upload_to_r2",
+            args=(output_path, input.project_id),
+            start_to_close_timeout=120,
+            retry_policy=RetryPolicy(maximum_attempts=3),
+        )
+
+        # 10. Notify
+        self._stage = "completed"
+        self._progress = 100
+        await workflow.execute_activity(
+            "notify_user",
+            args=(input.user_id, input.project_id),
+            start_to_close_timeout=30,
+        )
+
+        return output_path
+
+    @workflow.signal
+    async def update_progress(self, stage: str, progress: int) -> None:
+        self._stage = stage
+        self._progress = progress
+
+    @workflow.query
+    def get_progress(self) -> dict:
+        return {"stage": self._stage, "progress": self._progress}

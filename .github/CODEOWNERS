@@ -1,0 +1,17 @@
+# Default: all files
+* @h2m6jcm94s-eng
+
+# API
+apps/api/ @h2m6jcm94s-eng
+
+# Frontend
+apps/web/ @h2m6jcm94s-eng
+
+# Python workers
+services/ @h2m6jcm94s-eng
+
+# Temporal orchestration
+infra/ @h2m6jcm94s-eng
+
+# CI/CD changes require explicit review
+.github/ @h2m6jcm94s-eng

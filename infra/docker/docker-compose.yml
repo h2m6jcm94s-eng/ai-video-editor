@@ -1,0 +1,133 @@
+version: "3.8"
+
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.api
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=production
+      - API_PORT=4000
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=redis://redis:6379
+      - R2_ENDPOINT=${R2_ENDPOINT}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+      - R2_BUCKET_NAME=${R2_BUCKET_NAME}
+      - TEMPORAL_HOST=temporal:7233
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - KIMI_API_KEY=${KIMI_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AI_PROVIDER=${AI_PROVIDER:-programmatic}
+    depends_on:
+      - redis
+      - postgres
+      - temporal
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.web
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:4000
+    depends_on:
+      - api
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=ave
+      - POSTGRES_PASSWORD=ave
+      - POSTGRES_DB=ave
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  temporal:
+    image: temporalio/auto-setup:1.24
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_USER=ave
+      - POSTGRES_PWD=ave
+      - POSTGRES_SEEDS=postgres
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+    depends_on:
+      - postgres
+
+  temporal-ui:
+    image: temporalio/ui:2.26
+    ports:
+      - "8080:8080"
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    depends_on:
+      - temporal
+
+  ingest-worker:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.ingest
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - TEMPORAL_HOST=temporal:7233
+      - AVE_TEMP_DIR=/tmp
+      - DATABASE_URL=postgresql://ave:ave@postgres:5432/ave
+      - AI_PROVIDER=${AI_PROVIDER:-programmatic}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - KIMI_API_KEY=${KIMI_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    depends_on:
+      - redis
+      - temporal
+      - postgres
+    deploy:
+      replicas: 2
+
+  render-worker:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.render
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - TEMPORAL_HOST=temporal:7233
+      - AVE_TEMP_DIR=/tmp
+      - DATABASE_URL=postgresql://ave:ave@postgres:5432/ave
+      - R2_ENDPOINT=${R2_ENDPOINT}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+      - R2_BUCKET_NAME=${R2_BUCKET_NAME}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - KIMI_API_KEY=${KIMI_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    depends_on:
+      - redis
+      - temporal
+      - postgres
+    deploy:
+      replicas: 2
+
+volumes:
+  postgres_data:

@@ -1,0 +1,13 @@
+[project]
+name = "upscale-worker"
+version = "0.1.0"
+dependencies = [
+    "shared-py",
+    "httpx>=0.27.0",
+    "numpy>=1.26.0",
+    "pillow>=10.0.0",
+    "opencv-python>=4.9.0",
+]
+
+[tool.uv.sources]
+shared-py = { workspace = true }
