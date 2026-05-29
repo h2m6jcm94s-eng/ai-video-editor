@@ -122,14 +122,17 @@ reviews:
     # ── API: Environment ──────────────────────────────────────────────────────
     - path: "apps/api/src/env.ts"
       instructions: |
-        This file validates all env vars at startup via Zod and calls process.exit(1)
-        with a formatted ╔══ STARTUP FAILED ══╗ table if any are missing.
-        The exported `env` object is the ONLY way routes/services should read env vars.
+        Validates all env vars via Zod at startup. In production (NODE_ENV != test):
+        exits with ╔══ STARTUP FAILED ══╗ table if any var is missing.
+        In test mode (NODE_ENV=test): schema defaults fill in dummy values so Vitest
+        can run without real services — this is intentional, do not remove it.
+        The exported `env` object is the ONLY source of env vars for the entire API.
 
         Flag any change that:
         - Adds process.env.SOMETHING_NEW to routes/services without adding it to the Zod schema here
         - Weakens validation (e.g., removing .url() or .min() constraints)
-        - Removes the process.exit(1) on validation failure
+        - Removes the isTest bypass or the process.exit(1) on production validation failure
+        - Changes schema defaults to real credentials (defaults are CI-safe dummies only)
 
     # ── Web: API Client ───────────────────────────────────────────────────────
     - path: "apps/web/src/lib/api.ts"

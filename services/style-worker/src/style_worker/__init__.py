@@ -1,3 +1,6 @@
+﻿# Copyright (c) 2025 Devayan Dewri. All rights reserved.
+# Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
+# Commercial SaaS use is prohibited without written permission.
 # Lazy imports to avoid loading heavy ML dependencies on module init
 def __getattr__(name):
     if name == "extract_lut_from_reference":

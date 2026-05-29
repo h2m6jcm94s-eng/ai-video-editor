@@ -1,3 +1,6 @@
+﻿// Copyright (c) 2025 Devayan Dewri. All rights reserved.
+// Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
+// Commercial SaaS use is prohibited without written permission.
 import { APIError, type Project, type Asset, type RenderJob } from "@/types/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";

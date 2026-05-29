@@ -28,6 +28,9 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm build
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:4000
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_dummy00000000000000000000000000000000000000000000000000
 
   test-api:
     runs-on: ubuntu-latest
@@ -46,6 +49,15 @@ jobs:
         run: pnpm --filter @ai-video-editor/api test:coverage
         env:
           NODE_ENV: test
+          DATABASE_URL: postgresql://localhost:5432/test
+          CLERK_SECRET_KEY: sk_test_dummy_key_for_ci_only
+          WEB_URL: http://localhost:3000
+          R2_ENDPOINT: http://localhost:9000
+          R2_ACCESS_KEY_ID: minioadmin
+          R2_SECRET_ACCESS_KEY: minioadmin
+          R2_BUCKET_NAME: test
+          REDIS_URL: redis://localhost:6379
+          TEMPORAL_HOST: localhost:7233
       - name: Upload API coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
@@ -68,9 +80,8 @@ jobs:
       - run: uv sync
       - run: uv run ruff check services/
       - run: uv run mypy services/
-      - run: uv run pytest tests/ -v
       - name: Run Python tests with coverage
-        run: uv run pytest tests/ -v --tb=short --cov=services/shared-py/src --cov-report=xml:coverage-python.xml
+        run: uv run pytest tests/ -v --tb=short --cov=services/shared-py/src --cov-report=xml:coverage-python.xml -m "not requires_anthropic and not requires_google and not requires_groq and not requires_openai and not requires_kimi and not requires_qwen and not requires_openrouter"
       - name: Upload Python coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
