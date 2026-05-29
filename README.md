@@ -63,23 +63,52 @@ repo/
 - pnpm
 - uv
 - FFmpeg
+- Docker (for local Redis + Temporal)
 
-### Installation
+### 1. Configure environment
+
+Run the interactive setup script — it prompts for every required key and writes `.env` and `apps/web/.env.local`:
 
 ```bash
-# Install JS dependencies
+python setup.py
+```
+
+**Keys and services you'll need:**
+
+| Variable | Where to get it | Required |
+|---|---|---|
+| `CLERK_SECRET_KEY` + `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | [Clerk Dashboard](https://dashboard.clerk.com) → API Keys | ✅ |
+| `DATABASE_URL` | [Neon](https://neon.tech) → Connection string (pooled) | ✅ |
+| `R2_ENDPOINT` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET_NAME` | [Cloudflare R2](https://dash.cloudflare.com) → R2 → API Tokens | ✅ |
+| `REDIS_URL` | Local Docker (default) or [Upstash](https://upstash.com) | ✅ |
+| `TEMPORAL_HOST` | Local Docker (default) or [Temporal Cloud](https://temporal.io) | ✅ |
+| `ANTHROPIC_API_KEY` | [Anthropic Console](https://console.anthropic.com) | ✅ (primary AI) |
+| `GOOGLE_API_KEY` | [AI Studio](https://aistudio.google.com/apikey) | optional fallback |
+| `GROQ_API_KEY` | [Groq Console](https://console.groq.com) | optional fallback |
+| `OPENAI_API_KEY` | [OpenAI Platform](https://platform.openai.com) | optional fallback |
+| `KIMI_API_KEY` / `QWEN_API_KEY` / `OPENROUTER_API_KEY` | respective consoles | optional fallback |
+| `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` | [Modal](https://modal.com) | optional (GPU upscale) |
+
+### 2. Install dependencies
+
+```bash
 pnpm install
-
-# Install Python dependencies
 uv sync
+```
 
-# Start local services
-docker-compose -f infra/docker/docker-compose.yml up -d
+### 3. Start local services
 
-# Run the API
+```bash
+docker compose -f infra/docker/docker-compose.yml up -d
+```
+
+### 4. Run
+
+```bash
+# API
 pnpm --filter @ai-video-editor/api dev
 
-# Run the web app
+# Web app
 pnpm --filter @ai-video-editor/web dev
 ```
 
