@@ -62,7 +62,7 @@ jobs:
       - uses: astral-sh/setup-uv@v2
         with:
           version: ${{ env.UV_VERSION }}
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: uv sync
