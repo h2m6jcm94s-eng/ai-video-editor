@@ -3,7 +3,7 @@
 "use client";
 
 import { useReducer, useCallback } from "react";
-import type { CutList, Slot, Overlay, Asset } from "@/types/api";
+import type { CutList, Slot, Overlay, Asset, Effect, AudioTrack } from "@/types/api";
 
 interface EditorState {
   cutList: CutList | null;
@@ -24,6 +24,10 @@ type EditorAction =
   | { type: "ADD_OVERLAY"; overlay: Overlay }
   | { type: "UPDATE_OVERLAY"; id: string; overlay: Partial<Overlay> }
   | { type: "REMOVE_OVERLAY"; id: string }
+  | { type: "ADD_EFFECT"; slotIndex: number; effect: Effect }
+  | { type: "REMOVE_EFFECT"; slotIndex: number; effectId: string }
+  | { type: "ADD_AUDIO_TRACK"; track: AudioTrack }
+  | { type: "REMOVE_AUDIO_TRACK"; index: number }
   | { type: "SELECT_SLOT"; index: number | null }
   | { type: "SELECT_OVERLAY"; id: string | null }
   | { type: "SET_PLAYING"; payload: boolean }
@@ -90,6 +94,48 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
         },
       };
     }
+    case "ADD_EFFECT": {
+      if (!state.cutList) return state;
+      const effectSlots = [...state.cutList.slots];
+      const slot = effectSlots[action.slotIndex];
+      if (!slot) return state;
+      effectSlots[action.slotIndex] = {
+        ...slot,
+        effects: [...(slot.effects || []), action.effect],
+      };
+      return { ...state, cutList: { ...state.cutList, slots: effectSlots } };
+    }
+    case "REMOVE_EFFECT": {
+      if (!state.cutList) return state;
+      const effectSlots = [...state.cutList.slots];
+      const slot = effectSlots[action.slotIndex];
+      if (!slot) return state;
+      effectSlots[action.slotIndex] = {
+        ...slot,
+        effects: (slot.effects || []).filter((e) => e.id !== action.effectId),
+      };
+      return { ...state, cutList: { ...state.cutList, slots: effectSlots } };
+    }
+    case "ADD_AUDIO_TRACK": {
+      if (!state.cutList) return state;
+      return {
+        ...state,
+        cutList: {
+          ...state.cutList,
+          audioTracks: [...(state.cutList.audioTracks || []), action.track],
+        },
+      };
+    }
+    case "REMOVE_AUDIO_TRACK": {
+      if (!state.cutList) return state;
+      return {
+        ...state,
+        cutList: {
+          ...state.cutList,
+          audioTracks: (state.cutList.audioTracks || []).filter((_, i) => i !== action.index),
+        },
+      };
+    }
     case "SELECT_SLOT":
       return { ...state, selectedSlotIndex: action.index, selectedOverlayId: null };
     case "SELECT_OVERLAY":
@@ -127,6 +173,10 @@ export function useEditor(initial: Partial<EditorState> = {}) {
   const addOverlay = useCallback((overlay: Overlay) => dispatch({ type: "ADD_OVERLAY", overlay }), []);
   const updateOverlay = useCallback((id: string, overlay: Partial<Overlay>) => dispatch({ type: "UPDATE_OVERLAY", id, overlay }), []);
   const removeOverlay = useCallback((id: string) => dispatch({ type: "REMOVE_OVERLAY", id }), []);
+  const addEffect = useCallback((slotIndex: number, effect: Effect) => dispatch({ type: "ADD_EFFECT", slotIndex, effect }), []);
+  const removeEffect = useCallback((slotIndex: number, effectId: string) => dispatch({ type: "REMOVE_EFFECT", slotIndex, effectId }), []);
+  const addAudioTrack = useCallback((track: AudioTrack) => dispatch({ type: "ADD_AUDIO_TRACK", track }), []);
+  const removeAudioTrack = useCallback((index: number) => dispatch({ type: "REMOVE_AUDIO_TRACK", index }), []);
   const selectSlot = useCallback((index: number | null) => dispatch({ type: "SELECT_SLOT", index }), []);
   const selectOverlay = useCallback((id: string | null) => dispatch({ type: "SELECT_OVERLAY", id }), []);
   const setPlaying = useCallback((payload: boolean) => dispatch({ type: "SET_PLAYING", payload }), []);
@@ -145,6 +195,10 @@ export function useEditor(initial: Partial<EditorState> = {}) {
       addOverlay,
       updateOverlay,
       removeOverlay,
+      addEffect,
+      removeEffect,
+      addAudioTrack,
+      removeAudioTrack,
       selectSlot,
       selectOverlay,
       setPlaying,

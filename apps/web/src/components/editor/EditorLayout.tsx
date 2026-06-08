@@ -5,7 +5,7 @@
 import { useEffect, useCallback, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
-import { ChevronLeft, Play, Pause, RotateCcw, Subtitles, Smartphone, Save, FolderOpen, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { ChevronLeft, Play, Pause, RotateCcw, Subtitles, Smartphone, Save, FolderOpen, CheckCircle2, AlertCircle, Loader2, Command as CommandIcon, Wand2, Film, Type, Music, Zap, Settings } from "lucide-react";
 import { MediaPanel } from "./panels/MediaPanel";
 import { PreviewPanel } from "./panels/PreviewPanel";
 import { InspectorPanel } from "./panels/InspectorPanel";
@@ -16,6 +16,7 @@ import { ProgressBar } from "./ProgressBar";
 import { PresenceCursors } from "./PresenceCursors";
 import { TemplateSaveDialog } from "./TemplateSaveDialog";
 import { TemplateLoadDialog } from "./TemplateLoadDialog";
+import { CommandPalette, useCommandPalette, type CommandAction } from "@/components/cmdk/CommandPalette";
 import { useEditor } from "@/hooks/useEditor";
 import { useTimeline } from "@/hooks/useTimeline";
 import { useApi } from "@/lib/api/client";
@@ -44,6 +45,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [loadTemplateOpen, setLoadTemplateOpen] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "failed">("saved");
+  const [cmdkOpen, setCmdkOpen] = useState(false);
   const api = useApi();
 
   const aspectRatio = state.cutList?.globals?.aspectRatio || "9:16";
@@ -135,6 +137,29 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
     pushUndo(cutList);
     actions.setCutList(cutList);
   }, [actions, pushUndo]);
+
+  const commandActions: CommandAction[] = [
+    { id: "play-pause", title: "Play / Pause", shortcut: "Space", icon: <Play className="h-4 w-4" />, section: "Playback", perform: () => timeline.togglePlay() },
+    { id: "seek-start", title: "Seek to start", shortcut: "Home", icon: <RotateCcw className="h-4 w-4" />, section: "Playback", perform: () => timeline.seek(0) },
+    { id: "ai-prompt", title: "Open AI Prompt", shortcut: "P", icon: <Wand2 className="h-4 w-4" />, section: "AI", perform: () => setPromptOpen(true) },
+    { id: "render", title: "Render video", icon: <Film className="h-4 w-4" />, section: "Export", perform: () => { /* render button handles its own state */ } },
+    { id: "add-text", title: "Add text overlay", icon: <Type className="h-4 w-4" />, section: "Overlays", perform: () => toast.info("Select a slot and use the Inspector to add overlays.") },
+    { id: "add-audio", title: "Add audio track", icon: <Music className="h-4 w-4" />, section: "Audio", perform: () => toast.info("Drag a song asset onto the timeline.") },
+    { id: "save-template", title: "Save as template", icon: <Save className="h-4 w-4" />, section: "Templates", perform: () => state.cutList && setSaveTemplateOpen(true) },
+    { id: "load-template", title: "Load template", icon: <FolderOpen className="h-4 w-4" />, section: "Templates", perform: () => setLoadTemplateOpen(true) },
+    { id: "open-settings", title: "Open Settings — API Keys", icon: <Settings className="h-4 w-4" />, section: "Settings", perform: () => router.push("/settings/keys") },
+  ];
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setCmdkOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -413,6 +438,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
         onApply={(cutList) => actions.setCutList(cutList)}
       />
 
+      <CommandPalette open={cmdkOpen} onOpenChange={setCmdkOpen} actions={commandActions} />
       <ProgressBar jobId={activeJobId} />
     </div>
   );
