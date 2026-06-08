@@ -5,7 +5,7 @@
 import { useEffect, useCallback, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
-import { ChevronLeft, Play, Pause, RotateCcw, Subtitles, Smartphone, Save, FolderOpen } from "lucide-react";
+import { ChevronLeft, Play, Pause, RotateCcw, Subtitles, Smartphone, Save, FolderOpen, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { MediaPanel } from "./panels/MediaPanel";
 import { PreviewPanel } from "./panels/PreviewPanel";
 import { InspectorPanel } from "./panels/InspectorPanel";
@@ -43,6 +43,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
   const [transcribing, setTranscribing] = useState(false);
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [loadTemplateOpen, setLoadTemplateOpen] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "failed">("saved");
   const api = useApi();
 
   const aspectRatio = state.cutList?.globals?.aspectRatio || "9:16";
@@ -68,18 +69,35 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
     if (json === lastSavedRef.current) return;
 
     const timer = setTimeout(() => {
+      setSaveStatus("saving");
       api.projects
         .updateCutlist(project.id, state.cutList as CutList)
         .then(() => {
           lastSavedRef.current = json;
+          setSaveStatus("saved");
         })
-        .catch(() => {
-          toast.error("Autosave failed");
+        .catch((err) => {
+          setSaveStatus("failed");
+          toast.error(err instanceof APIError ? err.userMessage : "Autosave failed", {
+            action: {
+              label: "Retry",
+              onClick: () => {
+                setSaveStatus("saving");
+                api.projects
+                  .updateCutlist(project.id, state.cutList as CutList)
+                  .then(() => {
+                    lastSavedRef.current = json;
+                    setSaveStatus("saved");
+                  })
+                  .catch(() => setSaveStatus("failed"));
+              },
+            },
+          });
         });
     }, 1500);
 
     return () => clearTimeout(timer);
-  }, [state.cutList, project.id]);
+  }, [state.cutList, project.id, api]);
 
   // Push to undo stack on meaningful changes
   useEffect(() => {
@@ -93,6 +111,15 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.cutList?.globals, state.cutList?.slots.length, state.cutList?.overlays.length]);
 
+  const pushUndo = useCallback((cutList: CutList) => {
+    const json = JSON.stringify(cutList);
+    const last = undoStackRef.current[undoStackRef.current.length - 1];
+    if (!last || JSON.stringify(last) !== json) {
+      undoStackRef.current.push(cutList);
+      if (undoStackRef.current.length > 50) undoStackRef.current.shift();
+    }
+  }, []);
+
   const handleUndo = useCallback(() => {
     if (undoStackRef.current.length > 1) {
       const current = undoStackRef.current.pop();
@@ -103,6 +130,11 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
       }
     }
   }, [actions]);
+
+  const handlePromptUpdate = useCallback((cutList: CutList) => {
+    pushUndo(cutList);
+    actions.setCutList(cutList);
+  }, [actions, pushUndo]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -179,6 +211,22 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
             <span className="capitalize">{project.styleTier.replace("_", " ")}</span>
             <span>·</span>
             <span className="capitalize">{project.mode}</span>
+            <span>·</span>
+            {saveStatus === "saving" && (
+              <span className="flex items-center gap-1 text-zinc-400">
+                <Loader2 className="w-3 h-3 animate-spin" /> Saving…
+              </span>
+            )}
+            {saveStatus === "saved" && (
+              <span className="flex items-center gap-1 text-green-500">
+                <CheckCircle2 className="w-3 h-3" /> Saved
+              </span>
+            )}
+            {saveStatus === "failed" && (
+              <span className="flex items-center gap-1 text-amber-500">
+                <AlertCircle className="w-3 h-3" /> Save failed
+              </span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -345,7 +393,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
           <PromptPanel
             projectId={project.id}
             cutList={state.cutList}
-            onUpdateCutlist={actions.setCutList}
+            onUpdateCutlist={handlePromptUpdate}
             onUndo={handleUndo}
             onClose={() => setPromptOpen(false)}
           />
