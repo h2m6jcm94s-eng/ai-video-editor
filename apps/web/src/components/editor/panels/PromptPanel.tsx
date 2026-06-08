@@ -3,14 +3,19 @@
 "use client";
 
 import { useState } from "react";
-import { Send, X, Wand2, Undo2 } from "lucide-react";
+import { Send, X, Wand2, Undo2, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
 import type { CutList } from "@/types/api";
 import { toast } from "sonner";
 import { useApi } from "@/lib/api/client";
 import { APIError } from "@/lib/api/error";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { promptEditSchema } from "@ai-video-editor/shared-types";
+import { z } from "zod";
 
 const PROMPT_PATTERNS = [
   { pattern: /cut on (every )?beat/i, action: "align_cuts_to_beats", label: "Align cuts to beats" },
@@ -28,33 +33,43 @@ interface PromptPanelProps {
   onClose: () => void;
 }
 
+type PromptForm = z.infer<typeof promptEditSchema>;
+
 export function PromptPanel({ projectId, cutList, onUpdateCutlist, onUndo, onClose }: PromptPanelProps) {
-  const [prompt, setPrompt] = useState("");
   const [history, setHistory] = useState<{ prompt: string; response: string; error?: boolean }[]>([]);
   const [loading, setLoading] = useState(false);
   const api = useApi();
 
-  const handleSubmit = async () => {
-    if (!prompt.trim() || !cutList) return;
+  const form = useForm<PromptForm>({
+    resolver: zodResolver(promptEditSchema),
+    defaultValues: { prompt: "" },
+    mode: "onChange",
+  });
+
+  const onSubmit = async (values: PromptForm) => {
+    if (!cutList) {
+      toast.error("No cut list to edit");
+      return;
+    }
     setLoading(true);
 
     try {
-      const result = await api.projects.prompt(projectId, prompt.trim());
+      const result = await api.projects.prompt(projectId, values.prompt.trim());
       if (result.project.cutList) {
         onUpdateCutlist(result.project.cutList as CutList);
       }
       setHistory((h) => [
         ...h,
-        { prompt, response: result.explanation || "Changes applied successfully." },
+        { prompt: values.prompt, response: result.explanation || "Changes applied successfully." },
       ]);
       toast.success("AI edit applied");
+      form.reset({ prompt: "" });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "AI edit failed";
-      setHistory((h) => [...h, { prompt, response: message, error: true }]);
+      const message = err instanceof APIError ? err.userMessage : err instanceof Error ? err.message : "AI edit failed";
+      setHistory((h) => [...h, { prompt: values.prompt, response: message, error: true }]);
       toast.error(message);
     } finally {
       setLoading(false);
-      setPrompt("");
     }
   };
 
@@ -93,19 +108,30 @@ export function PromptPanel({ projectId, cutList, onUpdateCutlist, onUndo, onClo
         </div>
       </ScrollArea>
 
-      <div className="p-3 border-t border-zinc-800 flex gap-2">
-        <Input
-          placeholder="Ask AI to edit..."
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-          className="bg-zinc-950 border-zinc-800 h-8 text-xs"
-          disabled={loading}
-        />
-        <Button size="sm" className="h-8 px-3" onClick={handleSubmit} disabled={loading}>
-          <Send className="w-3 h-3" />
-        </Button>
-      </div>
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="p-3 border-t border-zinc-800 flex gap-2">
+          <FormField
+            control={form.control}
+            name="prompt"
+            render={({ field }) => (
+              <FormItem className="flex-1">
+                <FormControl>
+                  <Input
+                    placeholder="Ask AI to edit..."
+                    className="bg-zinc-950 border-zinc-800 h-8 text-xs"
+                    disabled={loading}
+                    {...field}
+                  />
+                </FormControl>
+                <FormMessage className="text-[10px]" />
+              </FormItem>
+            )}
+          />
+          <Button size="sm" className="h-8 px-3" type="submit" disabled={!form.formState.isValid || loading}>
+            <Send className="w-3 h-3" />
+          </Button>
+        </form>
+      </Form>
     </div>
   );
 }

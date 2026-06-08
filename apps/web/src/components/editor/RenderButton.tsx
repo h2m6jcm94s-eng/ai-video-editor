@@ -5,9 +5,7 @@
 import { useState } from "react";
 import { Film } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useApi } from "@/lib/api/client";
-import { APIError } from "@/lib/api/error";
-import { toast } from "sonner";
+import { RenderOptionsDialog } from "./RenderOptionsDialog";
 
 export function RenderButton({
   projectId,
@@ -16,32 +14,24 @@ export function RenderButton({
   projectId: string;
   onJobStart?: (jobId: string) => void;
 }) {
-  const [loading, setLoading] = useState(false);
-  const api = useApi();
-
-  const handleRender = async () => {
-    setLoading(true);
-    try {
-      const res = await api.renders.start(projectId);
-      toast.success("Render started", { description: `Job ID: ${res.job.id}` });
-      onJobStart?.(res.job.id);
-    } catch (err: unknown) {
-      const message = err instanceof APIError ? err.userMessage : "Render failed";
-      toast.error(message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [open, setOpen] = useState(false);
 
   return (
-    <Button
-      size="sm"
-      className="gap-2 bg-indigo-600 hover:bg-indigo-700"
-      onClick={handleRender}
-      disabled={loading}
-    >
-      <Film className="w-4 h-4" />
-      {loading ? "Rendering..." : "Render"}
-    </Button>
+    <>
+      <Button
+        size="sm"
+        className="gap-2 bg-indigo-600 hover:bg-indigo-700"
+        onClick={() => setOpen(true)}
+      >
+        <Film className="w-4 h-4" />
+        Render
+      </Button>
+      <RenderOptionsDialog
+        open={open}
+        onOpenChange={setOpen}
+        projectId={projectId}
+        onJobStart={onJobStart}
+      />
+    </>
   );
 }

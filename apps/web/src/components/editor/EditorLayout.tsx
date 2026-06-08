@@ -14,6 +14,8 @@ import { PromptPanel } from "./panels/PromptPanel";
 import { RenderButton } from "./RenderButton";
 import { ProgressBar } from "./ProgressBar";
 import { PresenceCursors } from "./PresenceCursors";
+import { TemplateSaveDialog } from "./TemplateSaveDialog";
+import { TemplateLoadDialog } from "./TemplateLoadDialog";
 import { useEditor } from "@/hooks/useEditor";
 import { useTimeline } from "@/hooks/useTimeline";
 import { useApi } from "@/lib/api/client";
@@ -39,6 +41,8 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
   const [showSubtitles, setShowSubtitles] = useState(true);
   const [selectedSubtitleId, setSelectedSubtitleId] = useState<string | null>(null);
   const [transcribing, setTranscribing] = useState(false);
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
+  const [loadTemplateOpen, setLoadTemplateOpen] = useState(false);
   const api = useApi();
 
   const aspectRatio = state.cutList?.globals?.aspectRatio || "9:16";
@@ -259,43 +263,13 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
             </button>
             <div className="absolute right-0 top-full mt-1 hidden group-hover:flex flex-col bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden z-50 min-w-[140px]">
               <button
-                onClick={async () => {
-                  if (!state.cutList) return;
-                  const name = window.prompt("Template name:");
-                  if (!name) return;
-                  try {
-                    await api.templates.create({ name, cutList: state.cutList });
-                    toast.success("Template saved");
-                  } catch (err) {
-                    toast.error("Failed to save template");
-                  }
-                }}
+                onClick={() => state.cutList && setSaveTemplateOpen(true)}
                 className="px-3 py-2 text-xs text-left hover:bg-zinc-800 transition text-zinc-300 flex items-center gap-1.5"
               >
                 <Save className="w-3 h-3" /> Save as Template
               </button>
               <button
-                onClick={async () => {
-                  try {
-                    const result = await api.templates.list();
-                    if (result.templates.length === 0) {
-                      toast.info("No templates yet");
-                      return;
-                    }
-                    const items = result.templates.map((t) => `${t.name} (${t.usageCount} uses)`).join("\n");
-                    const idx = window.prompt(`Load template:\n${items}\n\nEnter number (1-${result.templates.length}):`);
-                    if (!idx) return;
-                    const template = result.templates[parseInt(idx, 10) - 1];
-                    if (!template) return;
-                    const applied = await api.templates.apply(template.id);
-                    if (applied.cutList) {
-                      actions.setCutList(applied.cutList as CutList);
-                      toast.success(`Loaded template: ${template.name}`);
-                    }
-                  } catch (err) {
-                    toast.error("Failed to load template");
-                  }
-                }}
+                onClick={() => setLoadTemplateOpen(true)}
                 className="px-3 py-2 text-xs text-left hover:bg-zinc-800 transition text-zinc-300 flex items-center gap-1.5"
               >
                 <FolderOpen className="w-3 h-3" /> Load Template
@@ -377,6 +351,19 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
           />
         </div>
       )}
+
+      {state.cutList && (
+        <TemplateSaveDialog
+          open={saveTemplateOpen}
+          onOpenChange={setSaveTemplateOpen}
+          cutList={state.cutList}
+        />
+      )}
+      <TemplateLoadDialog
+        open={loadTemplateOpen}
+        onOpenChange={setLoadTemplateOpen}
+        onApply={(cutList) => actions.setCutList(cutList)}
+      />
 
       <ProgressBar jobId={activeJobId} />
     </div>
