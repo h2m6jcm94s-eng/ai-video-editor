@@ -212,7 +212,7 @@ export async function projectRoutes(app: FastifyInstance) {
       const result = await applyPromptEdit({
         prompt: body.prompt,
         cutList: project.cutList,
-        assets: projectAssets.map((a) => ({
+        assets: (projectAssets || []).map((a) => ({
           id: a.id,
           type: a.type,
           filename: a.filename,

@@ -38,6 +38,7 @@ vi.mock("../db", () => ({
       projects: { findFirst: vi.fn(), findMany: vi.fn() },
       assets: { findFirst: vi.fn(), findMany: vi.fn() },
       renders: { findFirst: vi.fn(), findMany: vi.fn() },
+      templates: { findFirst: vi.fn(), findMany: vi.fn() },
     },
     insert: createChainableInsert(),
     update: createChainableUpdate(),
@@ -50,8 +51,27 @@ vi.mock("../db", () => ({
 vi.mock("../services/storage", () => ({
   createPresignedUploadUrl: vi.fn(async () => ({ url: "https://r2.example.com/upload", fields: {} })),
   createPresignedDownloadUrl: vi.fn(async () => "https://r2.example.com/download"),
+  downloadAsset: vi.fn(async () => "/tmp/test.mp3"),
   deleteProjectAssets: vi.fn(async () => {}),
   probeS3Connection: vi.fn(async () => {}),
+}));
+
+// Mock fs
+vi.mock("fs", () => ({
+  default: {
+    readFileSync: vi.fn(() => Buffer.from("fake-audio")),
+    unlinkSync: vi.fn(),
+    existsSync: vi.fn(() => true),
+    mkdirSync: vi.fn(),
+    createWriteStream: vi.fn(() => ({ pipe: vi.fn(), on: vi.fn() })),
+  },
+}));
+
+// Mock os
+vi.mock("os", () => ({
+  default: {
+    tmpdir: vi.fn(() => "/tmp"),
+  },
 }));
 
 // Mock ioredis before queue/progress import it

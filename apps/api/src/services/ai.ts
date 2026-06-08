@@ -290,11 +290,19 @@ export async function applyPromptEdit(
 
   try {
     if (provider === "claude") {
-      result = await callClaude(context);
+      try {
+        result = await callClaude(context);
+      } catch {
+        result = await callOpenAI(context);
+      }
     } else if (provider === "openai") {
-      result = await callOpenAI(context);
+      try {
+        result = await callOpenAI(context);
+      } catch {
+        result = await callClaude(context);
+      }
     } else {
-      // Fallback chain
+      // Fallback chain for unknown providers
       try {
         result = await callClaude(context);
       } catch {
