@@ -26,7 +26,7 @@ export function TimelineClip({ slot, index, duration, isSelected, onSelect, onUp
   slotRef.current = slot;
   durationRef.current = duration;
 
-  const left = (slot.start_s / duration) * 100;
+  const left = (slot.startS / duration) * 100;
   const width = (slot.duration_s / duration) * 100;
 
   const handleMouseDown = useCallback((e: React.MouseEvent, mode: "move" | "resize-left" | "resize-right") => {
@@ -34,7 +34,7 @@ export function TimelineClip({ slot, index, duration, isSelected, onSelect, onUp
     setIsDragging(true);
     startXRef.current = e.clientX;
     startValueRef.current =
-      mode === "move" ? slotRef.current.start_s : mode === "resize-left" ? slotRef.current.start_s : slotRef.current.duration_s;
+      mode === "move" ? slotRef.current.startS : mode === "resize-left" ? slotRef.current.startS : slotRef.current.duration_s;
     containerWidthRef.current = (e.currentTarget.parentElement?.offsetWidth || 1);
 
     const handleMouseMove = (ev: MouseEvent) => {
@@ -45,11 +45,11 @@ export function TimelineClip({ slot, index, duration, isSelected, onSelect, onUp
 
       if (mode === "move") {
         const newStart = Math.max(0, startValueRef.current + deltaSec);
-        onUpdate({ start_s: newStart });
+        onUpdate({ startS: newStart });
       } else if (mode === "resize-left") {
         const newStart = Math.max(0, startValueRef.current + deltaSec);
-        const newDuration = slotRef.current.duration_s + (slotRef.current.start_s - newStart);
-        if (newDuration > 0.1) onUpdate({ start_s: newStart, duration_s: newDuration });
+        const newDuration = slotRef.current.duration_s + (slotRef.current.startS - newStart);
+        if (newDuration > 0.1) onUpdate({ startS: newStart, duration_s: newDuration });
       } else if (mode === "resize-right") {
         const newDuration = Math.max(0.1, startValueRef.current + deltaSec);
         onUpdate({ duration_s: newDuration });
@@ -78,7 +78,7 @@ export function TimelineClip({ slot, index, duration, isSelected, onSelect, onUp
         if (!isDragging) onSelect();
       }}
       role="button"
-      aria-label={`Clip ${index}: ${slot.target_shot_type}`}
+      aria-label={`Clip ${index}: ${slot.targetShotType}`}
       tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") onSelect();
@@ -90,7 +90,7 @@ export function TimelineClip({ slot, index, duration, isSelected, onSelect, onUp
         onMouseDown={(e) => handleMouseDown(e, "resize-left")}
       />
       <span className="truncate px-1 z-10 pointer-events-none">
-        {slot.target_shot_type}
+        {slot.targetShotType}
       </span>
       {/* Resize right handle */}
       <div

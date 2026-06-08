@@ -53,10 +53,10 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
       const removed = state.cutList.slots[action.index];
       const slots = state.cutList.slots.filter((_, i) => i !== action.index);
       if (action.ripple && removed) {
-        const removedEnd = removed.start_s + removed.duration_s;
+        const removedEnd = removed.startS + removed.duration_s;
         for (let i = action.index; i < slots.length; i++) {
-          if (slots[i].start_s >= removedEnd) {
-            slots[i] = { ...slots[i], start_s: slots[i].start_s - removed.duration_s };
+          if (slots[i].startS >= removedEnd) {
+            slots[i] = { ...slots[i], startS: slots[i].startS - removed.duration_s };
           }
         }
       }

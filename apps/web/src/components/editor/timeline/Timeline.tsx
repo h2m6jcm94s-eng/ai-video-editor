@@ -63,15 +63,15 @@ export function Timeline({
           );
         })}
         {/* Section markers */}
-        {(cutList?.globals?.section_markers || []).map((marker) => {
-          const left = (marker.start_s / duration) * 100;
-          const width = ((marker.end_s - marker.start_s) / duration) * 100;
+        {(cutList?.globals?.sectionMarkers || []).map((marker) => {
+          const left = (marker.startS / duration) * 100;
+          const width = ((marker.endS - marker.startS) / duration) * 100;
           return (
             <div
               key={marker.name}
               className="absolute top-0 h-full bg-violet-900/20 border-l border-r border-violet-800/40"
               style={{ left: `${left}%`, width: `${width}%` }}
-              title={`${marker.name}: ${formatTime(marker.start_s)} - ${formatTime(marker.end_s)}`}
+              title={`${marker.name}: ${formatTime(marker.startS)} - ${formatTime(marker.endS)}`}
             >
               <span className="absolute top-0 left-1 text-[8px] text-violet-400 truncate max-w-full px-0.5">
                 {marker.name}
@@ -129,8 +129,8 @@ export function Timeline({
                   key={o.id}
                   className="absolute top-1 h-6 rounded bg-amber-900/40 border border-amber-800/50 px-2 flex items-center text-[9px] text-amber-200 truncate"
                   style={{
-                    left: `${(o.start_time / duration) * 100}%`,
-                    width: `${((o.end_time - o.start_time) / duration) * 100}%`,
+                    left: `${(o.startTime / duration) * 100}%`,
+                    width: `${((o.endTime - o.startTime) / duration) * 100}%`,
                   }}
                 >
                   {o.text}
@@ -156,8 +156,8 @@ export function Timeline({
                       : "bg-cyan-900/30 border border-cyan-800/50 text-cyan-200 hover:bg-cyan-900/50"
                   }`}
                   style={{
-                    left: `${(sub.start_s / duration) * 100}%`,
-                    width: `${Math.max(((sub.end_s - sub.start_s) / duration) * 100, 0.5)}%`,
+                    left: `${(sub.startS / duration) * 100}%`,
+                    width: `${Math.max(((sub.endS - sub.startS) / duration) * 100, 0.5)}%`,
                   }}
                   title={sub.text}
                 >

@@ -43,11 +43,11 @@ export function PreviewPanel({ assets, currentTime, isPlaying, onTimeUpdate, ove
   }, [currentTime]);
 
   const activeOverlays = overlays.filter(
-    (o) => currentTime >= o.start_time && currentTime <= o.end_time
+    (o) => currentTime >= o.startTime && currentTime <= o.endTime
   );
 
   const activeSubtitle = showSubtitles && subtitles?.find(
-    (s) => currentTime >= s.start_s && currentTime <= s.end_s
+    (s) => currentTime >= s.startS && currentTime <= s.endS
   );
 
   const ratioStyle = RATIO_MAP[aspectRatio] || "9 / 16";

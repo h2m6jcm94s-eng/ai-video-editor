@@ -164,8 +164,8 @@ export async function projectRoutes(app: FastifyInstance) {
       const subtitles = segments.map((s, i) => ({
         id: `sub-${i}`,
         text: s.text,
-        start_s: s.start,
-        end_s: s.end,
+        startS: s.start,
+        endS: s.end,
       }));
 
       return { subtitles };

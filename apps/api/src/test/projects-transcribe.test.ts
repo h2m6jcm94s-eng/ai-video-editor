@@ -66,7 +66,7 @@ describe("Project Transcribe Route", () => {
     const body = JSON.parse(res.body);
     expect(body.subtitles).toHaveLength(2);
     expect(body.subtitles[0].text).toBe("Hello");
-    expect(body.subtitles[0].start_s).toBe(0);
+    expect(body.subtitles[0].startS).toBe(0);
   });
 
   it("POST returns 404 for missing project", async () => {

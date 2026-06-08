@@ -49,8 +49,8 @@ export interface RenderJob {
 
 export interface SectionMarker {
   name: string;
-  start_s: number;
-  end_s: number;
+  startS: number;
+  endS: number;
 }
 
 export interface PreviewEffects {
@@ -63,31 +63,31 @@ export interface PreviewEffects {
 }
 
 export interface CutListGlobals {
-  total_duration_s: number;
-  tempo_bpm: number;
-  time_signature: string;
-  energy_curve: number[];
-  section_markers: SectionMarker[];
-  aspect_ratio: string;
+  totalDurationS: number;
+  tempoBpm: number;
+  timeSignature: string;
+  energyCurve: number[];
+  sectionMarkers: SectionMarker[];
+  aspectRatio: string;
   effects?: PreviewEffects;
 }
 
 export interface Slot {
   index: number;
-  start_s: number;
+  startS: number;
   duration_s: number;
-  beat_index: number;
+  beatIndex: number;
   section: string;
-  transition_in: string;
-  transition_out: string;
-  target_shot_type: string;
-  subject_hint: string;
-  motion_hint: string;
-  energy_level: number;
-  required_tags: string[];
-  avoid_tags: string[];
-  selected_clip_id: string | null;
-  ranked_clip_ids: string[] | null;
+  transitionIn: string;
+  transitionOut: string;
+  targetShotType: string;
+  subjectHint: string;
+  motionHint: string;
+  energyLevel: number;
+  requiredTags: string[];
+  avoidTags: string[];
+  selectedClipId: string | null;
+  rankedClipIds: string[] | null;
   confidence: number | null;
 }
 
@@ -95,8 +95,8 @@ export interface Overlay {
   id: string;
   type: "text" | "shape" | "effect";
   text?: string;
-  start_time: number;
-  end_time: number;
+  startTime: number;
+  endTime: number;
   x: number;
   y: number;
   width: number;
@@ -107,8 +107,8 @@ export interface Overlay {
 export interface Subtitle {
   id: string;
   text: string;
-  start_s: number;
-  end_s: number;
+  startS: number;
+  endS: number;
   speaker?: string;
   confidence?: number;
 }
@@ -122,9 +122,9 @@ export interface CutList {
 
 export interface BeatGrid {
   bpm: number;
-  time_signature: string;
+  timeSignature: string;
   beats: number[];
-  beat_positions: number[];
+  beatPositions: number[];
   segments: { start: number; end: number; label: string }[];
   downbeats: number[];
 }

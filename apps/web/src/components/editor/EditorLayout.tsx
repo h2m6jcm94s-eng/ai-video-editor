@@ -41,12 +41,12 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
   const [transcribing, setTranscribing] = useState(false);
   const api = useApi();
 
-  const aspectRatio = state.cutList?.globals?.aspect_ratio || "9:16";
+  const aspectRatio = state.cutList?.globals?.aspectRatio || "9:16";
   const setAspectRatio = (ratio: string) => {
     if (!state.cutList) return;
     actions.setCutList({
       ...state.cutList,
-      globals: { ...state.cutList.globals, aspect_ratio: ratio },
+      globals: { ...state.cutList.globals, aspectRatio: ratio },
     });
   };
   const lastSavedRef = useRef<string>("");

@@ -114,8 +114,8 @@ export function InspectorPanel({
               <Input
                 type="number"
                 step={0.1}
-                value={selectedSlot.start_s}
-                onChange={(e) => onUpdateSlot(selectedSlotIndex, { start_s: parseFloat(e.target.value) })}
+                value={selectedSlot.startS}
+                onChange={(e) => onUpdateSlot(selectedSlotIndex, { startS: parseFloat(e.target.value) })}
                 className="bg-zinc-900 border-zinc-800 h-8 text-xs"
               />
             </div>
@@ -132,8 +132,8 @@ export function InspectorPanel({
             <div className="space-y-2">
               <Label className="text-xs">Transition In</Label>
               <Select
-                value={selectedSlot.transition_in}
-                onValueChange={(v) => onUpdateSlot(selectedSlotIndex, { transition_in: v })}
+                value={selectedSlot.transitionIn}
+                onValueChange={(v) => onUpdateSlot(selectedSlotIndex, { transitionIn: v })}
               >
                 <SelectTrigger className="bg-zinc-900 border-zinc-800 h-8 text-xs">
                   <SelectValue />
@@ -150,8 +150,8 @@ export function InspectorPanel({
             <div className="space-y-2">
               <Label className="text-xs">Transition Out</Label>
               <Select
-                value={selectedSlot.transition_out}
-                onValueChange={(v) => onUpdateSlot(selectedSlotIndex, { transition_out: v })}
+                value={selectedSlot.transitionOut}
+                onValueChange={(v) => onUpdateSlot(selectedSlotIndex, { transitionOut: v })}
               >
                 <SelectTrigger className="bg-zinc-900 border-zinc-800 h-8 text-xs">
                   <SelectValue />
@@ -168,8 +168,8 @@ export function InspectorPanel({
             <div className="space-y-2">
               <Label className="text-xs">Shot Type</Label>
               <Input
-                value={selectedSlot.target_shot_type}
-                onChange={(e) => onUpdateSlot(selectedSlotIndex, { target_shot_type: e.target.value })}
+                value={selectedSlot.targetShotType}
+                onChange={(e) => onUpdateSlot(selectedSlotIndex, { targetShotType: e.target.value })}
                 className="bg-zinc-900 border-zinc-800 h-8 text-xs"
               />
             </div>

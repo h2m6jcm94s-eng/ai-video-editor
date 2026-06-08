@@ -25,7 +25,7 @@ const SYSTEM_PROMPT = `You are an expert video editor AI assistant. The user des
 Rules:
 - Only modify what the user explicitly asks for.
 - Use JSON Patch operations: "add", "remove", "replace", "move", "copy".
-- Paths use slash notation (e.g., "/slots/0/transition_in").
+- Paths use slash notation (e.g., "/slots/0/transitionIn").
 - For "add" on arrays, use "-/" to append.
 - Provide a clear, concise explanation of what changed.
 - If the request is ambiguous, make a reasonable best guess and note it.
