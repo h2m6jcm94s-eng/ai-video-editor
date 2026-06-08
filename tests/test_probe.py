@@ -79,7 +79,7 @@ class TestProbeEdgeCases:
 
 
 class TestProbeMocked:
-    @pytest.mark.skipif(not __import__("ingest_worker.probe", fromlist=["_HAS_AV"])._HAS_AV, reason="av not installed")
+    @pytest.mark.skipif(__import__("ingest_worker.probe", fromlist=["av"]).av is None, reason="av not installed")
     @patch("ingest_worker.probe.av.open")
     def test_probe_mocked_video_stream(self, mock_av_open):
         mock_container = MagicMock()
