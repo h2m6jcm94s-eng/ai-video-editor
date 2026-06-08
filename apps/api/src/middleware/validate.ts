@@ -13,6 +13,7 @@ import {
   promptEditSchema,
   createTemplateSchema,
 } from "@ai-video-editor/shared-types";
+import { sendError } from "../lib/errors";
 
 export { ALLOWED_MIMES };
 
@@ -31,11 +32,7 @@ export function validateBody<T>(schema: z.ZodSchema<T>) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
     const result = schema.safeParse(request.body);
     if (!result.success) {
-      return reply.status(422).send({
-        error: "Validation failed",
-        code: "VALIDATION_ERROR",
-        details: result.error.issues,
-      });
+      return sendError(reply, 422, "Validation failed", "VALIDATION_ERROR", result.error.issues);
     }
     request.validatedBody = result.data;
   };

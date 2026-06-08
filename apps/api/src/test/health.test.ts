@@ -30,6 +30,7 @@ describe("Health Routes", () => {
     const res = await app.inject({ method: "GET", url: "/api/health/db" });
     expect(res.statusCode).toBe(503);
     const body = JSON.parse(res.body);
-    expect(body.db).toBe("disconnected");
+    expect(body.error).toBe("ECONNREFUSED");
+    expect(body.code).toBe("DB_UNAVAILABLE");
   });
 });

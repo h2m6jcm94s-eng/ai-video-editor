@@ -5,7 +5,8 @@ import { FastifyInstance } from "fastify";
 import Redis from "ioredis";
 import { eq } from "drizzle-orm";
 import { db } from "../db";
-import { renders, projects } from "../db/schema";
+import { renders } from "../db/schema";
+import { sendError } from "../lib/errors";
 
 const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
 const subscriberMap = new Map<string, Redis>();
@@ -23,10 +24,10 @@ export async function progressRoutes(app: FastifyInstance) {
       with: { project: true },
     });
     if (!job) {
-      return reply.status(404).send({ error: "Job not found", code: "NOT_FOUND" });
+      return sendError(reply, 404, "Job not found", "NOT_FOUND");
     }
     if (!job.project || job.project.userId !== userId) {
-      return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
 
     reply.raw.writeHead(200, {
