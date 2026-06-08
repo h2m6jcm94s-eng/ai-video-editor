@@ -13,13 +13,17 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import fs from "fs";
 import path from "path";
 
+const endpoint = process.env.R2_ENDPOINT || "";
+const isLocal = endpoint.includes("localhost") || endpoint.includes("127.0.0.1") || endpoint.includes("minio") || endpoint.includes(":9000");
+
 const s3 = new S3Client({
   region: "auto",
-  endpoint: process.env.R2_ENDPOINT,
+  endpoint: endpoint || undefined,
   credentials: {
     accessKeyId: process.env.R2_ACCESS_KEY_ID || "",
     secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",
   },
+  forcePathStyle: isLocal,
 });
 
 const BUCKET = process.env.R2_BUCKET_NAME || "ai-video-editor";
