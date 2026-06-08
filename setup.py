@@ -120,15 +120,17 @@ def main():
     with open(env_path, "w") as f:
         for k, v in env.items():
             f.write(f"{k}={v}\n")
+    os.chmod(env_path, 0o600)
 
     web_env_path = os.path.join(root, "apps", "web", ".env.local")
     os.makedirs(os.path.dirname(web_env_path), exist_ok=True)
     with open(web_env_path, "w") as f:
         for k, v in web_env.items():
             f.write(f"{k}={v}\n")
+    os.chmod(web_env_path, 0o600)
 
-    print(f"\n{GREEN}✓ Written:{RESET} .env")
-    print(f"{GREEN}✓ Written:{RESET} apps/web/.env.local")
+    print(f"\n{GREEN}✓ Written:{RESET} .env (permissions 600)")
+    print(f"{GREEN}✓ Written:{RESET} apps/web/.env.local (permissions 600)")
     print(f"\n{DIM}Run `pnpm install && uv sync` then `docker compose -f infra/docker/docker-compose.yml up -d` to start services.{RESET}\n")
 
 

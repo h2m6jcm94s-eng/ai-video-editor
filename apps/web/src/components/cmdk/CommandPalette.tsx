@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { Command } from "cmdk";
-import { Search, Wand2, Play, Pause, Settings, Film, Type, Music, Zap, RotateCcw, Save } from "lucide-react";
+import { Search, Wand2, Play, Settings, Film, Type, Music, RotateCcw, Save } from "lucide-react";
 import {
   Dialog,
   DialogContent,

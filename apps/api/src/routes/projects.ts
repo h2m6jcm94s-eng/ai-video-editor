@@ -128,7 +128,14 @@ export async function projectRoutes(app: FastifyInstance) {
   });
 
   // Transcribe audio asset to subtitles
-  app.post("/:id/transcribe", async (request, reply) => {
+  app.post("/:id/transcribe", {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: "1 minute",
+      },
+    },
+  }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = request.userId;
     const project = await db.query.projects.findFirst({
@@ -190,7 +197,15 @@ export async function projectRoutes(app: FastifyInstance) {
   });
 
   // Prompt-to-edit (AI powered)
-  app.post("/:id/prompt", { preHandler: validateBody(promptEditSchema) }, async (request, reply) => {
+  app.post("/:id/prompt", {
+    preHandler: validateBody(promptEditSchema),
+    config: {
+      rateLimit: {
+        max: 10,
+        timeWindow: "1 minute",
+      },
+    },
+  }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = request.userId;
     const project = await db.query.projects.findFirst({

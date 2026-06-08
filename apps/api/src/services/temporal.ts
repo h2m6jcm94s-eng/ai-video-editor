@@ -25,7 +25,8 @@ export async function startRenderWorkflow(
   styleTier: string,
   mode: string,
   userId: string,
-  renderId?: string
+  renderId?: string,
+  assetKeyMap?: Record<string, string>
 ) {
   const client = await getTemporalClient();
   const handle = await client.workflow.start("VideoRenderWorkflow", {
@@ -39,6 +40,7 @@ export async function startRenderWorkflow(
         style_tier: styleTier,
         mode,
         user_id: userId,
+        asset_key_map: assetKeyMap || {},
       },
     ],
     workflowId: `render-${projectId}-${renderId || Date.now()}`

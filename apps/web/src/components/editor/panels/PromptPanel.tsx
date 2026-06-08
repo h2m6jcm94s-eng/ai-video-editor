@@ -3,7 +3,7 @@
 "use client";
 
 import { useState } from "react";
-import { Send, X, Wand2, Undo2, Paperclip } from "lucide-react";
+import { Send, X, Wand2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -16,14 +16,6 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { promptEditSchema } from "@ai-video-editor/shared-types";
 import { z } from "zod";
-
-const PROMPT_PATTERNS = [
-  { pattern: /cut on (every )?beat/i, action: "align_cuts_to_beats", label: "Align cuts to beats" },
-  { pattern: /fade (in|out)/i, action: "add_fade", label: "Add fade" },
-  { pattern: /remove clip (\d+)/i, action: "remove_slot", label: "Remove clip" },
-  { pattern: /add text "(.+)" at (\d+:\d+)/i, action: "add_text_overlay", label: "Add text overlay" },
-  { pattern: /apply .* lut/i, action: "apply_lut", label: "Apply LUT" },
-];
 
 interface PromptPanelProps {
   projectId: string;

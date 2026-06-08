@@ -8,7 +8,6 @@
 import { eq, and } from "drizzle-orm";
 import { db } from "../db";
 import { providerKeys } from "../db/schema";
-import { env } from "../env";
 
 const ENCRYPTION_SECRET = process.env.PROVIDER_ENCRYPTION_SECRET || "dev-secret-do-not-use-in-production";
 

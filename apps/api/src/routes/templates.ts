@@ -2,7 +2,7 @@
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
 import { FastifyInstance } from "fastify";
-import { eq, desc, and, or } from "drizzle-orm";
+import { eq, desc, or } from "drizzle-orm";
 import { db } from "../db";
 import { templates } from "../db/schema";
 import { validateBody, createTemplateSchema } from "../middleware/validate";

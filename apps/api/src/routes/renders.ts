@@ -4,7 +4,7 @@
 import { FastifyInstance } from "fastify";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { db } from "../db";
-import { renders, projects } from "../db/schema";
+import { renders, projects, assets } from "../db/schema";
 import { enqueueJob } from "../services/queue";
 import { startRenderWorkflow } from "../services/temporal";
 import { validateBody, createRenderSchema } from "../middleware/validate";
@@ -19,7 +19,15 @@ const completeRenderSchema = z.object({
 
 export async function renderRoutes(app: FastifyInstance) {
   // Start render
-  app.post("/", { preHandler: validateBody(createRenderSchema) }, async (request, reply) => {
+  app.post("/", {
+    preHandler: validateBody(createRenderSchema),
+    config: {
+      rateLimit: {
+        max: 3,
+        timeWindow: "1 minute",
+      },
+    },
+  }, async (request, reply) => {
     const body = request.validatedBody as { projectId: string; options?: Record<string, unknown> };
     const userId = request.userId;
 
@@ -64,6 +72,27 @@ export async function renderRoutes(app: FastifyInstance) {
       })
       .returning();
 
+    // Fetch storage keys for all assets used in the render
+    const assetIds = [
+      project.referenceAssetId,
+      project.songAssetId,
+      ...((project.clipAssetIds as string[]) || []),
+    ].filter(Boolean) as string[];
+
+    const assetRows = assetIds.length
+      ? await db.query.assets.findMany({
+          where: (table, { inArray }) => inArray(table.id, assetIds),
+          columns: { id: true, storageKey: true },
+        })
+      : [];
+
+    const assetKeyMap: Record<string, string> = {};
+    for (const row of assetRows ?? []) {
+      if (row?.id && row?.storageKey) {
+        assetKeyMap[row.id] = row.storageKey;
+      }
+    }
+
     // Start Temporal workflow
     let workflowId: string;
     try {
@@ -75,7 +104,8 @@ export async function renderRoutes(app: FastifyInstance) {
         project.styleTier,
         project.mode,
         userId,
-        job.id
+        job.id,
+        assetKeyMap
       );
     } catch (e) {
       // Mark render as failed and return 500 without crashing

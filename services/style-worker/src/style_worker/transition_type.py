@@ -8,10 +8,8 @@ import numpy as np
 
 try:
     import cv2
-    _HAS_CV2 = True
 except ImportError:
     cv2 = None  # type: ignore[assignment]
-    _HAS_CV2 = False
 
 from shared_py.models import ShotBoundary
 
