@@ -14,6 +14,7 @@ import { presenceRoutes } from "./routes/presence";
 import { settingsRoutes } from "./routes/settings";
 import { healthRoutes } from "./routes/health";
 import { requireAuth } from "./middleware/auth";
+import { sendError } from "./lib/errors";
 
 export async function buildApp() {
   const app = Fastify({
@@ -26,18 +27,16 @@ export async function buildApp() {
     request.log.error({ err: error, url: request.url }, "Request error");
 
     if (error.validation) {
-      return reply.status(422).send({
-        error: "Validation failed",
-        code: "VALIDATION_ERROR",
-        details: error.validation,
-      });
+      return sendError(reply, 422, "Validation failed", "VALIDATION_ERROR", error.validation);
     }
 
     const isClientError = (error.statusCode ?? 500) < 500;
-    return reply.status(error.statusCode || 500).send({
-      error: isClientError ? error.message : "Internal server error",
-      code: error.code || "INTERNAL_ERROR",
-    });
+    return sendError(
+      reply,
+      error.statusCode || 500,
+      isClientError ? error.message : "Internal server error",
+      error.code || "INTERNAL_ERROR"
+    );
   });
 
   await app.register(cors, {

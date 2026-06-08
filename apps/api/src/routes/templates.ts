@@ -6,6 +6,7 @@ import { eq, desc, or } from "drizzle-orm";
 import { db } from "../db";
 import { templates } from "../db/schema";
 import { validateBody, createTemplateSchema } from "../middleware/validate";
+import { sendError } from "../lib/errors";
 
 export async function templateRoutes(app: FastifyInstance) {
   // List templates (user's own + public)
@@ -52,10 +53,10 @@ export async function templateRoutes(app: FastifyInstance) {
       where: eq(templates.id, id),
     });
     if (!template) {
-      return reply.status(404).send({ error: "Not found", code: "NOT_FOUND" });
+      return sendError(reply, 404, "Not found", "NOT_FOUND");
     }
     if (template.userId !== userId && !template.isPublic) {
-      return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
     return { template };
   });
@@ -68,10 +69,10 @@ export async function templateRoutes(app: FastifyInstance) {
       where: eq(templates.id, id),
     });
     if (!template) {
-      return reply.status(404).send({ error: "Not found", code: "NOT_FOUND" });
+      return sendError(reply, 404, "Not found", "NOT_FOUND");
     }
     if (template.userId !== userId) {
-      return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
 
     const body = request.body as Partial<typeof templates.$inferInsert>;
@@ -92,10 +93,10 @@ export async function templateRoutes(app: FastifyInstance) {
       where: eq(templates.id, id),
     });
     if (!template) {
-      return reply.status(404).send({ error: "Not found", code: "NOT_FOUND" });
+      return sendError(reply, 404, "Not found", "NOT_FOUND");
     }
     if (template.userId !== userId) {
-      return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
 
     await db.delete(templates).where(eq(templates.id, id));
@@ -110,10 +111,10 @@ export async function templateRoutes(app: FastifyInstance) {
       where: eq(templates.id, id),
     });
     if (!template) {
-      return reply.status(404).send({ error: "Not found", code: "NOT_FOUND" });
+      return sendError(reply, 404, "Not found", "NOT_FOUND");
     }
     if (template.userId !== userId && !template.isPublic) {
-      return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
 
     await db

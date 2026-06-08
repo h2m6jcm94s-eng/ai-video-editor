@@ -4,6 +4,7 @@
 import { FastifyInstance } from "fastify";
 import { sql } from "drizzle-orm";
 import { db } from "../db";
+import { sendError } from "../lib/errors";
 
 export async function healthRoutes(app: FastifyInstance) {
   app.get("/", async () => {
@@ -15,7 +16,7 @@ export async function healthRoutes(app: FastifyInstance) {
       await db.execute(sql`SELECT 1`);
       return { status: "ok", db: "connected" };
     } catch (e: any) {
-      return reply.status(503).send({ status: "error", db: "disconnected", error: e.message });
+      return sendError(reply, 503, e.message || "Database unreachable", "DB_UNAVAILABLE");
     }
   });
 }

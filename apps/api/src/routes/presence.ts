@@ -2,6 +2,7 @@
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
 import { FastifyInstance } from "fastify";
+import { sendError } from "../lib/errors";
 
 interface CursorData {
   x: number;

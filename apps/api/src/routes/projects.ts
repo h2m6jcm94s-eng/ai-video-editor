@@ -10,6 +10,7 @@ import { sendCutlistApprovedSignal, startRenderWorkflow } from "../services/temp
 import { deleteProjectAssets, downloadAsset } from "../services/storage";
 import { validateBody, createProjectSchema, patchProjectSchema, updateCutlistSchema, promptEditSchema } from "../middleware/validate";
 import { applyPromptEdit, transcribeAudio } from "../services/ai";
+import { sendError } from "../lib/errors";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -57,10 +58,10 @@ export async function projectRoutes(app: FastifyInstance) {
       with: { assets: true },
     });
     if (!project) {
-      return reply.status(404).send({ error: "Not found", code: "NOT_FOUND" });
+      return sendError(reply, 404, "Not found", "NOT_FOUND");
     }
     if (project.userId !== userId) {
-      return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
     return { project };
   });
@@ -73,10 +74,10 @@ export async function projectRoutes(app: FastifyInstance) {
       where: eq(projects.id, id),
     });
     if (!project) {
-      return reply.status(404).send({ error: "Not found", code: "NOT_FOUND" });
+      return sendError(reply, 404, "Not found", "NOT_FOUND");
     }
     if (project.userId !== userId) {
-      return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
 
     const body = request.validatedBody as Partial<typeof projects.$inferInsert>;
@@ -97,10 +98,10 @@ export async function projectRoutes(app: FastifyInstance) {
       where: eq(projects.id, id),
     });
     if (!project) {
-      return reply.status(404).send({ error: "Not found", code: "NOT_FOUND" });
+      return sendError(reply, 404, "Not found", "NOT_FOUND");
     }
     if (project.userId !== userId) {
-      return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
 
     const body = request.validatedBody as { cutList: any };
@@ -139,22 +140,22 @@ export async function projectRoutes(app: FastifyInstance) {
       where: eq(projects.id, id),
     });
     if (!project) {
-      return reply.status(404).send({ error: "Not found", code: "NOT_FOUND" });
+      return sendError(reply, 404, "Not found", "NOT_FOUND");
     }
     if (project.userId !== userId) {
-      return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
 
     const body = request.body as { assetId?: string };
     if (!body?.assetId) {
-      return reply.status(400).send({ error: "assetId required", code: "VALIDATION_ERROR" });
+      return sendError(reply, 400, "assetId required", "VALIDATION_ERROR");
     }
 
     const asset = await db.query.assets.findFirst({
       where: eq(assets.id, body.assetId),
     });
     if (!asset || asset.projectId !== id) {
-      return reply.status(404).send({ error: "Asset not found", code: "NOT_FOUND" });
+      return sendError(reply, 404, "Asset not found", "NOT_FOUND");
     }
 
     const tmpDir = os.tmpdir();
@@ -177,13 +178,14 @@ export async function projectRoutes(app: FastifyInstance) {
       request.log.error({ err }, "Transcription failed");
       const code =
         err && typeof err === "object" && "code" in err
-          ? (err as { code?: string }).code
+          ? (err as { code?: string }).code || "INTERNAL_ERROR"
           : "INTERNAL_ERROR";
       const status = code === "PROVIDER_KEY_MISSING" ? 400 : 500;
-      return reply.status(status).send({
-        error: err instanceof Error ? err.message : "Transcription failed",
-        code,
-      });
+      if (err instanceof Error) {
+        const message = err.message || "Transcription failed";
+        return sendError(reply, status, message, code);
+      }
+      return sendError(reply, status, "Transcription failed", code);
     } finally {
       try {
         fs.unlinkSync(tmpFile);
@@ -209,15 +211,15 @@ export async function projectRoutes(app: FastifyInstance) {
       where: eq(projects.id, id),
     });
     if (!project) {
-      return reply.status(404).send({ error: "Not found", code: "NOT_FOUND" });
+      return sendError(reply, 404, "Not found", "NOT_FOUND");
     }
     if (project.userId !== userId) {
-      return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
 
     const body = request.validatedBody as { prompt: string };
     if (!project.cutList) {
-      return reply.status(400).send({ error: "No cutlist to edit", code: "NO_CUTLIST" });
+      return sendError(reply, 400, "No cutlist to edit", "NO_CUTLIST");
     }
 
     // Gather assets for context
@@ -257,13 +259,14 @@ export async function projectRoutes(app: FastifyInstance) {
       request.log.error({ err }, "Prompt edit failed");
       const code =
         err && typeof err === "object" && "code" in err
-          ? (err as { code?: string }).code
+          ? (err as { code?: string }).code || "INTERNAL_ERROR"
           : "INTERNAL_ERROR";
       const status = code === "PROVIDER_KEY_MISSING" ? 400 : 500;
-      return reply.status(status).send({
-        error: err instanceof Error ? err.message : "AI edit failed",
-        code,
-      });
+      if (err instanceof Error) {
+        const message = err.message || "AI edit failed";
+        return sendError(reply, status, message, code);
+      }
+      return sendError(reply, status, "AI edit failed", code);
     }
   });
 

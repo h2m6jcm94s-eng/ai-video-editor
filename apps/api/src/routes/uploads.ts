@@ -8,6 +8,7 @@ import { assets, projects } from "../db/schema";
 import type { AssetType } from "@ai-video-editor/shared-types";
 import { createPresignedUploadUrl, createPresignedDownloadUrl } from "../services/storage";
 import { validateBody, presignedUploadSchema } from "../middleware/validate";
+import { sendError } from "../lib/errors";
 
 export async function uploadRoutes(app: FastifyInstance) {
   // Get presigned upload URL for multipart upload
@@ -27,10 +28,10 @@ export async function uploadRoutes(app: FastifyInstance) {
       where: eq(projects.id, body.projectId),
     });
     if (!project) {
-      return reply.status(404).send({ error: "Project not found", code: "NOT_FOUND" });
+      return sendError(reply, 404, "Project not found", "NOT_FOUND");
     }
     if (project.userId !== userId) {
-      return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
 
     const assetId = crypto.randomUUID();
@@ -61,7 +62,7 @@ export async function uploadRoutes(app: FastifyInstance) {
     const body = request.body as { sizeBytes: number; etag: string; metadata?: any };
 
     if (body.sizeBytes < 0 || body.sizeBytes > 5 * 1024 * 1024 * 1024) {
-      return reply.status(422).send({ error: "sizeBytes must be between 0 and 5GB", code: "VALIDATION_ERROR" });
+      return sendError(reply, 422, "sizeBytes must be between 0 and 5GB", "VALIDATION_ERROR");
     }
 
     const assetRow = await db.query.assets.findFirst({
@@ -69,13 +70,13 @@ export async function uploadRoutes(app: FastifyInstance) {
       with: { project: true },
     });
     if (!assetRow) {
-      return reply.status(404).send({ error: "Asset not found", code: "NOT_FOUND" });
+      return sendError(reply, 404, "Asset not found", "NOT_FOUND");
     }
 
     // Ownership check via project
     const userId = request.userId;
     if (!assetRow.project || assetRow.project.userId !== userId) {
-      return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
 
     const storageUrl = await createPresignedDownloadUrl(assetRow.storageKey || "");
@@ -106,13 +107,13 @@ export async function uploadRoutes(app: FastifyInstance) {
     });
 
     if (!asset) {
-      return reply.status(404).send({ error: "Asset not found", code: "NOT_FOUND" });
+      return sendError(reply, 404, "Asset not found", "NOT_FOUND");
     }
 
     // Ownership check
     const userId = request.userId;
     if (!asset.project || asset.project.userId !== userId) {
-      return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
 
     return { asset };
@@ -127,29 +128,29 @@ export async function uploadRoutes(app: FastifyInstance) {
     });
 
     if (!asset) {
-      return reply.status(404).send({ error: "Asset not found", code: "NOT_FOUND" });
+      return sendError(reply, 404, "Asset not found", "NOT_FOUND");
     }
 
     // Ownership check
     const userId = request.userId;
     if (!asset.project || asset.project.userId !== userId) {
-      return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
 
     const body = request.body as { durationSec?: number; width?: number; height?: number; fps?: number };
 
     // Basic range validation
     if (body.durationSec !== undefined && (body.durationSec < 0 || body.durationSec > 86400)) {
-      return reply.status(422).send({ error: "Invalid durationSec", code: "VALIDATION_ERROR" });
+      return sendError(reply, 422, "Invalid durationSec", "VALIDATION_ERROR");
     }
     if (body.width !== undefined && (body.width < 1 || body.width > 7680)) {
-      return reply.status(422).send({ error: "Invalid width", code: "VALIDATION_ERROR" });
+      return sendError(reply, 422, "Invalid width", "VALIDATION_ERROR");
     }
     if (body.height !== undefined && (body.height < 1 || body.height > 7680)) {
-      return reply.status(422).send({ error: "Invalid height", code: "VALIDATION_ERROR" });
+      return sendError(reply, 422, "Invalid height", "VALIDATION_ERROR");
     }
     if (body.fps !== undefined && (body.fps < 1 || body.fps > 120)) {
-      return reply.status(422).send({ error: "Invalid fps", code: "VALIDATION_ERROR" });
+      return sendError(reply, 422, "Invalid fps", "VALIDATION_ERROR");
     }
 
     const [updated] = await db

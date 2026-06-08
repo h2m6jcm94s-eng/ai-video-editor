@@ -7,6 +7,7 @@ import { db } from "../db";
 import { providerKeys } from "../db/schema";
 import { providerKeySchema, testProviderKeySchema } from "@ai-video-editor/shared-types";
 import { validateBody } from "../middleware/validate";
+import { sendError } from "../lib/errors";
 
 // Simple XOR encryption for demo — replace with AES-256-GCM + KEK in production
 function encrypt(key: string, secret: string): string {
@@ -87,7 +88,7 @@ export async function settingsRoutes(app: FastifyInstance) {
     });
 
     if (!row) {
-      return reply.status(404).send({ error: "Key not found", code: "NOT_FOUND" });
+      return sendError(reply, 404, "Key not found", "NOT_FOUND");
     }
 
     const key = decrypt(row.encryptedKey, ENCRYPTION_SECRET);
@@ -116,14 +117,11 @@ export async function settingsRoutes(app: FastifyInstance) {
         });
         if (!res.ok) throw new Error(await res.text());
       } else {
-        return reply.status(400).send({ error: "Unsupported provider", code: "VALIDATION_ERROR" });
+        return sendError(reply, 400, "Unsupported provider", "VALIDATION_ERROR");
       }
       return { success: true };
     } catch (err: unknown) {
-      return reply.status(400).send({
-        error: err instanceof Error ? err.message : "Test failed",
-        code: "PROVIDER_INVALID_RESPONSE",
-      });
+      return sendError(reply, 400, err instanceof Error ? err.message : "Test failed", "PROVIDER_INVALID_RESPONSE");
     }
   });
 }

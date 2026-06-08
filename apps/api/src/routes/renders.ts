@@ -8,6 +8,7 @@ import { renders, projects, assets } from "../db/schema";
 import { enqueueJob } from "../services/queue";
 import { startRenderWorkflow } from "../services/temporal";
 import { validateBody, createRenderSchema } from "../middleware/validate";
+import { sendError } from "../lib/errors";
 import { z } from "zod";
 
 const completeRenderSchema = z.object({
@@ -36,18 +37,15 @@ export async function renderRoutes(app: FastifyInstance) {
       where: eq(projects.id, body.projectId),
     });
     if (!project) {
-      return reply.status(404).send({ error: "Project not found", code: "NOT_FOUND" });
+      return sendError(reply, 404, "Project not found", "NOT_FOUND");
     }
     if (project.userId !== userId) {
-      return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
 
     // Validate project has required assets
     if (!project.referenceAssetId || !project.songAssetId) {
-      return reply.status(422).send({
-        error: "Project missing reference asset or song",
-        code: "MISSING_ASSETS",
-      });
+      return sendError(reply, 422, "Project missing reference asset or song", "MISSING_ASSETS");
     }
 
     // Idempotency: prevent duplicate in-progress renders
@@ -58,7 +56,7 @@ export async function renderRoutes(app: FastifyInstance) {
       ),
     });
     if (existing) {
-      return reply.status(409).send({ error: "Render already in progress", code: "CONFLICT", jobId: existing.id });
+      return sendError(reply, 409, "Render already in progress", "CONFLICT", { jobId: existing.id });
     }
 
     const [job] = await db
@@ -110,7 +108,7 @@ export async function renderRoutes(app: FastifyInstance) {
     } catch (e) {
       // Mark render as failed and return 500 without crashing
       await db.update(renders).set({ status: "failed", errorMessage: "Temporal workflow failed" }).where(eq(renders.id, job.id));
-      return reply.status(500).send({ error: "Render engine unavailable", code: "TEMPORAL_ERROR" });
+      return sendError(reply, 500, "Render engine unavailable", "TEMPORAL_ERROR");
     }
 
     await db
@@ -148,11 +146,11 @@ export async function renderRoutes(app: FastifyInstance) {
     });
 
     if (!job) {
-      return reply.status(404).send({ error: "Job not found", code: "NOT_FOUND" });
+      return sendError(reply, 404, "Job not found", "NOT_FOUND");
     }
 
     if (!job.project || job.project.userId !== userId) {
-      return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
 
     return { job };
@@ -167,7 +165,7 @@ export async function renderRoutes(app: FastifyInstance) {
       where: eq(projects.id, projectId),
     });
     if (!project || project.userId !== userId) {
-      return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
 
     const projectRenders = await db.query.renders.findMany({
@@ -184,7 +182,7 @@ export async function renderRoutes(app: FastifyInstance) {
 
     const job = await db.query.renders.findFirst({ where: eq(renders.id, jobId) });
     if (!job) {
-      return reply.status(404).send({ error: "Job not found", code: "NOT_FOUND" });
+      return sendError(reply, 404, "Job not found", "NOT_FOUND");
     }
 
     const [updated] = await db
