@@ -12,7 +12,7 @@ import json
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from shared_py.models import CutList, Slot, Overlay, RenderConfig
+from shared_py.models import CutList, Slot, Overlay, RenderConfig, Effect, AudioTrack
 
 
 def _find_font() -> str:
@@ -71,16 +71,69 @@ def _esc_text(t: str) -> str:
     return t.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:").replace("%", "\\%")
 
 
+def _apply_video_effects(slot: Slot, base_vf: str) -> str:
+    """Apply video effects to a slot's filter chain."""
+    filters = [base_vf] if base_vf else []
+    for effect in slot.effects or []:
+        etype = effect.type
+        params = effect.params
+        if etype == "zoom_punch_in":
+            scale = getattr(params, "target_scale", 1.3)
+            dur = getattr(params, "duration_ms", 300) / 1000.0
+            easing = "ease_out" if getattr(params, "easing", "easeOut") == "easeOut" else "linear"
+            filters.append(
+                f"zoompan=z='1+({scale}-1)*min(t/{dur},1)':d=1:s=1280x720"
+            )
+        elif etype == "vignette":
+            intensity = getattr(params, "intensity", 0.4)
+            filters.append(f"vignette=PI/{max(0.01, 1 - intensity)}")
+        elif etype == "film_grain":
+            intensity = getattr(params, "intensity", 0.2)
+            filters.append(f"noise=c0s={intensity*10}:allf=t+u")
+        elif etype == "shake":
+            intensity = getattr(params, "intensity", 5)
+            dur = getattr(params, "duration_ms", 300) / 1000.0
+            filters.append(
+                f"crop=iw:ih:(random(1)*{intensity}):(random(1)*{intensity}):enable='lte(t,{dur})'"
+            )
+    return ",".join(filters)
+
+
+def _build_audio_filter(audio_tracks: List[AudioTrack], base_input_count: int, song_path: Optional[str]) -> tuple[str, int]:
+    """Build amix filter for multi-audio tracks. Returns filter string and output audio label."""
+    if not audio_tracks and not song_path:
+        return "", -1
+
+    parts = []
+    inputs = []
+    idx = base_input_count
+
+    for track in audio_tracks:
+        parts.append(f"[{idx}:a]afade=t=in:ss=0:d={track.fade_in_s},afade=t=out:st={max(0, track.end_s - track.start_s - track.fade_out_s)}:d={track.fade_out_s},volume={track.gain_db}dB[a{idx}]")
+        inputs.append(f"[a{idx}]")
+        idx += 1
+
+    if song_path:
+        parts.append(f"[{idx}:a]anull[asong]")
+        inputs.append("[asong]")
+        idx += 1
+
+    if len(inputs) > 1:
+        parts.append(f"{''.join(inputs)}amix=inputs={len(inputs)}:duration=longest:dropout_transition=0[amixed]")
+        return ";".join(parts), idx
+    elif inputs:
+        parts.append(f"{inputs[0]}anull[amixed]")
+        return ";".join(parts), idx
+    return "", idx
+
+
 def compile_timeline(
     cutlist: CutList,
     clip_paths: Dict[str, str],
     output_path: str,
     config: RenderConfig,
 ) -> str:
-    """Compile a cut-list into a final video using FFmpeg.
-
-    Uses the concat demuxer with filter_complex for transitions, LUTs, and text.
-    """
+    """Compile a cut-list into a final video using FFmpeg."""
     if not cutlist.slots:
         raise ValueError("Cut list has no slots")
 
@@ -92,26 +145,30 @@ def compile_timeline(
     for slot in cutlist.slots:
         clip_id = slot.selected_clip_id
         if not clip_id or clip_id not in clip_paths:
-            # Skip missing clips or use placeholder
             continue
 
         clip_path = clip_paths[clip_id]
         segment_path = os.path.join(temp_dir, f"slot_{slot.index:03d}.mp4")
 
-        # Extract exact segment using trim filter
-        # We use -ss/-t for speed, then filter for frame accuracy
         duration = slot.duration_s
-        start = 0.0  # For MVP, use start of clip; production would use smart offset
+        start = 0.0
+
+        base_vf = (
+            f"fps={config.fps},"
+            f"scale={config.width}:{config.height}:force_original_aspect_ratio=decrease,"
+            f"pad={config.width}:{config.height}:(ow-iw)/2:(oh-ih)/2"
+        )
+        vf = _apply_video_effects(slot, base_vf)
 
         cmd = [
             "ffmpeg", "-y",
             "-ss", str(start),
             "-t", str(duration),
             "-i", clip_path,
-            "-vf", f"fps={config.fps},scale={config.width}:{config.height}:force_original_aspect_ratio=decrease,pad={config.width}:{config.height}:(ow-iw)/2:(oh-ih)/2",
+            "-vf", vf,
             "-c:v", "libx264", "-preset", "ultrafast",
             "-crf", "23", "-pix_fmt", "yuv420p",
-            "-an",  # No audio in segments
+            "-an",
             segment_path,
         ]
         _run_ffmpeg(cmd, f"segment extraction for slot {slot.index}")
@@ -126,25 +183,21 @@ def compile_timeline(
         raise ValueError("No valid segments could be extracted")
 
     # Stage 2: Build filter_complex for concatenation + transitions
-    # For simplicity with transitions, we build a chain of xfade filters
     filter_parts = []
-    inputs = []
 
-    for i, seg in enumerate(slot_segments):
-        inputs.append(f"[{i}:v]")
+    for i, _ in enumerate(slot_segments):
+        filter_parts.append(f"[{i}:v]setpts=PTS-STARTPTS[v{i}]")
 
-    # Build xfade chain
-    current_label = "0:v"
+    current_label = "v0"
     for i in range(len(slot_segments) - 1):
         slot = slot_segments[i]["slot"]
-        next_slot = slot_segments[i + 1]["slot"]
         transition = XFADE_MAP.get(slot.transition_out, "fade")
-        xfade_duration = min(0.3, slot.duration_s * 0.5)  # never exceed half of slot duration
+        xfade_duration = min(0.3, slot.duration_s * 0.5)
         offset = max(0.0, slot.duration_s - xfade_duration)
 
-        out_label = f"v{i}"
+        out_label = f"vx{i}"
         filter_parts.append(
-            f"[{current_label}][{i+1}:v]xfade=transition={transition}:duration={xfade_duration}:offset={offset}[{out_label}]"
+            f"[{current_label}][v{i+1}]xfade=transition={transition}:duration={xfade_duration}:offset={offset}[{out_label}]"
         )
         current_label = out_label
 
@@ -161,28 +214,14 @@ def compile_timeline(
     # Text overlays
     for overlay in cutlist.overlays:
         text_label = f"text_{overlay.start_s}"
-        # Build drawtext expression
-        x_expr = "(w-text_w)/2"  # center
+        x_expr = "(w-text_w)/2"
         y_expr = "(h-text_h)/2"
         if overlay.position == "top":
             y_expr = "h*0.1"
         elif overlay.position == "bottom":
             y_expr = "h*0.9"
-        elif overlay.position == "top_left":
-            x_expr = "w*0.05"
-            y_expr = "h*0.1"
-        elif overlay.position == "top_right":
-            x_expr = "w*0.95-text_w"
-            y_expr = "h*0.1"
-        elif overlay.position == "bottom_left":
-            x_expr = "w*0.05"
-            y_expr = "h*0.9"
-        elif overlay.position == "bottom_right":
-            x_expr = "w*0.95-text_w"
-            y_expr = "h*0.9"
 
         fontfile = _find_font()
-
         enable_expr = f"between(t\\,{overlay.start_s}\\,{overlay.end_s})"
 
         filter_parts.append(
@@ -197,17 +236,27 @@ def compile_timeline(
         current_label = text_label
 
     # Final output mapping
-    expected_label = f"v{len(slot_segments)-2}" if len(slot_segments) > 1 else "0:v"
-    if current_label != expected_label:
-        filter_parts.append(f"[{current_label}]format=yuv420p[outv]")
-        final_label = "outv"
-    else:
-        final_label = current_label
+    filter_parts.append(f"[{current_label}]format=yuv420p[outv]")
+    final_label = "outv"
 
     # Build full command
     input_args = []
     for seg in slot_segments:
         input_args.extend(["-i", seg["path"]])
+
+    # Audio inputs
+    audio_tracks = list(cutlist.audio_tracks) if hasattr(cutlist, "audio_tracks") else []
+    if not audio_tracks and config.song_path and os.path.exists(config.song_path or ""):
+        audio_tracks = [AudioTrack(asset_id="song", start_s=0.0, end_s=1e9, gain_db=0.0)]
+
+    for track in audio_tracks:
+        path = clip_paths.get(track.asset_id) or config.song_path
+        if path and os.path.exists(path):
+            input_args.extend(["-i", path])
+
+    audio_filter, _ = _build_audio_filter(audio_tracks, len(slot_segments), config.song_path)
+    if audio_filter:
+        filter_parts.append(audio_filter)
 
     filter_complex = ";".join(filter_parts)
 
@@ -222,16 +271,8 @@ def compile_timeline(
         "-pix_fmt", config.pix_fmt,
     ]
 
-    # Add song audio if provided
-    if config.song_path and os.path.exists(config.song_path):
-        audio_input_idx = len(slot_segments)  # audio is always the last input
-        cmd.extend([
-            "-i", config.song_path,
-            "-map", f"{audio_input_idx}:a:0",
-            "-c:a", config.audio_codec,
-            "-b:a", config.audio_bitrate,
-            "-shortest",
-        ])
+    if audio_filter:
+        cmd.extend(["-map", "[amixed]", "-c:a", config.audio_codec, "-b:a", config.audio_bitrate, "-shortest"])
     else:
         cmd.extend(["-an"])
 
@@ -270,7 +311,6 @@ def render_preview(
         video_crf=28,
     )
 
-    # Truncate slots for preview
     preview_cutlist = cutlist.model_copy(deep=True)
     total = 0.0
     preview_slots = []
