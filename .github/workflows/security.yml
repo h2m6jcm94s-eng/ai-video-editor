@@ -56,13 +56,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v2
-        with:
-          version: "0.4.x"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: uv sync
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.4.x"
+      - run: uv sync --no-install-project
       - run: uv pip install pip-audit
-      - run: uv run pip-audit --desc
+      - run: uv run --no-project pip-audit --desc
         continue-on-error: true

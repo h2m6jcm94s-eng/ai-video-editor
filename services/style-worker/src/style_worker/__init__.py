@@ -1,3 +1,6 @@
+﻿# Copyright (c) 2025 Devayan Dewri. All rights reserved.
+# Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
+# Commercial SaaS use is prohibited without written permission.
 # Lazy imports to avoid loading heavy ML dependencies on module init
 def __getattr__(name):
     if name == "extract_lut_from_reference":
@@ -14,9 +17,3 @@ def __getattr__(name):
         return analyze_camera_motion
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-__all__ = [
-    "extract_lut_from_reference",
-    "classify_transitions",
-    "extract_text_overlays",
-    "analyze_camera_motion",
-]

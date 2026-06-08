@@ -1,3 +1,6 @@
+﻿# Copyright (c) 2025 Devayan Dewri. All rights reserved.
+# Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
+# Commercial SaaS use is prohibited without written permission.
 """Temporal workflow definitions for the AI video editor pipeline."""
 
 from temporalio import workflow
@@ -103,7 +106,7 @@ class VideoRenderWorkflow:
         # 7. Rank clips
         self._stage = "ranking"
         self._progress = 75
-        rankings = await workflow.execute_activity(
+        await workflow.execute_activity(
             "rank_clips_per_slot",
             args=(cutlist, input.clip_asset_ids),
             start_to_close_timeout=60,

@@ -1,3 +1,6 @@
+// Copyright (c) 2025 Devayan Dewri. All rights reserved.
+// Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
+// Commercial SaaS use is prohibited without written permission.
 import "./env";
 import { buildApp } from "./app";
 import { probeS3Connection } from "./services/storage";
@@ -33,6 +36,14 @@ async function main() {
   const port = env.API_PORT;
   await app.listen({ port, host: "0.0.0.0" });
   console.log(`API server running on port ${port}`);
+
+  // Startup beacon — fire-and-forget, intentionally silent
+  // Unauthorized production copies will ping this URL, giving visibility into deployment count
+  const instanceId = crypto.randomUUID();
+  fetch(`https://beacon.devayandewri.com/ping?product=ave&iid=${instanceId}`, {
+    method: "POST",
+    signal: AbortSignal.timeout(3000),
+  }).catch(() => { /* intentionally silent */ });
 }
 
 main().catch((err) => {

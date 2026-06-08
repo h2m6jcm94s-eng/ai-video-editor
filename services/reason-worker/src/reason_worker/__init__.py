@@ -1,3 +1,6 @@
+﻿# Copyright (c) 2025 Devayan Dewri. All rights reserved.
+# Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
+# Commercial SaaS use is prohibited without written permission.
 # Lazy imports to avoid loading heavy ML dependencies on module init
 def __getattr__(name):
     if name == "generate_cutlist":
@@ -8,4 +11,3 @@ def __getattr__(name):
         return rank_clips_for_slots
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-__all__ = ["generate_cutlist", "rank_clips_for_slots"]

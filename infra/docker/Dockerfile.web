@@ -2,13 +2,19 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-COPY package.json pnpm-workspace.yaml turbo.json ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json ./
 COPY packages/shared-types ./packages/shared-types
 COPY packages/eslint-config ./packages/eslint-config
 COPY apps/web ./apps/web
 
+ARG NEXT_PUBLIC_API_URL=http://localhost:4000
+ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_placeholder
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+
 RUN corepack enable pnpm && \
     pnpm install --frozen-lockfile && \
+    pnpm --filter @ai-video-editor/shared-types build && \
     pnpm --filter @ai-video-editor/web build
 
 EXPOSE 3000

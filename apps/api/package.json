@@ -6,7 +6,7 @@
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "lint": "eslint src",
+    "lint": "eslint --ext .ts src/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -16,10 +16,13 @@
   },
   "dependencies": {
     "@ai-video-editor/shared-types": "workspace:*",
+    "@aws-sdk/client-s3": "^3.600.0",
+    "@aws-sdk/s3-request-presigner": "^3.600.0",
     "@clerk/fastify": "^1.0.0",
+    "@temporalio/client": "^1.10.0",
     "@fastify/cors": "^9.0.0",
     "@fastify/multipart": "^8.0.0",
-    "@fastify/rate-limit": "^10.3.0",
+    "@fastify/rate-limit": "^9.1.0",
     "@fastify/static": "^7.0.0",
     "drizzle-orm": "^0.31.0",
     "fastify": "^4.26.0",
@@ -36,6 +39,7 @@
     "eslint": "^10.4.0",
     "tsx": "^4.11.0",
     "typescript": "^5.4.0",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.7",
+    "@vitest/coverage-v8": "^4.1.7"
   }
 }

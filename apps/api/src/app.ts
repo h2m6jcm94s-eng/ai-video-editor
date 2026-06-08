@@ -1,3 +1,6 @@
+﻿// Copyright (c) 2025 Devayan Dewri. All rights reserved.
+// Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
+// Commercial SaaS use is prohibited without written permission.
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
@@ -45,13 +48,11 @@ export async function buildApp() {
     },
   });
 
-  if (process.env.NODE_ENV !== "test") {
-    await app.register(rateLimit, {
-      max: 60,
-      timeWindow: "1 minute",
-      keyGenerator: (req) => req.userId ?? req.ip,
-    });
-  }
+  await app.register(rateLimit, {
+    max: process.env.NODE_ENV === "test" ? 10000 : 60,
+    timeWindow: "1 minute",
+    keyGenerator: (req) => req.userId ?? req.ip,
+  });
 
   await app.register(healthRoutes, { prefix: "/api/health" });
 

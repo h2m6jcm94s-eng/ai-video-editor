@@ -1,11 +1,19 @@
+﻿# Copyright (c) 2025 Devayan Dewri. All rights reserved.
+# Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
+# Commercial SaaS use is prohibited without written permission.
 """Beat, downbeat, and section detection using allin1 + librosa fallback."""
 
 import os
 import tempfile
 from typing import Optional
 import numpy as np
-import librosa
-import soundfile as sf
+
+try:
+    import librosa
+    _HAS_LIBROSA = True
+except ImportError:
+    librosa = None  # type: ignore[assignment]
+    _HAS_LIBROSA = False
 
 from shared_py.models import BeatGrid, BeatSegment
 

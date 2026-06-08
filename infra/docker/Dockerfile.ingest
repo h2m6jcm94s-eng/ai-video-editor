@@ -4,7 +4,7 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsm6 \
     libxext6 \
-    libgl1-mesa-glx \
+    libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -14,7 +14,6 @@ COPY services/ingest-worker ./ingest-worker
 COPY pyproject.toml .
 COPY uv.lock .
 
-RUN pip install --no-cache-dir uv && \
-    uv pip install -e ./shared-py -e ./ingest-worker
+RUN pip install --no-cache-dir ./shared-py ./ingest-worker
 
 CMD ["python", "-m", "ingest_worker"]

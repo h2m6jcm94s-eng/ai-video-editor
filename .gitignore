@@ -1,4 +1,4 @@
-# Dependencies
+﻿# Dependencies
 node_modules/
 .pnpm-store/
 
@@ -58,3 +58,4 @@ renders/
 *.cube
 *.lut
 secrets.env
+.turbo/

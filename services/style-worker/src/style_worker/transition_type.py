@@ -1,8 +1,17 @@
+﻿# Copyright (c) 2025 Devayan Dewri. All rights reserved.
+# Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
+# Commercial SaaS use is prohibited without written permission.
 """Classify transition types from shot boundaries."""
 
 from typing import List
 import numpy as np
-import cv2
+
+try:
+    import cv2
+    _HAS_CV2 = True
+except ImportError:
+    cv2 = None  # type: ignore[assignment]
+    _HAS_CV2 = False
 
 from shared_py.models import ShotBoundary
 
@@ -12,7 +21,6 @@ def classify_transitions(
 ) -> List[ShotBoundary]:
     """Classify transition type for each boundary."""
     cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS)
 
     for boundary in boundaries:
         if not boundary.is_gradual:

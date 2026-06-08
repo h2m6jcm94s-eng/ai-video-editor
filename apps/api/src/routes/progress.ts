@@ -1,3 +1,6 @@
+﻿// Copyright (c) 2025 Devayan Dewri. All rights reserved.
+// Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
+// Commercial SaaS use is prohibited without written permission.
 import { FastifyInstance } from "fastify";
 import Redis from "ioredis";
 import { eq } from "drizzle-orm";
@@ -43,7 +46,7 @@ export async function progressRoutes(app: FastifyInstance) {
     if (!subscriber) {
       subscriber = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
       subscriber.on("error", (err) => {
-        console.error(`Redis subscriber error on ${channel}:`, err);
+        console.error("Redis subscriber error", { channel, err });
       });
       await subscriber.subscribe(channel);
       subscriberMap.set(channel, subscriber);

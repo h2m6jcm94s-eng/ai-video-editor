@@ -1,3 +1,6 @@
+﻿// Copyright (c) 2025 Devayan Dewri. All rights reserved.
+// Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
+// Commercial SaaS use is prohibited without written permission.
 "use client";
 
 import type { Project, Slot, CutList } from "@ai-video-editor/shared-types";
@@ -34,7 +37,7 @@ export function TimelinePreview({ project, cutList }: TimelinePreviewProps) {
           </span>
           <span className="flex items-center space-x-1">
             <Music className="w-4 h-4" />
-            <span>{Math.round(cutList.globals?.tempo_bpm ?? 120)} BPM</span>
+            <span>{Math.round(cutList.globals?.tempoBpm ?? 120)} BPM</span>
           </span>
         </div>
       </div>

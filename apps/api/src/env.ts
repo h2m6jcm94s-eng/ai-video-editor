@@ -1,20 +1,26 @@
+// Copyright (c) 2025 Devayan Dewri. All rights reserved.
+// Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
+// Commercial SaaS use is prohibited without written permission.
 import { z } from "zod";
 
+const isTest = process.env.NODE_ENV === "test";
+
 const schema = z.object({
-  DATABASE_URL: z.string().url("DATABASE_URL must be a valid postgres:// URL"),
-  CLERK_SECRET_KEY: z.string().min(10, "CLERK_SECRET_KEY is missing or too short"),
-  WEB_URL: z.string().url("WEB_URL must be a valid URL (e.g. http://localhost:3000)"),
-  R2_ENDPOINT: z.string().url("R2_ENDPOINT must be a valid URL"),
-  R2_ACCESS_KEY_ID: z.string().min(1, "R2_ACCESS_KEY_ID is missing"),
-  R2_SECRET_ACCESS_KEY: z.string().min(1, "R2_SECRET_ACCESS_KEY is missing"),
-  R2_BUCKET_NAME: z.string().min(1, "R2_BUCKET_NAME is missing"),
-  REDIS_URL: z.string().url("REDIS_URL must be a valid redis:// URL"),
-  TEMPORAL_HOST: z.string().min(1, "TEMPORAL_HOST is missing (e.g. localhost:7233)"),
+  DATABASE_URL: z.string().url("DATABASE_URL must be a valid postgres:// URL").default("postgresql://localhost:5432/test"),
+  CLERK_SECRET_KEY: z.string().min(1, "CLERK_SECRET_KEY is missing").default("sk_test_dummy"),
+  WEB_URL: z.string().url("WEB_URL must be a valid URL (e.g. http://localhost:3000)").default("http://localhost:3000"),
+  R2_ENDPOINT: z.string().url("R2_ENDPOINT must be a valid URL").default("http://localhost:9000"),
+  R2_ACCESS_KEY_ID: z.string().min(1, "R2_ACCESS_KEY_ID is missing").default("minioadmin"),
+  R2_SECRET_ACCESS_KEY: z.string().min(1, "R2_SECRET_ACCESS_KEY is missing").default("minioadmin"),
+  R2_BUCKET_NAME: z.string().min(1, "R2_BUCKET_NAME is missing").default("test"),
+  REDIS_URL: z.string().url("REDIS_URL must be a valid redis:// URL").default("redis://localhost:6379"),
+  TEMPORAL_HOST: z.string().min(1, "TEMPORAL_HOST is missing (e.g. localhost:7233)").default("localhost:7233"),
   API_PORT: z.coerce.number().int().min(1).max(65535).default(4000),
 });
 
 const result = schema.safeParse(process.env);
-if (!result.success) {
+
+if (!result.success && !isTest) {
   console.error("\n╔══════════════════════════════════════════════════╗");
   console.error("║  STARTUP FAILED — Missing or invalid env vars    ║");
   console.error("╠══════════════════════════════════════════════════╣");
@@ -27,4 +33,5 @@ if (!result.success) {
   process.exit(1);
 }
 
-export const env = result.data;
+// In test mode, schema defaults fill in any missing vars so Vitest can run without real services.
+export const env = result.success ? result.data : schema.parse({});

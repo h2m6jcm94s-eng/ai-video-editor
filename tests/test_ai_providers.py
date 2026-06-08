@@ -29,6 +29,8 @@ class TestProviderFactory:
                 provider = get_ai_provider(name)
             except ImportError:
                 continue  # Skip providers with missing optional deps
+            except ValueError:
+                continue  # Skip providers whose API key is not set in this environment
             assert provider is not None
             assert hasattr(provider, "generate_cutlist")
             assert hasattr(provider, "classify_shot")
@@ -50,6 +52,8 @@ class TestProviderFactory:
             assert type(provider_lower) == type(provider_upper)
         except ImportError:
             pytest.skip("openai package not installed")
+        except ValueError:
+            pytest.skip("GROQ_API_KEY not set")
 
 
 # ──────────────────────────────────────────────────────────────────────────────

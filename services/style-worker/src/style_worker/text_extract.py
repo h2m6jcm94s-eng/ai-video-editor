@@ -1,9 +1,17 @@
+﻿# Copyright (c) 2025 Devayan Dewri. All rights reserved.
+# Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
+# Commercial SaaS use is prohibited without written permission.
 """Extract text overlays using PaddleOCR + frame deduplication."""
 
-import os
 from typing import List
 import numpy as np
-import cv2
+
+try:
+    import cv2
+    _HAS_CV2 = True
+except ImportError:
+    cv2 = None  # type: ignore[assignment]
+    _HAS_CV2 = False
 
 try:
     from paddleocr import PaddleOCR

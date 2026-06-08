@@ -1,3 +1,6 @@
+﻿// Copyright (c) 2025 Devayan Dewri. All rights reserved.
+// Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
+// Commercial SaaS use is prohibited without written permission.
 "use client";
 
 import { useState } from "react";
@@ -88,7 +91,7 @@ export default function Home() {
               </h2>
               <p className="text-lg text-slate-600">
                 Upload a reference video, your clips, and a song. Our AI parses
-                the reference's editing style and applies it to your footage.
+                the reference&apos;s editing style and applies it to your footage.
               </p>
             </div>
 

@@ -15,6 +15,7 @@ dependencies = [
     "numpy>=1.26.0",
     "pillow>=10.0.0",
     "pydantic>=2.5.0",
+    "pydantic-settings>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -47,6 +48,13 @@ markers = [
     "integration: marks tests as integration tests",
     "ffmpeg: marks tests that require FFmpeg",
     "optional: marks tests for optional dependencies",
+    "requires_anthropic: requires ANTHROPIC_API_KEY to be set",
+    "requires_google: requires GOOGLE_API_KEY to be set",
+    "requires_groq: requires GROQ_API_KEY to be set",
+    "requires_openai: requires OPENAI_API_KEY to be set",
+    "requires_kimi: requires KIMI_API_KEY to be set",
+    "requires_qwen: requires QWEN_API_KEY to be set",
+    "requires_openrouter: requires OPENROUTER_API_KEY to be set",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",

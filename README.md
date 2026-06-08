@@ -1,4 +1,6 @@
-# AI Video Editor - Reference Style Matching
+﻿# AI Video Editor - Reference Style Matching
+[![License: ELv2](https://img.shields.io/badge/License-Elastic_v2-blue.svg)](https://www.elastic.co/licensing/elastic-license)
+
 
 > Parse a reference video's editing style and apply it to your clips, synced to a custom song.
 
@@ -145,4 +147,6 @@ Per 60-second output (quality tier):
 
 ## License
 
-MIT
+[![License: ELv2](https://img.shields.io/badge/License-Elastic_v2-blue.svg)](https://www.elastic.co/licensing/elastic-license)
+
+This project is licensed under the [Elastic License 2.0](LICENSE). Source-available for personal and internal use. Commercial SaaS deployments require written permission.

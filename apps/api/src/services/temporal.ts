@@ -1,18 +1,20 @@
-import { Client } from "@temporalio/client";
+﻿// Copyright (c) 2025 Devayan Dewri. All rights reserved.
+// Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
+// Commercial SaaS use is prohibited without written permission.
+import { Client, Connection } from "@temporalio/client";
+import { env } from "../env";
 
 let temporalClient: Client | null = null;
 let lastConnectAttempt = 0;
 
 export async function getTemporalClient(): Promise<Client> {
   const now = Date.now();
-  // Reconnect if client is null or if 5 minutes have passed since last attempt
   if (!temporalClient || now - lastConnectAttempt > 5 * 60 * 1000) {
     lastConnectAttempt = now;
-    temporalClient = await Client.connect({
-      address: process.env.TEMPORAL_HOST || "localhost:7233",
-    });
+    const connection = await Connection.connect({ address: env.TEMPORAL_HOST });
+    temporalClient = new Client({ connection });
   }
-  return temporalClient;
+  return temporalClient!;
 }
 
 export async function startRenderWorkflow(

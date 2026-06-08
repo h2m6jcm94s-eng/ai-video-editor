@@ -1,3 +1,6 @@
+﻿// Copyright (c) 2025 Devayan Dewri. All rights reserved.
+// Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
+// Commercial SaaS use is prohibited without written permission.
 import { FastifyInstance } from "fastify";
 import { eq, desc, and, inArray } from "drizzle-orm";
 import { db } from "../db";
@@ -136,7 +139,7 @@ export async function projectRoutes(app: FastifyInstance) {
 
     // Clean up assets from R2 asynchronously (don't block response)
     deleteProjectAssets(id).catch((err) => {
-      console.error(`Failed to delete assets for project ${id}:`, err);
+      console.error("Failed to delete assets for project", { projectId: id, err });
     });
 
     await db.delete(projects).where(eq(projects.id, id));
