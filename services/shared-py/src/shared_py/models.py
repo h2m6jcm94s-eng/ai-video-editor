@@ -1,11 +1,123 @@
 ﻿# Copyright (c) 2025 Devayan Dewri. All rights reserved.
 # Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 # Commercial SaaS use is prohibited without written permission.
-from typing import List, Optional, Literal
-from pydantic import BaseModel, Field
+from typing import List, Optional, Literal, Any
+from pydantic import BaseModel, Field, ConfigDict
+from pydantic.alias_generators import to_camel
 
 
-class CutListGlobals(BaseModel):
+class BaseModelCamel(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
+class EffectParams(BaseModelCamel):
+    pass
+
+
+class ZoomPunchInParams(EffectParams):
+    target_scale: float = Field(default=1.3, ge=1.0, le=3.0)
+    duration_ms: int = Field(default=300, ge=50, le=2000)
+    easing: Literal["linear", "easeIn", "easeOut", "easeInOut"] = "easeOut"
+
+
+class FocusPullParams(EffectParams):
+    target_blur: float = Field(default=0.0, ge=0.0, le=20.0)
+    duration_ms: int = Field(default=800, ge=50, le=5000)
+    easing: Literal["linear", "easeIn", "easeOut", "easeInOut"] = "easeInOut"
+
+
+class FreezeFrameParams(EffectParams):
+    hold_ms: int = Field(default=500, ge=50, le=5000)
+
+
+class SpeedRampParams(EffectParams):
+    start_speed: float = Field(default=1.0, ge=0.1, le=4.0)
+    end_speed: float = Field(default=2.0, ge=0.1, le=4.0)
+    curve: Literal["linear", "ramp_up", "ramp_down", "s_curve"] = "s_curve"
+
+
+class ShakeParams(EffectParams):
+    intensity: float = Field(default=5.0, ge=0.0, le=20.0)
+    duration_ms: int = Field(default=300, ge=50, le=2000)
+
+
+class GlitchParams(EffectParams):
+    intensity: float = Field(default=0.3, ge=0.0, le=1.0)
+    duration_ms: int = Field(default=200, ge=50, le=2000)
+
+
+class VignetteParams(EffectParams):
+    intensity: float = Field(default=0.4, ge=0.0, le=1.0)
+    color: str = "#000000"
+
+
+class FilmGrainParams(EffectParams):
+    intensity: float = Field(default=0.2, ge=0.0, le=1.0)
+
+
+class ColorPopParams(EffectParams):
+    hue_shift: float = Field(default=0.0, ge=-180.0, le=180.0)
+    saturation: float = Field(default=1.5, ge=0.0, le=3.0)
+
+
+class TextKineticParams(EffectParams):
+    text: str = Field(..., min_length=1, max_length=200)
+    animation: Literal["fade_up", "typewriter", "pop", "slide_left"] = "fade_up"
+    font_size: int = Field(default=48, ge=8, le=200)
+
+
+class LowerThirdParams(EffectParams):
+    text: str = Field(..., min_length=1, max_length=200)
+    subtext: Optional[str] = Field(default=None, max_length=200)
+    style: Literal["minimal", "bold", "news"] = "minimal"
+
+
+class CalloutArrowParams(EffectParams):
+    direction: Literal["up", "down", "left", "right"] = "down"
+    color: str = "#f59e0b"
+
+
+class SfxParams(EffectParams):
+    gain_db: float = Field(default=-6.0, ge=-60.0, le=12.0)
+
+
+class WhooshSfxParams(SfxParams):
+    variant: Literal["short", "long", "dramatic"] = "short"
+
+
+class DingSfxParams(SfxParams):
+    variant: Literal["bell", "chime", "coin"] = "bell"
+
+
+class RecordScratchSfxParams(SfxParams):
+    pass
+
+
+class Effect(BaseModelCamel):
+    id: Optional[str] = None
+    type: Literal[
+        "zoom_punch_in",
+        "focus_pull",
+        "freeze_frame",
+        "speed_ramp",
+        "shake",
+        "glitch",
+        "vignette",
+        "film_grain",
+        "color_pop",
+        "text_kinetic",
+        "lower_third",
+        "callout_arrow",
+        "whoosh_sfx",
+        "ding_sfx",
+        "record_scratch_sfx",
+    ]
+    start_s: float = Field(ge=0.0)
+    duration_s: float = Field(ge=0.0)
+    params: Any
+
+
+class CutListGlobals(BaseModelCamel):
     total_duration_s: float
     tempo_bpm: float
     time_signature: str = "4/4"
@@ -16,13 +128,13 @@ class CutListGlobals(BaseModel):
     aspect_ratio: str = "9:16"
 
 
-class SectionMarker(BaseModel):
+class SectionMarker(BaseModelCamel):
     name: str
     start_s: float
     end_s: float
 
 
-class Slot(BaseModel):
+class Slot(BaseModelCamel):
     index: int
     start_s: float
     duration_s: float
@@ -39,9 +151,10 @@ class Slot(BaseModel):
     selected_clip_id: Optional[str] = None
     ranked_clip_ids: Optional[List[str]] = None
     confidence: Optional[float] = None
+    effects: List[Effect] = Field(default_factory=list)
 
 
-class Overlay(BaseModel):
+class Overlay(BaseModelCamel):
     text: str
     start_s: float
     end_s: float
@@ -53,13 +166,23 @@ class Overlay(BaseModel):
     animation: str = "none"
 
 
-class CutList(BaseModel):
+class AudioTrack(BaseModelCamel):
+    asset_id: str
+    gain_db: float = Field(default=0.0, ge=-60.0, le=12.0)
+    start_s: float = Field(ge=0.0)
+    end_s: float = Field(ge=0.0)
+    fade_in_s: float = Field(default=0.0, ge=0.0)
+    fade_out_s: float = Field(default=0.0, ge=0.0)
+
+
+class CutList(BaseModelCamel):
     globals: CutListGlobals
     slots: List[Slot]
     overlays: List[Overlay] = Field(default_factory=list)
+    audio_tracks: List[AudioTrack] = Field(default_factory=list)
 
 
-class ShotBoundary(BaseModel):
+class ShotBoundary(BaseModelCamel):
     start_frame: int
     end_frame: int
     start_s: float
@@ -68,13 +191,13 @@ class ShotBoundary(BaseModel):
     confidence: float = 1.0
 
 
-class BeatSegment(BaseModel):
+class BeatSegment(BaseModelCamel):
     start: float
     end: float
     label: str
 
 
-class BeatGrid(BaseModel):
+class BeatGrid(BaseModelCamel):
     bpm: float
     beats: List[float]
     downbeats: List[float]
@@ -82,7 +205,7 @@ class BeatGrid(BaseModel):
     segments: List[BeatSegment]
 
 
-class ShotAnalysis(BaseModel):
+class ShotAnalysis(BaseModelCamel):
     shot_size: str
     motion: str
     subject_type: str
@@ -91,7 +214,7 @@ class ShotAnalysis(BaseModel):
     camera_move: str
 
 
-class StyleAnalysis(BaseModel):
+class StyleAnalysis(BaseModelCamel):
     color_palette: List[str] = Field(default_factory=list)
     contrast_level: float = 1.0
     saturation_level: float = 1.0
@@ -105,7 +228,7 @@ class StyleAnalysis(BaseModel):
     mood: str = "neutral"
 
 
-class ClipScore(BaseModel):
+class ClipScore(BaseModelCamel):
     clip_id: str
     semantic_score: float = 0.0
     shot_type_score: float = 0.0
@@ -116,7 +239,7 @@ class ClipScore(BaseModel):
     total_score: float = 0.0
 
 
-class RenderConfig(BaseModel):
+class RenderConfig(BaseModelCamel):
     output_path: str
     width: int = 1280
     height: int = 720
@@ -129,3 +252,4 @@ class RenderConfig(BaseModel):
     pix_fmt: str = "yuv420p"
     lut_path: Optional[str] = None
     song_path: Optional[str] = None
+    audio_tracks: List[AudioTrack] = Field(default_factory=list)

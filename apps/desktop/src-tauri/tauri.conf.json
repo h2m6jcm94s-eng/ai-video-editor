@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AI Video Editor",
+  "version": "0.1.0",
+  "identifier": "com.aivideoeditor.app",
+  "build": {
+    "beforeDevCommand": "cd ../web && pnpm dev",
+    "beforeBuildCommand": "cd ../web && pnpm build",
+    "devUrl": "http://localhost:3000",
+    "frontendDist": "../web/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "AI Video Editor",
+        "width": 1600,
+        "height": 1000,
+        "minWidth": 1200,
+        "minHeight": 700,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": null,
+      "dangerousDisableAssetCspModification": false
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "dmg", "appimage", "nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "shell": {
+      "open": true
+    }
+  }
+}

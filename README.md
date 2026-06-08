@@ -1,152 +1,80 @@
-﻿# AI Video Editor - Reference Style Matching
+# AI Video Editor — Reference Style Matching
+
 [![License: ELv2](https://img.shields.io/badge/License-Elastic_v2-blue.svg)](https://www.elastic.co/licensing/elastic-license)
 
+> **Claude Code for video editing.** AI generates a working baseline from a reference video + song + clips + style tier. Newbies hit render and ship. Power users refine via prompts and manual controls.
 
-> Parse a reference video's editing style and apply it to your clips, synced to a custom song.
+## What it does
 
-## Overview
+1. Upload a **reference video** — the style you want to match (cuts, color, text, transitions).
+2. Upload your **clips** — the footage to edit.
+3. Upload a **song** — the music to sync to.
+4. Pick a **style tier** from the 5-tier ladder.
+5. Hit render, or prompt-edit the cut list until it's perfect.
 
-This AI video editor takes three inputs:
-1. **Reference video** - The style you want to match (cut rhythm, shot types, color grade, transitions, text overlays)
-2. **Your clips** - Your raw footage to be edited
-3. **Your song** - The music to sync the edit to
+## 5-Tier StyleTier Ladder
 
-It outputs a professionally edited video that mimics the reference's style while using your content.
+| Tier | What runs | When to use |
+|------|-----------|-------------|
+| `cuts_only` | Beat detect + shot detect → AI cut list | "Just sync my clips to the beat" |
+| `color_grade` | + LUT extraction from reference | "Match the reference's color only" |
+| `with_text` | + Text overlay extraction (PaddleOCR) | "Ad-style titles like the reference" |
+| `with_effects` | + Transition classifier + camera motion + SFX | "Borrow the reference's edit feel" |
+| `full_remix` | All above + manual effects, multi-song, prompt edits | "AI baseline, now I'm directing" |
+
+## Quick start
+
+```bash
+pnpm install
+pnpm dev
+```
+
+Then open `http://localhost:3000`, sign in with Clerk, and add your AI provider keys in **Settings → API Keys**. No `.env` required for AI providers in local dev.
 
 ## Architecture
 
 ```
 repo/
 ├── apps/
-│   ├── web/          # Next.js 15 frontend
-│   └── api/          # Fastify 5 backend API
+│   ├── web/           # Next.js 15 + Tailwind + shadcn/ui
+│   └── api/           # Fastify 4 + Temporal + Drizzle
 ├── packages/
-│   ├── shared-types/ # TypeScript type definitions
-│   └── eslint-config # Shared linting rules
-├── services/         # Python workers (uv workspace)
-│   ├── ingest-worker/    # Video probe, shot detection, beat detection
-│   ├── style-worker/     # LUT extraction, transition typing, text OCR
-│   ├── reason-worker/    # Claude cut-list generation + clip ranking
-│   ├── render-worker/    # FFmpeg timeline compiler
-│   ├── upscale-worker/   # Real-ESRGAN / Topaz upscaling
-│   └── shared-py/        # Shared Python models & config
-├── infra/
-│   ├── docker/       # Dockerfiles & compose
-│   ├── modal/        # Modal.cloud GPU deployments
-│   └── temporal/     # Temporal workflow definitions
-└── services/orchestrator.py  # CLI pipeline runner
+│   ├── shared-types/  # Zod schemas, enums, errors, effects
+│   └── eslint-config
+├── services/          # Python workers (uv workspace)
+│   ├── render-worker/
+│   ├── ingest-worker/
+│   ├── style-worker/
+│   ├── reason-worker/
+│   └── shared-py/
+└── infra/             # Docker, Temporal, deploy configs
 ```
 
-## Tech Stack
+## Tech stack
 
 | Layer | Technology |
 |-------|-----------|
-| Reference Understanding | TransNet V2 + Gemini 2.5 Pro + Twelve Labs Marengo 3 |
-| Shot Classification | Gemini 2.5 Flash / Qwen2.5-VL |
-| Beat Detection | allin1 + librosa |
-| Color Grade | color-matcher + colour-science |
-| Text OCR | PaddleOCR + Gemini Pro |
-| Cut-List Reasoning | Claude Sonnet 4.6 (forced tool-use) |
-| Render | FFmpeg + PyAV |
-| Upscale | Real-ESRGAN (MVP) / Topaz Video AI (Pro) |
-| Orchestration | Temporal Cloud |
-| Storage | Cloudflare R2 + CDN |
-| Auth | Clerk |
-| DB | Neon Postgres + Qdrant |
+| Frontend | Next.js 15, React 19, Tailwind CSS, shadcn/ui, Clerk |
+| Backend | Fastify 4, Drizzle ORM, Postgres, Redis, MinIO |
+| Orchestration | Temporal |
+| AI | Claude 3.5 Sonnet, GPT-4o, Whisper |
+| Render | FFmpeg, PyAV |
+| Language | TypeScript 5.4, Python 3.11 |
+| Package manager | pnpm 9.15 |
 
-## Quick Start
+## In-app key entry
 
-### Prerequisites
+AI provider keys are stored per-user in the `provider_keys` table, encrypted at rest. The app falls back to env vars for admin/global keys. If a feature needs a missing key, the UI shows a "Connect [Provider]" CTA instead of crashing.
 
-- Node.js 20+
-- Python 3.11+
-- pnpm
-- uv
-- FFmpeg
-
-### Installation
+## Scripts
 
 ```bash
-# Install JS dependencies
-pnpm install
-
-# Install Python dependencies
-uv sync
-
-# Start local services
-docker-compose -f infra/docker/docker-compose.yml up -d
-
-# Run the API
-pnpm --filter @ai-video-editor/api dev
-
-# Run the web app
-pnpm --filter @ai-video-editor/web dev
+pnpm dev          # Start web + api + shared-types watch
+pnpm typecheck    # Type-check all packages
+pnpm test         # Run API tests
+pnpm test:coverage # Run API tests with coverage report
 ```
-
-### CLI Usage
-
-```bash
-# Run the full pipeline from command line
-uv run python services/orchestrator.py \
-  --reference ./reference.mp4 \
-  --song ./song.mp3 \
-  --clips ./clip1.mp4 ./clip2.mp4 ./clip3.mp4 \
-  --output ./final.mp4 \
-  --tier full_style \
-  --mode auto
-```
-
-### API Usage
-
-```bash
-# Create a project
-curl -X POST http://localhost:4000/api/projects \
-  -H "Content-Type: application/json" \
-  -d '{"name": "My Edit", "styleTier": "full_style", "mode": "auto"}'
-
-# Upload assets (get presigned URL)
-curl -X POST http://localhost:4000/api/uploads/presigned \
-  -H "Content-Type: application/json" \
-  -d '{"projectId": "...", "filename": "ref.mp4", "type": "reference_video"}'
-
-# Start render
-curl -X POST http://localhost:4000/api/renders \
-  -H "Content-Type: application/json" \
-  -d '{"projectId": "..."}'
-
-# Stream progress
-curl http://localhost:4000/api/progress/{jobId}/events
-```
-
-## Cost Model
-
-Per 60-second output (quality tier):
-
-| Component | Cost |
-|-----------|------|
-| TransNet V2 shot detection | ~$0.012 |
-| Gemini style analysis | ~$0.029 (first) / $0.003 (cached) |
-| Marengo 3 indexing | ~$0.168 |
-| Claude cut-list | ~$0.074 |
-| FFmpeg render | ~$0.005 |
-| R2 storage/egress | ~$0.008 |
-| **Total cold render** | **~$0.39** |
-| **Total warm render** | **~$0.36** |
-
-## Development Phases
-
-- **Phase 0 (Week 1)**: Scaffolding, auth, uploads, Temporal hello-world
-- **Phase 1 (Week 2)**: Basic render pipeline (hard-coded cut-list)
-- **Phase 2 (Week 3-4)**: Claude cut-list + clip ranking (demo ready)
-- **Phase 3 (Week 5)**: TransNet V2 + transitions
-- **Phase 4 (Week 6)**: Color grade (LUT) extraction
-- **Phase 5 (Week 7)**: Text overlay detection
-- **Phase 6 (Week 8-9)**: Assisted mode UI + proxy preview
-- **Phase 7 (Week 10-11)**: Effects + camera motion
-- **Phase 8 (Week 12+)**: Upscale + polish
 
 ## License
 
-[![License: ELv2](https://img.shields.io/badge/License-Elastic_v2-blue.svg)](https://www.elastic.co/licensing/elastic-license)
-
-This project is licensed under the [Elastic License 2.0](LICENSE). Source-available for personal and internal use. Commercial SaaS deployments require written permission.
+Elastic License 2.0. Commercial SaaS use requires written permission.

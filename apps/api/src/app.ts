@@ -9,17 +9,21 @@ import { projectRoutes } from "./routes/projects";
 import { uploadRoutes } from "./routes/uploads";
 import { renderRoutes } from "./routes/renders";
 import { progressRoutes } from "./routes/progress";
+import { templateRoutes } from "./routes/templates";
+import { presenceRoutes } from "./routes/presence";
+import { settingsRoutes } from "./routes/settings";
 import { healthRoutes } from "./routes/health";
 import { requireAuth } from "./middleware/auth";
 
 export async function buildApp() {
   const app = Fastify({
-    logger: false,
+    logger: { level: process.env.LOG_LEVEL || "info" },
     bodyLimit: 1024 * 1024 * 1024,
+    genReqId: () => `req_${crypto.randomUUID().slice(0, 8)}`,
   });
 
   app.setErrorHandler((error, request, reply) => {
-    app.log.error({ err: error, url: request.url }, "Request error");
+    request.log.error({ err: error, url: request.url }, "Request error");
 
     if (error.validation) {
       return reply.status(422).send({
@@ -54,6 +58,12 @@ export async function buildApp() {
     keyGenerator: (req) => req.userId ?? req.ip,
   });
 
+  // Propagate request ID via response header
+  app.addHook("onSend", async (request, reply, payload) => {
+    reply.header("x-request-id", request.id);
+    return payload;
+  });
+
   await app.register(healthRoutes, { prefix: "/api/health" });
 
   app.addHook("onRequest", async (request, reply) => {
@@ -67,6 +77,9 @@ export async function buildApp() {
   await app.register(uploadRoutes, { prefix: "/api/uploads" });
   await app.register(renderRoutes, { prefix: "/api/renders" });
   await app.register(progressRoutes, { prefix: "/api/progress" });
+  await app.register(templateRoutes, { prefix: "/api/templates" });
+  await app.register(presenceRoutes, { prefix: "/api/presence" });
+  await app.register(settingsRoutes, { prefix: "/api/settings" });
 
   return app;
 }

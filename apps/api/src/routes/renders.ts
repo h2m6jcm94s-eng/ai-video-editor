@@ -8,6 +8,14 @@ import { renders, projects } from "../db/schema";
 import { enqueueJob } from "../services/queue";
 import { startRenderWorkflow } from "../services/temporal";
 import { validateBody, createRenderSchema } from "../middleware/validate";
+import { z } from "zod";
+
+const completeRenderSchema = z.object({
+  status: z.enum(["complete", "failed"]),
+  outputAssetId: z.string().uuid().optional(),
+  previewAssetId: z.string().uuid().optional(),
+  errorMessage: z.string().max(2000).optional(),
+});
 
 export async function renderRoutes(app: FastifyInstance) {
   // Start render
@@ -139,5 +147,42 @@ export async function renderRoutes(app: FastifyInstance) {
       orderBy: [desc(renders.createdAt)],
     });
     return { jobs: projectRenders };
+  });
+
+  // Worker webhook: mark render complete/failed
+  app.post("/:jobId/complete", { preHandler: validateBody(completeRenderSchema) }, async (request, reply) => {
+    const { jobId } = request.params as { jobId: string };
+    const body = request.validatedBody as z.infer<typeof completeRenderSchema>;
+
+    const job = await db.query.renders.findFirst({ where: eq(renders.id, jobId) });
+    if (!job) {
+      return reply.status(404).send({ error: "Job not found", code: "NOT_FOUND" });
+    }
+
+    const [updated] = await db
+      .update(renders)
+      .set({
+        status: body.status,
+        outputAssetId: body.outputAssetId ?? null,
+        previewAssetId: body.previewAssetId ?? null,
+        errorMessage: body.errorMessage ?? null,
+        completedAt: new Date(),
+      })
+      .where(eq(renders.id, jobId))
+      .returning();
+
+    if (body.status === "complete") {
+      await db
+        .update(projects)
+        .set({ status: "complete", updatedAt: new Date(), renderAssetId: body.outputAssetId ?? null })
+        .where(eq(projects.id, job.projectId));
+    } else {
+      await db
+        .update(projects)
+        .set({ status: "failed", updatedAt: new Date() })
+        .where(eq(projects.id, job.projectId));
+    }
+
+    return { job: updated };
   });
 }

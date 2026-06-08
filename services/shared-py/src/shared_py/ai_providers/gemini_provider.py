@@ -23,7 +23,7 @@ class GeminiProvider(AIProvider):
 
     name = "gemini"
 
-    def __init__(self, api_key: str = None, model: str = "gemini-2.5-flash"):
+    def __init__(self, api_key: str = None, model: str = "gemini-2.5-flash-preview-05-20"):
         if genai is None:
             raise ImportError("google-generativeai not installed. Run: pip install google-generativeai")
         self.api_key = api_key or os.environ.get("GOOGLE_API_KEY", "")

@@ -176,6 +176,15 @@ reviews:
         - Adds a field not present in the backend schema
         - Renames fields (breaks JSON deserialization silently)
 
+    # ── Web: Editor Components ────────────────────────────────────────────────
+    - path: "apps/web/src/components/editor/**"
+      instructions: |
+        Da Vinci-style editor components. Flag:
+        - raw fetch() instead of api.* methods
+        - canvas operations without error handling
+        - timeline clip mutations outside useEditor reducer
+        - missing keyboard shortcut support on interactive elements
+
     # ── Web: Components & Pages ───────────────────────────────────────────────
     - path: "apps/web/src/**/*.tsx"
       instructions: |

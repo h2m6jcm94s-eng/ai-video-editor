@@ -81,7 +81,9 @@ jobs:
           version: ${{ env.UV_VERSION }}
       - run: uv sync --no-install-project --dev
       - run: uv run --no-project ruff check services/ || true
+        continue-on-error: true
       - run: uv run --no-project mypy services/ --ignore-missing-imports || true
+        continue-on-error: true
       - name: Run Python tests with coverage
         run: uv run --no-project pytest tests/ -v --tb=short --cov=services/shared-py/src --cov-report=xml:coverage-python.xml -m "not requires_anthropic and not requires_google and not requires_groq and not requires_openai and not requires_kimi and not requires_qwen and not requires_openrouter"
       - name: Upload Python coverage to Codecov
@@ -101,3 +103,20 @@ jobs:
       - name: Build Docker images
         run: |
           docker compose -f infra/docker/docker-compose.yml build
+
+  # Single gate that branch protection can require. Adding new test jobs is a one-line change.
+  ci-gate:
+    runs-on: ubuntu-latest
+    needs: [test-js, test-api, test-py, docker]
+    if: always()
+    steps:
+      - name: Require all required jobs to pass
+        run: |
+          results=("${{ needs.test-js.result }}" "${{ needs.test-api.result }}" "${{ needs.test-py.result }}" "${{ needs.docker.result }}")
+          for result in "${results[@]}"; do
+            if [[ "$result" != "success" ]]; then
+              echo "::error::Required job failed with result: $result"
+              exit 1
+            fi
+          done
+          echo "All required jobs passed."
