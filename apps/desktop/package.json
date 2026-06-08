@@ -1,0 +1,13 @@
+{
+  "name": "@ai-video-editor/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "echo 'Install Rust and run: cargo tauri dev'",
+    "build": "echo 'Install Rust and run: cargo tauri build'"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}

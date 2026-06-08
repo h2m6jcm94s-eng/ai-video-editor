@@ -47,13 +47,29 @@ export interface RenderJob {
   createdAt: string;
 }
 
+export interface SectionMarker {
+  name: string;
+  start_s: number;
+  end_s: number;
+}
+
+export interface PreviewEffects {
+  brightness: number; // 0-2, default 1
+  contrast: number; // 0-2, default 1
+  saturation: number; // 0-2, default 1
+  blur: number; // 0-10px, default 0
+  sepia: number; // 0-1, default 0
+  hueRotate: number; // 0-360, default 0
+}
+
 export interface CutListGlobals {
   total_duration_s: number;
   tempo_bpm: number;
   time_signature: string;
   energy_curve: number[];
-  section_markers: string[];
+  section_markers: SectionMarker[];
   aspect_ratio: string;
+  effects?: PreviewEffects;
 }
 
 export interface Slot {
@@ -88,10 +104,20 @@ export interface Overlay {
   style?: Record<string, unknown>;
 }
 
+export interface Subtitle {
+  id: string;
+  text: string;
+  start_s: number;
+  end_s: number;
+  speaker?: string;
+  confidence?: number;
+}
+
 export interface CutList {
   globals: CutListGlobals;
   slots: Slot[];
   overlays: Overlay[];
+  subtitles?: Subtitle[];
 }
 
 export interface BeatGrid {

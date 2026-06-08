@@ -21,6 +21,8 @@ interface TimelinePanelProps {
   onSelectSlot: (index: number | null) => void;
   onUpdateSlot: (index: number, slot: Partial<Slot>) => void;
   onReorderSlots: (slots: Slot[]) => void;
+  selectedSubtitleId?: string | null;
+  onSelectSubtitle?: (id: string | null) => void;
 }
 
 export function TimelinePanel({
@@ -37,6 +39,8 @@ export function TimelinePanel({
   onSelectSlot,
   onUpdateSlot,
   onReorderSlots,
+  selectedSubtitleId,
+  onSelectSubtitle,
 }: TimelinePanelProps) {
   const trackRef = useRef<HTMLDivElement>(null);
 
@@ -126,6 +130,8 @@ export function TimelinePanel({
           onSelectSlot={onSelectSlot}
           onUpdateSlot={onUpdateSlot}
           onReorderSlots={onReorderSlots}
+          selectedSubtitleId={selectedSubtitleId}
+          onSelectSubtitle={onSelectSubtitle}
         />
       </div>
     </div>

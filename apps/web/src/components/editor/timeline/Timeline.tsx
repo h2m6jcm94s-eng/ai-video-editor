@@ -5,7 +5,7 @@
 import { useMemo } from "react";
 import { TimelineClip } from "./TimelineClip";
 import { Playhead } from "./Playhead";
-import type { CutList, Slot } from "@/types/api";
+import type { CutList, Slot, Subtitle } from "@/types/api";
 
 const PIXELS_PER_SECOND = 50;
 
@@ -18,6 +18,8 @@ interface TimelineProps {
   onSelectSlot: (index: number | null) => void;
   onUpdateSlot: (index: number, slot: Partial<Slot>) => void;
   onReorderSlots: (slots: Slot[]) => void;
+  selectedSubtitleId?: string | null;
+  onSelectSubtitle?: (id: string | null) => void;
 }
 
 export function Timeline({
@@ -28,8 +30,11 @@ export function Timeline({
   selectedSlotIndex,
   onSelectSlot,
   onUpdateSlot,
+  selectedSubtitleId,
+  onSelectSubtitle,
 }: TimelineProps) {
   const slots = cutList?.slots || [];
+  const subtitles = cutList?.subtitles || [];
   const totalWidth = Math.max(duration * PIXELS_PER_SECOND * zoomLevel, 800);
 
   const timeMarkers = useMemo(() => {
@@ -54,6 +59,23 @@ export function Timeline({
               style={{ left: `${left}%`, transform: "translateX(-50%)" }}
             >
               <span className="text-[9px] text-zinc-500 mt-0.5">{formatTime(t)}</span>
+            </div>
+          );
+        })}
+        {/* Section markers */}
+        {(cutList?.globals?.section_markers || []).map((marker) => {
+          const left = (marker.start_s / duration) * 100;
+          const width = ((marker.end_s - marker.start_s) / duration) * 100;
+          return (
+            <div
+              key={marker.name}
+              className="absolute top-0 h-full bg-violet-900/20 border-l border-r border-violet-800/40"
+              style={{ left: `${left}%`, width: `${width}%` }}
+              title={`${marker.name}: ${formatTime(marker.start_s)} - ${formatTime(marker.end_s)}`}
+            >
+              <span className="absolute top-0 left-1 text-[8px] text-violet-400 truncate max-w-full px-0.5">
+                {marker.name}
+              </span>
             </div>
           );
         })}
@@ -116,6 +138,35 @@ export function Timeline({
               ))}
           </div>
         </div>
+
+        {/* Subtitle track */}
+        {subtitles.length > 0 && (
+          <div className="h-8 relative mt-1">
+            <div className="absolute left-0 top-0 h-full w-8 text-[9px] text-zinc-500 flex items-center pl-1 border-r border-zinc-800 bg-zinc-950/50">
+              S1
+            </div>
+            <div className="ml-8 h-full relative">
+              {subtitles.map((sub) => (
+                <div
+                  key={sub.id}
+                  onClick={() => onSelectSubtitle?.(sub.id)}
+                  className={`absolute top-1 h-6 rounded px-2 flex items-center text-[9px] truncate cursor-pointer transition-colors ${
+                    selectedSubtitleId === sub.id
+                      ? "bg-cyan-900/60 border border-cyan-400 text-cyan-200"
+                      : "bg-cyan-900/30 border border-cyan-800/50 text-cyan-200 hover:bg-cyan-900/50"
+                  }`}
+                  style={{
+                    left: `${(sub.start_s / duration) * 100}%`,
+                    width: `${Math.max(((sub.end_s - sub.start_s) / duration) * 100, 0.5)}%`,
+                  }}
+                  title={sub.text}
+                >
+                  {sub.text}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Playhead */}

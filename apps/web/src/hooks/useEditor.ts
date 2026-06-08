@@ -19,7 +19,7 @@ type EditorAction =
   | { type: "SET_CUTLIST"; payload: CutList }
   | { type: "UPDATE_SLOT"; index: number; slot: Partial<Slot> }
   | { type: "ADD_SLOT"; slot: Slot }
-  | { type: "REMOVE_SLOT"; index: number }
+  | { type: "REMOVE_SLOT"; index: number; ripple?: boolean }
   | { type: "REORDER_SLOTS"; slots: Slot[] }
   | { type: "ADD_OVERLAY"; overlay: Overlay }
   | { type: "UPDATE_OVERLAY"; id: string; overlay: Partial<Overlay> }
@@ -50,7 +50,16 @@ function editorReducer(state: EditorState, action: EditorAction): EditorState {
     }
     case "REMOVE_SLOT": {
       if (!state.cutList) return state;
+      const removed = state.cutList.slots[action.index];
       const slots = state.cutList.slots.filter((_, i) => i !== action.index);
+      if (action.ripple && removed) {
+        const removedEnd = removed.start_s + removed.duration_s;
+        for (let i = action.index; i < slots.length; i++) {
+          if (slots[i].start_s >= removedEnd) {
+            slots[i] = { ...slots[i], start_s: slots[i].start_s - removed.duration_s };
+          }
+        }
+      }
       return { ...state, cutList: { ...state.cutList, slots } };
     }
     case "REORDER_SLOTS": {
@@ -113,7 +122,7 @@ export function useEditor(initial: Partial<EditorState> = {}) {
   const setCutList = useCallback((cutList: CutList) => dispatch({ type: "SET_CUTLIST", payload: cutList }), []);
   const updateSlot = useCallback((index: number, slot: Partial<Slot>) => dispatch({ type: "UPDATE_SLOT", index, slot }), []);
   const addSlot = useCallback((slot: Slot) => dispatch({ type: "ADD_SLOT", slot }), []);
-  const removeSlot = useCallback((index: number) => dispatch({ type: "REMOVE_SLOT", index }), []);
+  const removeSlot = useCallback((index: number, ripple?: boolean) => dispatch({ type: "REMOVE_SLOT", index, ripple }), []);
   const reorderSlots = useCallback((slots: Slot[]) => dispatch({ type: "REORDER_SLOTS", slots }), []);
   const addOverlay = useCallback((overlay: Overlay) => dispatch({ type: "ADD_OVERLAY", overlay }), []);
   const updateOverlay = useCallback((id: string, overlay: Partial<Overlay>) => dispatch({ type: "UPDATE_OVERLAY", id, overlay }), []);

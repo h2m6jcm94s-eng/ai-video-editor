@@ -3,12 +3,13 @@
 "use client";
 
 import { useState } from "react";
-import { Send, X, Wand2 } from "lucide-react";
+import { Send, X, Wand2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { CutList } from "@/types/api";
 import { toast } from "sonner";
+import { api } from "@/lib/api";
 
 const PROMPT_PATTERNS = [
   { pattern: /cut on (every )?beat/i, action: "align_cuts_to_beats", label: "Align cuts to beats" },
@@ -22,40 +23,37 @@ interface PromptPanelProps {
   projectId: string;
   cutList: CutList | null;
   onUpdateCutlist: (cutList: CutList) => void;
+  onUndo?: () => void;
   onClose: () => void;
 }
 
-export function PromptPanel({ cutList, onUpdateCutlist, onClose }: PromptPanelProps) {
+export function PromptPanel({ projectId, cutList, onUpdateCutlist, onUndo, onClose }: PromptPanelProps) {
   const [prompt, setPrompt] = useState("");
-  const [history, setHistory] = useState<{ prompt: string; response: string }[]>([]);
+  const [history, setHistory] = useState<{ prompt: string; response: string; error?: boolean }[]>([]);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
     if (!prompt.trim() || !cutList) return;
     setLoading(true);
 
-    // Client-side pattern matching for optimistic updates only
-    const matched = PROMPT_PATTERNS.find((p) => p.pattern.test(prompt));
-    if (matched) {
-      const updated = structuredClone ? structuredClone(cutList) : JSON.parse(JSON.stringify(cutList));
-      if (matched.action === "add_fade") {
-        updated.slots = updated.slots.map((s: CutList["slots"][number], i: number) =>
-          i === 0 ? { ...s, transition_in: "fade" } : s
-        );
-      } else if (matched.action === "apply_lut") {
-        updated.globals = { ...updated.globals, lut_applied: true };
+    try {
+      const result = await api.projects.prompt(projectId, prompt.trim());
+      if (result.project.cutList) {
+        onUpdateCutlist(result.project.cutList as CutList);
       }
-      onUpdateCutlist(updated);
-      setHistory((h) => [...h, { prompt, response: `Applied: ${matched.label}` }]);
-      setPrompt("");
+      setHistory((h) => [
+        ...h,
+        { prompt, response: result.explanation || "Changes applied successfully." },
+      ]);
+      toast.success("AI edit applied");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "AI edit failed";
+      setHistory((h) => [...h, { prompt, response: message, error: true }]);
+      toast.error(message);
+    } finally {
       setLoading(false);
-      return;
+      setPrompt("");
     }
-
-    // No backend endpoint yet — show "not yet supported" instead of 404
-    setHistory((h) => [...h, { prompt, response: "This command is not yet supported. Try: cut on beat, fade in, apply LUT." }]);
-    setLoading(false);
-    setPrompt("");
   };
 
   return (
@@ -65,9 +63,16 @@ export function PromptPanel({ cutList, onUpdateCutlist, onClose }: PromptPanelPr
           <Wand2 className="w-3 h-3" />
           AI Prompt
         </div>
-        <button onClick={onClose} className="p-1 hover:bg-zinc-800 rounded" aria-label="Close">
-          <X className="w-3 h-3" />
-        </button>
+        <div className="flex items-center gap-1">
+          {onUndo && (
+            <button onClick={onUndo} className="p-1 hover:bg-zinc-800 rounded" aria-label="Undo last edit" title="Undo">
+              <Undo2 className="w-3 h-3" />
+            </button>
+          )}
+          <button onClick={onClose} className="p-1 hover:bg-zinc-800 rounded" aria-label="Close">
+            <X className="w-3 h-3" />
+          </button>
+        </div>
       </div>
 
       <ScrollArea className="flex-1 p-3">
@@ -80,7 +85,7 @@ export function PromptPanel({ cutList, onUpdateCutlist, onClose }: PromptPanelPr
           {history.map((h, i) => (
             <div key={i} className="space-y-1">
               <div className="bg-zinc-800 rounded-lg px-3 py-2 text-xs">{h.prompt}</div>
-              <div className="text-[11px] text-zinc-400 px-1">{h.response}</div>
+              <div className={`text-[11px] px-1 ${h.error ? "text-red-400" : "text-zinc-400"}`}>{h.response}</div>
             </div>
           ))}
         </div>

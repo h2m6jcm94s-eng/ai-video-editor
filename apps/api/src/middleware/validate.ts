@@ -71,6 +71,18 @@ export const updateCutlistSchema = z.object({
   }),
 });
 
+export const promptEditSchema = z.object({
+  prompt: z.string().min(1).max(2000),
+});
+
+export const createTemplateSchema = z.object({
+  name: z.string().min(1).max(255),
+  description: z.string().optional(),
+  cutList: z.record(z.unknown()),
+  tags: z.array(z.string()).optional(),
+  isPublic: z.boolean().optional(),
+});
+
 export function validateBody<T>(schema: z.ZodSchema<T>) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
     const result = schema.safeParse(request.body);
