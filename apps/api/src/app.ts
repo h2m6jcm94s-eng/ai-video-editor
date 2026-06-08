@@ -11,6 +11,7 @@ import { renderRoutes } from "./routes/renders";
 import { progressRoutes } from "./routes/progress";
 import { templateRoutes } from "./routes/templates";
 import { presenceRoutes } from "./routes/presence";
+import { settingsRoutes } from "./routes/settings";
 import { healthRoutes } from "./routes/health";
 import { requireAuth } from "./middleware/auth";
 
@@ -71,6 +72,7 @@ export async function buildApp() {
   await app.register(progressRoutes, { prefix: "/api/progress" });
   await app.register(templateRoutes, { prefix: "/api/templates" });
   await app.register(presenceRoutes, { prefix: "/api/presence" });
+  await app.register(settingsRoutes, { prefix: "/api/settings" });
 
   return app;
 }

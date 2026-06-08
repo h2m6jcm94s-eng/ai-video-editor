@@ -4,6 +4,9 @@ export const dynamic = "force-dynamic";
 
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import Link from "next/link";
+import { Settings } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { ProjectList } from "@/components/dashboard/ProjectList";
 import { CreateProjectDialog } from "@/components/dashboard/CreateProjectDialog";
 import { apiServer } from "@/lib/api/server";
@@ -26,6 +29,12 @@ export default async function DashboardPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
           <h1 className="text-lg font-semibold tracking-tight">AI Video Editor</h1>
           <div className="flex items-center gap-4">
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/settings">
+                <Settings className="h-4 w-4 mr-1.5" />
+                Settings
+              </Link>
+            </Button>
             <CreateProjectDialog />
           </div>
         </div>

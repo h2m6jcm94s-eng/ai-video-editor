@@ -120,6 +120,18 @@ export function createAPI(getToken: TokenGetter) {
         return new EventSource(`${API_BASE}/progress/${jobId}/events`);
       },
     },
+    settings: {
+      providerKeys: {
+        list: (): Promise<{ keys: Array<{ provider: string; masked: string; createdAt: string }> }> =>
+          fetchJSON("/settings/provider-keys"),
+        save: (data: { provider: string; key: string }): Promise<{ success: boolean }> =>
+          fetchJSON("/settings/provider-keys", { method: "POST", body: JSON.stringify(data) }),
+        remove: (provider: string): Promise<{ success: boolean }> =>
+          fetchJSON(`/settings/provider-keys/${provider}`, { method: "DELETE" }),
+        test: (provider: string): Promise<{ success: boolean }> =>
+          fetchJSON("/settings/provider-keys/test", { method: "POST", body: JSON.stringify({ provider }) }),
+      },
+    },
   };
 }
 

@@ -12,6 +12,7 @@ import {
   boolean,
   real,
   index,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
@@ -115,6 +116,22 @@ export const templates = pgTable(
   })
 );
 
+export const providerKeys = pgTable(
+  "provider_keys",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: varchar("provider", { length: 50 }).notNull(),
+    encryptedKey: text("encrypted_key").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.provider] }),
+  })
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Project = typeof projects.$inferSelect;
@@ -125,3 +142,5 @@ export type Render = typeof renders.$inferSelect;
 export type NewRender = typeof renders.$inferInsert;
 export type Template = typeof templates.$inferSelect;
 export type NewTemplate = typeof templates.$inferInsert;
+export type ProviderKey = typeof providerKeys.$inferSelect;
+export type NewProviderKey = typeof providerKeys.$inferInsert;
