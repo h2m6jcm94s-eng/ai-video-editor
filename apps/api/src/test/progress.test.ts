@@ -39,10 +39,9 @@ describe("Progress Routes", () => {
   });
 
   it("GET /api/progress/:jobId/events returns 403 for other user's job", async () => {
-    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(mockRender as any);
-    vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce({
-      ...mockProject,
-      userId: "other-user-id",
+    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce({
+      ...mockRender,
+      project: { ...mockProject, userId: "other-user-id" },
     } as any);
 
     const app = await buildApp();

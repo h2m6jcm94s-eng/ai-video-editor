@@ -126,8 +126,7 @@ describe("Render Routes", () => {
   });
 
   it("GET /api/renders/:jobId returns render job", async () => {
-    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(mockRender as any);
-    vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(mockProject as any);
+    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce({ ...mockRender, project: mockProject } as any);
 
     const app = await buildApp();
     const res = await app.inject({ method: "GET", url: `/api/renders/${RENDER_ID}` });

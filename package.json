@@ -19,11 +19,5 @@
   "packageManager": "pnpm@9.15.9",
   "engines": {
     "node": ">=20"
-  },
-  "lint-staged": {
-    "*.{ts,tsx}": [
-      "pnpm --filter @ai-video-editor/shared-types build",
-      "pnpm typecheck"
-    ]
   }
 }

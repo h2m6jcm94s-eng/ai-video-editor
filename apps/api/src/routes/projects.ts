@@ -54,6 +54,7 @@ export async function projectRoutes(app: FastifyInstance) {
     const userId = request.userId;
     const project = await db.query.projects.findFirst({
       where: eq(projects.id, id),
+      with: { assets: true },
     });
     if (!project) {
       return reply.status(404).send({ error: "Not found", code: "NOT_FOUND" });
@@ -61,11 +62,7 @@ export async function projectRoutes(app: FastifyInstance) {
     if (project.userId !== userId) {
       return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
     }
-    const fullProject = await db.query.projects.findFirst({
-      where: eq(projects.id, id),
-      with: { assets: true },
-    });
-    return { project: fullProject };
+    return { project };
   });
 
   // Update project

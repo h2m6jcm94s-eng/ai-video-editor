@@ -144,16 +144,14 @@ export async function renderRoutes(app: FastifyInstance) {
 
     const job = await db.query.renders.findFirst({
       where: eq(renders.id, jobId),
+      with: { project: true },
     });
 
     if (!job) {
       return reply.status(404).send({ error: "Job not found", code: "NOT_FOUND" });
     }
 
-    const project = await db.query.projects.findFirst({
-      where: eq(projects.id, job.projectId),
-    });
-    if (!project || project.userId !== userId) {
+    if (!job.project || job.project.userId !== userId) {
       return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
     }
 
