@@ -3,7 +3,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { api } from "@/lib/api";
+import { useApi } from "@/lib/api/client";
 import type { Asset } from "@/types/api";
 
 interface UploadState {
@@ -13,6 +13,7 @@ interface UploadState {
 }
 
 export function useUpload(projectId: string) {
+  const api = useApi();
   const [state, setState] = useState<UploadState>({
     uploading: false,
     progress: 0,
@@ -59,7 +60,7 @@ export function useUpload(projectId: string) {
         return null;
       }
     },
-    [projectId]
+    [projectId, api]
   );
 
   return { ...state, uploadFile };

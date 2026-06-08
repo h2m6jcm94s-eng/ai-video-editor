@@ -5,7 +5,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
-import { api } from "@/lib/api";
+import { useApi } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +21,7 @@ import { toast } from "sonner";
 export default function NewProjectPage() {
   const router = useRouter();
   const { isLoaded, isSignedIn } = useAuth();
+  const api = useApi();
   const [name, setName] = useState("");
   const [styleTier, setStyleTier] = useState<"full_style" | "style_transfer" | "no_style">("full_style");
   const [mode, setMode] = useState<"auto" | "assisted">("auto");

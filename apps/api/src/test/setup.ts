@@ -8,6 +8,31 @@ vi.mock("@clerk/fastify", () => ({
       toAuth: () => ({ userId: "test-user-id", sessionId: "test-session" }),
     })),
   }),
+  clerkClient: {
+    users: {
+      getUser: vi.fn(async (userId: string) => ({
+        id: userId,
+        emailAddresses: [{ emailAddress: "test@test.com" }],
+        fullName: "Test User",
+      })),
+    },
+  },
+}));
+
+// Mock user sync so auth middleware resolves to a local UUID without hitting DB
+vi.mock("../services/users", () => ({
+  getUserByClerkId: vi.fn(async () => ({
+    id: "test-user-id",
+    clerkId: "test-user-id",
+    email: "test@test.com",
+    name: "Test User",
+  })),
+  upsertUser: vi.fn(async (clerkId: string, email: string, name: string) => ({
+    id: clerkId,
+    clerkId,
+    email,
+    name,
+  })),
 }));
 
 // Mock DB

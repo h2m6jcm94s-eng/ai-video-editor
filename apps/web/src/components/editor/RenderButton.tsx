@@ -5,7 +5,8 @@
 import { useState } from "react";
 import { Film } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { api } from "@/lib/api";
+import { useApi } from "@/lib/api/client";
+import { APIError } from "@/lib/api/error";
 import { toast } from "sonner";
 
 export function RenderButton({
@@ -16,6 +17,7 @@ export function RenderButton({
   onJobStart?: (jobId: string) => void;
 }) {
   const [loading, setLoading] = useState(false);
+  const api = useApi();
 
   const handleRender = async () => {
     setLoading(true);
@@ -24,7 +26,7 @@ export function RenderButton({
       toast.success("Render started", { description: `Job ID: ${res.job.id}` });
       onJobStart?.(res.job.id);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Render failed";
+      const message = err instanceof APIError ? err.userMessage : "Render failed";
       toast.error(message);
     } finally {
       setLoading(false);

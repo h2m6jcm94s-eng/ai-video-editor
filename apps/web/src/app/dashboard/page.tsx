@@ -6,15 +6,15 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { ProjectList } from "@/components/dashboard/ProjectList";
 import { CreateProjectDialog } from "@/components/dashboard/CreateProjectDialog";
-import { api } from "@/lib/api";
+import { apiServer } from "@/lib/api/server";
 
 export default async function DashboardPage() {
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
 
-  let projects: Awaited<ReturnType<typeof api.projects.list>>["projects"] = [];
+  let projects: Awaited<ReturnType<typeof apiServer.projects.list>>["projects"] = [];
   try {
-    const res = await api.projects.list();
+    const res = await apiServer.projects.list();
     projects = res.projects;
   } catch {
     // Silent fail — empty state handles it

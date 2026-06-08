@@ -3,7 +3,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { useApi } from "@/lib/api/client";
 
 interface CursorUser {
   userId: string;
@@ -23,6 +23,7 @@ export function PresenceCursors({ projectId, userName }: PresenceCursorsProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const lastReportRef = useRef(0);
   const mousePosRef = useRef({ x: 0, y: 0 });
+  const api = useApi();
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -41,7 +42,7 @@ export function PresenceCursors({ projectId, userName }: PresenceCursorsProps) {
 
     window.addEventListener("mousemove", handleMouseMove);
     return () => window.removeEventListener("mousemove", handleMouseMove);
-  }, [projectId, userName]);
+  }, [projectId, userName, api]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -50,7 +51,7 @@ export function PresenceCursors({ projectId, userName }: PresenceCursorsProps) {
         .catch(() => {});
     }, 1000);
     return () => clearInterval(interval);
-  }, [projectId]);
+  }, [projectId, api]);
 
   if (users.length === 0) return null;
 

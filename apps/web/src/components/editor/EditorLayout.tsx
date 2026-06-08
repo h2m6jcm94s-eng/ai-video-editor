@@ -16,7 +16,8 @@ import { ProgressBar } from "./ProgressBar";
 import { PresenceCursors } from "./PresenceCursors";
 import { useEditor } from "@/hooks/useEditor";
 import { useTimeline } from "@/hooks/useTimeline";
-import { api } from "@/lib/api";
+import { useApi } from "@/lib/api/client";
+import { APIError } from "@/lib/api/error";
 import { toast } from "sonner";
 import type { Project, Asset, CutList } from "@/types/api";
 
@@ -38,6 +39,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
   const [showSubtitles, setShowSubtitles] = useState(true);
   const [selectedSubtitleId, setSelectedSubtitleId] = useState<string | null>(null);
   const [transcribing, setTranscribing] = useState(false);
+  const api = useApi();
 
   const aspectRatio = state.cutList?.globals?.aspect_ratio || "9:16";
   const setAspectRatio = (ratio: string) => {

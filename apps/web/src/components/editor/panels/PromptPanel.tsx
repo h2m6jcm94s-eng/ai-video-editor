@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { CutList } from "@/types/api";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
+import { useApi } from "@/lib/api/client";
+import { APIError } from "@/lib/api/error";
 
 const PROMPT_PATTERNS = [
   { pattern: /cut on (every )?beat/i, action: "align_cuts_to_beats", label: "Align cuts to beats" },
@@ -31,6 +32,7 @@ export function PromptPanel({ projectId, cutList, onUpdateCutlist, onUndo, onClo
   const [prompt, setPrompt] = useState("");
   const [history, setHistory] = useState<{ prompt: string; response: string; error?: boolean }[]>([]);
   const [loading, setLoading] = useState(false);
+  const api = useApi();
 
   const handleSubmit = async () => {
     if (!prompt.trim() || !cutList) return;

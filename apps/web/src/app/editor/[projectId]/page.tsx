@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { auth } from "@clerk/nextjs/server";
 import { redirect, notFound } from "next/navigation";
-import { api } from "@/lib/api";
+import { apiServer } from "@/lib/api/server";
 import { EditorLayout } from "@/components/editor/EditorLayout";
 import { EditorErrorBoundary } from "@/components/editor/ErrorBoundary";
 
@@ -18,10 +18,10 @@ export default async function EditorPage({ params }: EditorPageProps) {
 
   const { projectId } = await params;
 
-  let project: Awaited<ReturnType<typeof api.projects.get>>["project"] | null = null;
-  let assets: Awaited<ReturnType<typeof api.projects.get>>["project"]["assets"] = [];
+  let project: Awaited<ReturnType<typeof apiServer.projects.get>>["project"] | null = null;
+  let assets: Awaited<ReturnType<typeof apiServer.projects.get>>["project"]["assets"] = [];
   try {
-    const res = await api.projects.get(projectId);
+    const res = await apiServer.projects.get(projectId);
     project = res.project;
     assets = res.project.assets;
   } catch {

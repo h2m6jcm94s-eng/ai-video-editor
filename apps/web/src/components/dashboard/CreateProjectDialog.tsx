@@ -23,11 +23,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api } from "@/lib/api";
+import { useApi } from "@/lib/api/client";
+import { APIError } from "@/lib/api/error";
 import { toast } from "sonner";
 
 export function CreateProjectDialog() {
   const router = useRouter();
+  const api = useApi();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [styleTier, setStyleTier] = useState<"full_style" | "style_transfer" | "no_style">("full_style");
@@ -45,7 +47,7 @@ export function CreateProjectDialog() {
       setOpen(false);
       router.push(`/editor/${res.project.id}`);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to create project";
+      const message = err instanceof APIError ? err.userMessage : "Failed to create project";
       toast.error(message);
     } finally {
       setLoading(false);
