@@ -2,9 +2,12 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { createProjectSchema, STYLE_TIER, EDIT_MODE } from "@ai-video-editor/shared-types";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,35 +30,58 @@ import { useApi } from "@/lib/api/client";
 import { APIError } from "@/lib/api/error";
 import { toast } from "sonner";
 
+type FormData = z.infer<typeof createProjectSchema>;
+
+const STYLE_LABELS: Record<(typeof STYLE_TIER)[number], string> = {
+  cuts_only: "Cuts Only (beat sync, no effects)",
+  color_grade: "+ Color Grade (LUT matching)",
+  with_text: "+ Text Overlays (kinetic typography)",
+  with_effects: "+ Effects (transitions, zooms, SFX)",
+  full_remix: "Full Remix (everything + manual layers)",
+};
+
+const MODE_LABELS: Record<(typeof EDIT_MODE)[number], string> = {
+  auto: "Auto (AI generates full edit)",
+  assisted: "Assisted (you approve the cutlist)",
+};
+
 export function CreateProjectDialog() {
   const router = useRouter();
   const api = useApi();
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [styleTier, setStyleTier] = useState<"full_style" | "style_transfer" | "no_style">("full_style");
-  const [mode, setMode] = useState<"auto" | "assisted">("auto");
-  const [loading, setLoading] = useState(false);
 
-  const handleCreate = async () => {
-    if (!name.trim()) {
-      toast.error("Project name is required");
-      return;
-    }
-    setLoading(true);
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    watch,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm<FormData>({
+    resolver: zodResolver(createProjectSchema),
+    defaultValues: {
+      name: "",
+      styleTier: "with_effects",
+      mode: "auto",
+    },
+    mode: "onChange",
+  });
+
+  const styleTier = watch("styleTier");
+  const mode = watch("mode");
+
+  const onSubmit = async (data: FormData) => {
     try {
-      const res = await api.projects.create({ name, styleTier, mode });
-      setOpen(false);
+      const res = await api.projects.create(data);
+      reset();
       router.push(`/editor/${res.project.id}`);
     } catch (err: unknown) {
       const message = err instanceof APIError ? err.userMessage : "Failed to create project";
       toast.error(message);
-    } finally {
-      setLoading(false);
     }
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog>
       <DialogTrigger asChild>
         <Button size="sm" className="gap-2">
           <Plus className="w-4 h-4" />
@@ -69,51 +95,75 @@ export function CreateProjectDialog() {
             Start a new AI-powered video editing session.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 py-4">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-4">
           <div className="space-y-2">
             <Label htmlFor="project-name">Project Name</Label>
             <Input
               id="project-name"
               placeholder="My Awesome Edit"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
               className="bg-zinc-950 border-zinc-800"
+              {...register("name")}
             />
+            {errors.name && (
+              <p className="text-xs text-red-400">{errors.name.message}</p>
+            )}
           </div>
+
           <div className="space-y-2">
             <Label>Style Tier</Label>
-            <Select value={styleTier} onValueChange={(v) => setStyleTier(v as typeof styleTier)}>
+            <Select
+              value={styleTier}
+              onValueChange={(v) => setValue("styleTier", v as FormData["styleTier"])}
+            >
               <SelectTrigger className="bg-zinc-950 border-zinc-800">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="full_style">Full Style</SelectItem>
-                <SelectItem value="style_transfer">Style Transfer Only</SelectItem>
-                <SelectItem value="no_style">No Style</SelectItem>
+                {STYLE_TIER.map((tier) => (
+                  <SelectItem key={tier} value={tier}>
+                    {STYLE_LABELS[tier]}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
+            {errors.styleTier && (
+              <p className="text-xs text-red-400">{errors.styleTier.message}</p>
+            )}
           </div>
+
           <div className="space-y-2">
             <Label>Edit Mode</Label>
-            <Select value={mode} onValueChange={(v) => setMode(v as typeof mode)}>
+            <Select
+              value={mode}
+              onValueChange={(v) => setValue("mode", v as FormData["mode"])}
+            >
               <SelectTrigger className="bg-zinc-950 border-zinc-800">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="auto">Auto</SelectItem>
-                <SelectItem value="assisted">Assisted</SelectItem>
+                {EDIT_MODE.map((m) => (
+                  <SelectItem key={m} value={m}>
+                    {MODE_LABELS[m]}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
+            {errors.mode && (
+              <p className="text-xs text-red-400">{errors.mode.message}</p>
+            )}
           </div>
-        </div>
-        <div className="flex justify-end gap-3">
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={loading}>
-            Cancel
-          </Button>
-          <Button onClick={handleCreate} disabled={loading}>
-            {loading ? "Creating..." : "Create"}
-          </Button>
-        </div>
+
+          <div className="flex justify-end gap-3">
+            <DialogTrigger asChild>
+              <Button type="button" variant="outline" disabled={isSubmitting}>
+                Cancel
+              </Button>
+            </DialogTrigger>
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? "Creating..." : "Create"}
+            </Button>
+          </div>
+        </form>
       </DialogContent>
     </Dialog>
   );
