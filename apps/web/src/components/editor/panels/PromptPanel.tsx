@@ -7,7 +7,6 @@ import { Send, X, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { api } from "@/lib/api";
 import type { CutList } from "@/types/api";
 import { toast } from "sonner";
 
@@ -26,7 +25,7 @@ interface PromptPanelProps {
   onClose: () => void;
 }
 
-export function PromptPanel({ projectId, cutList, onUpdateCutlist, onClose }: PromptPanelProps) {
+export function PromptPanel({ cutList, onUpdateCutlist, onClose }: PromptPanelProps) {
   const [prompt, setPrompt] = useState("");
   const [history, setHistory] = useState<{ prompt: string; response: string }[]>([]);
   const [loading, setLoading] = useState(false);
@@ -35,15 +34,16 @@ export function PromptPanel({ projectId, cutList, onUpdateCutlist, onClose }: Pr
     if (!prompt.trim() || !cutList) return;
     setLoading(true);
 
-    // Client-side pattern matching for optimistic updates
+    // Client-side pattern matching for optimistic updates only
     const matched = PROMPT_PATTERNS.find((p) => p.pattern.test(prompt));
     if (matched) {
-      // Optimistic update based on action
-      const updated = { ...cutList };
+      const updated = structuredClone ? structuredClone(cutList) : JSON.parse(JSON.stringify(cutList));
       if (matched.action === "add_fade") {
-        updated.slots = updated.slots.map((s, i) =>
+        updated.slots = updated.slots.map((s: CutList["slots"][number], i: number) =>
           i === 0 ? { ...s, transition_in: "fade" } : s
         );
+      } else if (matched.action === "apply_lut") {
+        updated.globals = { ...updated.globals, lut_applied: true };
       }
       onUpdateCutlist(updated);
       setHistory((h) => [...h, { prompt, response: `Applied: ${matched.label}` }]);
@@ -52,26 +52,10 @@ export function PromptPanel({ projectId, cutList, onUpdateCutlist, onClose }: Pr
       return;
     }
 
-    // Send to backend
-    try {
-      const res = await fetch(`/api/projects/${projectId}/prompt`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, context: { cutList } }),
-      });
-      const data = await res.json();
-      if (data.diff) {
-        // Apply diff (simplified: replace cutList for now)
-        onUpdateCutlist(data.diff);
-      }
-      setHistory((h) => [...h, { prompt, response: data.explanation || "Done" }]);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "AI request failed";
-      toast.error(message);
-    } finally {
-      setLoading(false);
-      setPrompt("");
-    }
+    // No backend endpoint yet — show "not yet supported" instead of 404
+    setHistory((h) => [...h, { prompt, response: "This command is not yet supported. Try: cut on beat, fade in, apply LUT." }]);
+    setLoading(false);
+    setPrompt("");
   };
 
   return (
@@ -109,6 +93,7 @@ export function PromptPanel({ projectId, cutList, onUpdateCutlist, onClose }: Pr
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
           className="bg-zinc-950 border-zinc-800 h-8 text-xs"
+          disabled={loading}
         />
         <Button size="sm" className="h-8 px-3" onClick={handleSubmit} disabled={loading}>
           <Send className="w-3 h-3" />

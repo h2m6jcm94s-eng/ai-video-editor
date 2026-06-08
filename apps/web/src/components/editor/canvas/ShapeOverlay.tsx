@@ -2,13 +2,14 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
+import React from "react";
 import type { Overlay } from "@/types/api";
 
 interface ShapeOverlayProps {
   overlay: Overlay;
 }
 
-export function ShapeOverlay({ overlay }: ShapeOverlayProps) {
+export const ShapeOverlay = React.memo(function ShapeOverlay({ overlay }: ShapeOverlayProps) {
   const shapeType = (overlay.style?.shape as string) || "rectangle";
   const color = (overlay.style?.color as string) || "rgba(255,255,255,0.3)";
 
@@ -61,4 +62,4 @@ export function ShapeOverlay({ overlay }: ShapeOverlayProps) {
   }
 
   return <div className="absolute rounded" style={baseStyle} />;
-}
+});

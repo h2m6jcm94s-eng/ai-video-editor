@@ -16,6 +16,7 @@ import type { Slot, Overlay } from "@/types/api";
 
 interface InspectorPanelProps {
   selectedSlot: Slot | null;
+  selectedSlotIndex: number | null;
   selectedOverlayId: string | null;
   overlays: Overlay[];
   onUpdateSlot: (index: number, slot: Partial<Slot>) => void;
@@ -25,6 +26,7 @@ interface InspectorPanelProps {
 
 export function InspectorPanel({
   selectedSlot,
+  selectedSlotIndex,
   selectedOverlayId,
   overlays,
   onUpdateSlot,
@@ -39,16 +41,16 @@ export function InspectorPanel({
         Inspector
       </div>
       <ScrollArea className="flex-1 p-3">
-        {selectedSlot && (
+        {selectedSlot && selectedSlotIndex !== null && (
           <div className="space-y-4">
-            <h3 className="text-sm font-medium">Slot {selectedSlot.index}</h3>
+            <h3 className="text-sm font-medium">Slot {selectedSlotIndex}</h3>
             <div className="space-y-2">
               <Label className="text-xs">Start (s)</Label>
               <Input
                 type="number"
                 step={0.1}
                 value={selectedSlot.start_s}
-                onChange={(e) => onUpdateSlot(selectedSlot.index, { start_s: parseFloat(e.target.value) })}
+                onChange={(e) => onUpdateSlot(selectedSlotIndex, { start_s: parseFloat(e.target.value) })}
                 className="bg-zinc-900 border-zinc-800 h-8 text-xs"
               />
             </div>
@@ -58,7 +60,7 @@ export function InspectorPanel({
                 type="number"
                 step={0.1}
                 value={selectedSlot.duration_s}
-                onChange={(e) => onUpdateSlot(selectedSlot.index, { duration_s: parseFloat(e.target.value) })}
+                onChange={(e) => onUpdateSlot(selectedSlotIndex, { duration_s: parseFloat(e.target.value) })}
                 className="bg-zinc-900 border-zinc-800 h-8 text-xs"
               />
             </div>
@@ -66,7 +68,7 @@ export function InspectorPanel({
               <Label className="text-xs">Transition In</Label>
               <Select
                 value={selectedSlot.transition_in}
-                onValueChange={(v) => onUpdateSlot(selectedSlot.index, { transition_in: v })}
+                onValueChange={(v) => onUpdateSlot(selectedSlotIndex, { transition_in: v })}
               >
                 <SelectTrigger className="bg-zinc-900 border-zinc-800 h-8 text-xs">
                   <SelectValue />
@@ -84,7 +86,7 @@ export function InspectorPanel({
               <Label className="text-xs">Transition Out</Label>
               <Select
                 value={selectedSlot.transition_out}
-                onValueChange={(v) => onUpdateSlot(selectedSlot.index, { transition_out: v })}
+                onValueChange={(v) => onUpdateSlot(selectedSlotIndex, { transition_out: v })}
               >
                 <SelectTrigger className="bg-zinc-900 border-zinc-800 h-8 text-xs">
                   <SelectValue />
@@ -102,7 +104,7 @@ export function InspectorPanel({
               <Label className="text-xs">Shot Type</Label>
               <Input
                 value={selectedSlot.target_shot_type}
-                onChange={(e) => onUpdateSlot(selectedSlot.index, { target_shot_type: e.target.value })}
+                onChange={(e) => onUpdateSlot(selectedSlotIndex, { target_shot_type: e.target.value })}
                 className="bg-zinc-900 border-zinc-800 h-8 text-xs"
               />
             </div>

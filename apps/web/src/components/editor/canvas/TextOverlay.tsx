@@ -2,13 +2,14 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
+import React from "react";
 import type { Overlay } from "@/types/api";
 
 interface TextOverlayProps {
   overlay: Overlay;
 }
 
-export function TextOverlay({ overlay }: TextOverlayProps) {
+export const TextOverlay = React.memo(function TextOverlay({ overlay }: TextOverlayProps) {
   return (
     <div
       className="absolute flex items-center justify-center text-center drop-shadow-md"
@@ -27,4 +28,4 @@ export function TextOverlay({ overlay }: TextOverlayProps) {
       {overlay.text}
     </div>
   );
-}
+});

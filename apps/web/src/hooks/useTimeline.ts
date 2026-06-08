@@ -34,7 +34,8 @@ export function useTimeline(initialDuration = 30) {
   }, []);
 
   const seek = useCallback((time: number) => {
-    setCurrentTime(Math.max(0, Math.min(time, duration)));
+    const dur = duration || 1; // guard against 0
+    setCurrentTime(Math.max(0, Math.min(time, dur)));
   }, [duration]);
 
   const zoomIn = useCallback(() => setZoomLevel((z) => Math.min(z * 1.2, 10)), []);
@@ -51,9 +52,10 @@ export function useTimeline(initialDuration = 30) {
       lastTimeRef.current = now;
       setCurrentTime((prev) => {
         const next = prev + delta;
-        if (next >= duration) {
+        const dur = duration || 1;
+        if (next >= dur) {
           setIsPlaying(false);
-          return duration;
+          return dur;
         }
         return next;
       });

@@ -8,7 +8,13 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 
-export function RenderButton({ projectId }: { projectId: string }) {
+export function RenderButton({
+  projectId,
+  onJobStart,
+}: {
+  projectId: string;
+  onJobStart?: (jobId: string) => void;
+}) {
   const [loading, setLoading] = useState(false);
 
   const handleRender = async () => {
@@ -16,6 +22,7 @@ export function RenderButton({ projectId }: { projectId: string }) {
     try {
       const res = await api.renders.start(projectId);
       toast.success("Render started", { description: `Job ID: ${res.job.id}` });
+      onJobStart?.(res.job.id);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Render failed";
       toast.error(message);

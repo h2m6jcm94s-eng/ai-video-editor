@@ -6,6 +6,7 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect, notFound } from "next/navigation";
 import { api } from "@/lib/api";
 import { EditorLayout } from "@/components/editor/EditorLayout";
+import { EditorErrorBoundary } from "@/components/editor/ErrorBoundary";
 
 interface EditorPageProps {
   params: Promise<{ projectId: string }>;
@@ -29,5 +30,9 @@ export default async function EditorPage({ params }: EditorPageProps) {
 
   if (!project) notFound();
 
-  return <EditorLayout project={project} assets={assets} />;
+  return (
+    <EditorErrorBoundary>
+      <EditorLayout project={project} assets={assets} />
+    </EditorErrorBoundary>
+  );
 }

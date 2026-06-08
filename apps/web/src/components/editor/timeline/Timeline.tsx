@@ -7,6 +7,8 @@ import { TimelineClip } from "./TimelineClip";
 import { Playhead } from "./Playhead";
 import type { CutList, Slot } from "@/types/api";
 
+const PIXELS_PER_SECOND = 50;
+
 interface TimelineProps {
   cutList: CutList | null;
   currentTime: number;
@@ -28,7 +30,7 @@ export function Timeline({
   onUpdateSlot,
 }: TimelineProps) {
   const slots = cutList?.slots || [];
-  const totalWidth = Math.max(duration * 50 * zoomLevel, 800);
+  const totalWidth = Math.max(duration * PIXELS_PER_SECOND * zoomLevel, 800);
 
   const timeMarkers = useMemo(() => {
     const markers = [];

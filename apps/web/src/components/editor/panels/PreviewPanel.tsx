@@ -18,13 +18,15 @@ interface PreviewPanelProps {
 export function PreviewPanel({ assets, currentTime, isPlaying, onTimeUpdate, overlays }: PreviewPanelProps) {
   const playerRef = useRef<ReactPlayer>(null);
   const referenceAsset = assets.find((a) => a.type === "reference");
-  const containerRef = useRef<HTMLDivElement>(null);
+  const seekingRef = useRef(false);
 
   useEffect(() => {
-    if (playerRef.current) {
-      const internalPlayer = playerRef.current.getInternalPlayer();
-      if (internalPlayer && Math.abs(internalPlayer.currentTime - currentTime) > 0.5) {
+    if (playerRef.current && !seekingRef.current) {
+      const internal = playerRef.current.getInternalPlayer();
+      if (internal && Math.abs(internal.currentTime - currentTime) > 0.5) {
+        seekingRef.current = true;
         playerRef.current.seekTo(currentTime, "seconds");
+        setTimeout(() => { seekingRef.current = false; }, 150);
       }
     }
   }, [currentTime]);
@@ -34,7 +36,7 @@ export function PreviewPanel({ assets, currentTime, isPlaying, onTimeUpdate, ove
   );
 
   return (
-    <div ref={containerRef} className="flex-1 bg-black relative flex items-center justify-center overflow-hidden">
+    <div className="flex-1 bg-black relative flex items-center justify-center overflow-hidden">
       {referenceAsset?.storageUrl ? (
         <div className="relative w-full h-full max-w-4xl max-h-full">
           <ReactPlayer
@@ -44,7 +46,9 @@ export function PreviewPanel({ assets, currentTime, isPlaying, onTimeUpdate, ove
             width="100%"
             height="100%"
             style={{ position: "absolute", top: 0, left: 0 }}
-            onProgress={({ playedSeconds }) => onTimeUpdate(playedSeconds)}
+            onProgress={({ playedSeconds }) => {
+              if (!seekingRef.current) onTimeUpdate(playedSeconds);
+            }}
             progressInterval={100}
             config={{ file: { attributes: { crossOrigin: "anonymous" } } }}
           />

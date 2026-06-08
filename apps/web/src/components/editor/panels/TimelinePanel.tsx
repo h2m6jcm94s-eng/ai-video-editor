@@ -15,6 +15,8 @@ interface TimelinePanelProps {
   isPlaying: boolean;
   onSeek: (time: number) => void;
   onTogglePlay: () => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
   selectedSlotIndex: number | null;
   onSelectSlot: (index: number | null) => void;
   onUpdateSlot: (index: number, slot: Partial<Slot>) => void;
@@ -29,6 +31,8 @@ export function TimelinePanel({
   isPlaying,
   onSeek,
   onTogglePlay,
+  onZoomIn,
+  onZoomOut,
   selectedSlotIndex,
   onSelectSlot,
   onUpdateSlot,
@@ -42,6 +46,37 @@ export function TimelinePanel({
     const x = e.clientX - rect.left;
     const ratio = x / rect.width;
     onSeek(ratio * duration);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const assetId = e.dataTransfer.getData("assetId");
+    if (!assetId || !cutList) return;
+    // Insert at drop position
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = e.clientX - rect.left;
+    const ratio = x / rect.width;
+    const startTime = ratio * duration;
+    const newSlot: Slot = {
+      index: cutList.slots.length,
+      start_s: startTime,
+      duration_s: 2,
+      beat_index: 0,
+      section: "custom",
+      transition_in: "hard_cut",
+      transition_out: "hard_cut",
+      target_shot_type: "medium",
+      subject_hint: "",
+      motion_hint: "static",
+      energy_level: 0.5,
+      required_tags: [],
+      avoid_tags: [],
+      selected_clip_id: assetId,
+      ranked_clip_ids: null,
+      confidence: null,
+    };
+    onReorderSlots([...cutList.slots, newSlot]);
   };
 
   return (
@@ -66,16 +101,22 @@ export function TimelinePanel({
           {formatTime(duration)}
         </span>
         <div className="flex-1" />
-        <button className="p-1 hover:bg-zinc-800 rounded" aria-label="Zoom in">
+        <button onClick={onZoomIn} className="p-1 hover:bg-zinc-800 rounded" aria-label="Zoom in">
           <ZoomIn className="w-3 h-3" />
         </button>
-        <button className="p-1 hover:bg-zinc-800 rounded" aria-label="Zoom out">
+        <button onClick={onZoomOut} className="p-1 hover:bg-zinc-800 rounded" aria-label="Zoom out">
           <ZoomOut className="w-3 h-3" />
         </button>
       </div>
 
       {/* Timeline Tracks */}
-      <div className="flex-1 overflow-x-auto overflow-y-hidden relative" onClick={handleTrackClick} ref={trackRef}>
+      <div
+        className="flex-1 overflow-x-auto overflow-y-hidden relative"
+        onClick={handleTrackClick}
+        ref={trackRef}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={handleDrop}
+      >
         <Timeline
           cutList={cutList}
           currentTime={currentTime}

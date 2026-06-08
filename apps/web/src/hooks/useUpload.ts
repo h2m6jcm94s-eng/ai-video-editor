@@ -34,14 +34,21 @@ export function useUpload(projectId: string) {
         Object.entries(presign.fields).forEach(([k, v]) => formData.append(k, v));
         formData.append("file", file);
 
-        await fetch(presign.url, {
+        const putRes = await fetch(presign.url, {
           method: "POST",
           body: formData,
         });
 
+        if (!putRes.ok) {
+          throw new Error(`Upload failed: ${putRes.status} ${putRes.statusText}`);
+        }
+
+        // Extract ETag from response headers if available
+        const etag = putRes.headers.get("etag") || putRes.headers.get("ETag") || "";
+
         const complete = await api.uploads.complete(presign.assetId, {
           sizeBytes: file.size,
-          etag: "", // R2/Minio may not require this
+          etag,
         });
 
         setState({ uploading: false, progress: 100, error: null });

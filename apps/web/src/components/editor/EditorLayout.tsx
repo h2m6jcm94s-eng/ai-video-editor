@@ -2,17 +2,20 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, Play, Pause, Maximize2, RotateCcw } from "lucide-react";
+import { ChevronLeft, Play, Pause, RotateCcw } from "lucide-react";
 import { MediaPanel } from "./panels/MediaPanel";
 import { PreviewPanel } from "./panels/PreviewPanel";
 import { InspectorPanel } from "./panels/InspectorPanel";
 import { TimelinePanel } from "./panels/TimelinePanel";
 import { PromptPanel } from "./panels/PromptPanel";
 import { RenderButton } from "./RenderButton";
+import { ProgressBar } from "./ProgressBar";
 import { useEditor } from "@/hooks/useEditor";
 import { useTimeline } from "@/hooks/useTimeline";
+import { api } from "@/lib/api";
+import { toast } from "sonner";
 import type { Project, Asset, CutList } from "@/types/api";
 
 interface EditorLayoutProps {
@@ -28,14 +31,80 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
   });
   const timeline = useTimeline();
   const [promptOpen, setPromptOpen] = useState(false);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const lastSavedRef = useRef<string>("");
+  const undoStackRef = useRef<CutList[]>([]);
+  const redoStackRef = useRef<CutList[]>([]);
 
   useEffect(() => {
     actions.setAssets(assets);
   }, [assets, actions]);
 
+  // Autosave cutlist with debounce
+  useEffect(() => {
+    if (!state.cutList) return;
+    const json = JSON.stringify(state.cutList);
+    if (json === lastSavedRef.current) return;
+
+    const timer = setTimeout(() => {
+      api.projects
+        .updateCutlist(project.id, state.cutList as CutList)
+        .then(() => {
+          lastSavedRef.current = json;
+        })
+        .catch(() => {
+          toast.error("Autosave failed");
+        });
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [state.cutList, project.id]);
+
+  // Push to undo stack on meaningful changes
+  useEffect(() => {
+    if (!state.cutList) return;
+    const json = JSON.stringify(state.cutList);
+    const last = undoStackRef.current[undoStackRef.current.length - 1];
+    if (!last || JSON.stringify(last) !== json) {
+      undoStackRef.current.push(state.cutList);
+      if (undoStackRef.current.length > 50) undoStackRef.current.shift();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.cutList?.globals, state.cutList?.slots.length, state.cutList?.overlays.length]);
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if ((e.key === "Delete" || e.key === "Backspace") && state.selectedSlotIndex !== null) {
+        e.preventDefault();
+        actions.removeSlot(state.selectedSlotIndex);
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          // Ctrl+Shift+Z = Redo
+          const next = redoStackRef.current.pop();
+          if (next) {
+            undoStackRef.current.push(next);
+            actions.setCutList(next);
+          }
+        } else {
+          // Ctrl+Z = Undo
+          if (undoStackRef.current.length > 1) {
+            const current = undoStackRef.current.pop();
+            const prev = undoStackRef.current[undoStackRef.current.length - 1];
+            if (current && prev) {
+              redoStackRef.current.push(current);
+              actions.setCutList(prev);
+            }
+          }
+        }
+        return;
+      }
+
       switch (e.key) {
         case " ":
           e.preventDefault();
@@ -55,7 +124,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
           break;
       }
     },
-    [timeline]
+    [timeline, actions, state.selectedSlotIndex]
   );
 
   useEffect(() => {
@@ -108,7 +177,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
           >
             AI Prompt
           </button>
-          <RenderButton projectId={project.id} />
+          <RenderButton projectId={project.id} onJobStart={setActiveJobId} />
         </div>
       </div>
 
@@ -137,6 +206,8 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
             isPlaying={timeline.isPlaying}
             onSeek={timeline.seek}
             onTogglePlay={timeline.togglePlay}
+            onZoomIn={timeline.zoomIn}
+            onZoomOut={timeline.zoomOut}
             selectedSlotIndex={state.selectedSlotIndex}
             onSelectSlot={actions.selectSlot}
             onUpdateSlot={actions.updateSlot}
@@ -146,6 +217,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
 
         <InspectorPanel
           selectedSlot={selectedSlot}
+          selectedSlotIndex={state.selectedSlotIndex}
           selectedOverlayId={state.selectedOverlayId}
           overlays={state.cutList?.overlays || []}
           onUpdateSlot={actions.updateSlot}
@@ -164,6 +236,8 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
           />
         </div>
       )}
+
+      <ProgressBar jobId={activeJobId} />
     </div>
   );
 }

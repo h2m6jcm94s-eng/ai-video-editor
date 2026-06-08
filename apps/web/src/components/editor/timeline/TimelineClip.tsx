@@ -2,7 +2,7 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import type { Slot } from "@/types/api";
 
 interface TimelineClipProps {
@@ -14,33 +14,41 @@ interface TimelineClipProps {
   onUpdate: (slot: Partial<Slot>) => void;
 }
 
-export function TimelineClip({ slot, duration, isSelected, onSelect, onUpdate }: TimelineClipProps) {
+export function TimelineClip({ slot, index, duration, isSelected, onSelect, onUpdate }: TimelineClipProps) {
   const [isDragging, setIsDragging] = useState(false);
-  const [dragMode, setDragMode] = useState<"move" | "resize-left" | "resize-right" | null>(null);
   const startXRef = useRef(0);
   const startValueRef = useRef(0);
+  const containerWidthRef = useRef(0);
+  const slotRef = useRef(slot);
+  const durationRef = useRef(duration);
+
+  // Keep refs in sync to avoid stale closures
+  slotRef.current = slot;
+  durationRef.current = duration;
 
   const left = (slot.start_s / duration) * 100;
   const width = (slot.duration_s / duration) * 100;
 
-  const handleMouseDown = (e: React.MouseEvent, mode: "move" | "resize-left" | "resize-right") => {
+  const handleMouseDown = useCallback((e: React.MouseEvent, mode: "move" | "resize-left" | "resize-right") => {
     e.stopPropagation();
     setIsDragging(true);
-    setDragMode(mode);
     startXRef.current = e.clientX;
-    startValueRef.current = mode === "move" ? slot.start_s : mode === "resize-left" ? slot.start_s : slot.duration_s;
+    startValueRef.current =
+      mode === "move" ? slotRef.current.start_s : mode === "resize-left" ? slotRef.current.start_s : slotRef.current.duration_s;
+    containerWidthRef.current = (e.currentTarget.parentElement?.offsetWidth || 1);
 
     const handleMouseMove = (ev: MouseEvent) => {
       const deltaPx = ev.clientX - startXRef.current;
-      const containerWidth = (e.currentTarget.parentElement?.offsetWidth || 1);
-      const deltaSec = (deltaPx / containerWidth) * duration;
+      const cw = containerWidthRef.current;
+      const dur = durationRef.current;
+      const deltaSec = (deltaPx / cw) * dur;
 
       if (mode === "move") {
         const newStart = Math.max(0, startValueRef.current + deltaSec);
         onUpdate({ start_s: newStart });
       } else if (mode === "resize-left") {
         const newStart = Math.max(0, startValueRef.current + deltaSec);
-        const newDuration = slot.duration_s + (slot.start_s - newStart);
+        const newDuration = slotRef.current.duration_s + (slotRef.current.start_s - newStart);
         if (newDuration > 0.1) onUpdate({ start_s: newStart, duration_s: newDuration });
       } else if (mode === "resize-right") {
         const newDuration = Math.max(0.1, startValueRef.current + deltaSec);
@@ -50,14 +58,13 @@ export function TimelineClip({ slot, duration, isSelected, onSelect, onUpdate }:
 
     const handleMouseUp = () => {
       setIsDragging(false);
-      setDragMode(null);
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
 
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
-  };
+  }, [onUpdate]);
 
   return (
     <div
@@ -71,7 +78,7 @@ export function TimelineClip({ slot, duration, isSelected, onSelect, onUpdate }:
         if (!isDragging) onSelect();
       }}
       role="button"
-      aria-label={`Clip ${slot.index}: ${slot.target_shot_type}`}
+      aria-label={`Clip ${index}: ${slot.target_shot_type}`}
       tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") onSelect();
