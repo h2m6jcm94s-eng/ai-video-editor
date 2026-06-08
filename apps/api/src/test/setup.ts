@@ -64,6 +64,7 @@ vi.mock("../db", () => ({
       assets: { findFirst: vi.fn(), findMany: vi.fn() },
       renders: { findFirst: vi.fn(), findMany: vi.fn() },
       templates: { findFirst: vi.fn(), findMany: vi.fn() },
+      providerKeys: { findFirst: vi.fn().mockResolvedValue(null) },
     },
     insert: createChainableInsert(),
     update: createChainableUpdate(),

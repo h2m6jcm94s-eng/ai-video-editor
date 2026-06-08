@@ -4,6 +4,8 @@
 
 import { useState, useCallback } from "react";
 import { useApi } from "@/lib/api/client";
+import { APIError } from "@/lib/api/error";
+import { toast } from "sonner";
 import type { Asset } from "@/types/api";
 
 interface UploadState {
@@ -11,6 +13,8 @@ interface UploadState {
   progress: number;
   error: string | null;
 }
+
+const ALLOWED_TYPES = ["video/mp4", "video/quicktime", "video/webm", "audio/mpeg", "audio/wav", "audio/aac", "audio/ogg"];
 
 export function useUpload(projectId: string) {
   const api = useApi();
@@ -22,6 +26,13 @@ export function useUpload(projectId: string) {
 
   const uploadFile = useCallback(
     async (file: File, type: "reference" | "song" | "clip"): Promise<Asset | null> => {
+      if (!ALLOWED_TYPES.includes(file.type)) {
+        const msg = `Unsupported file type: ${file.type}. Allowed: MP4, MOV, WEBM, MP3, WAV, AAC, OGG.`;
+        setState({ uploading: false, progress: 0, error: msg });
+        toast.error(msg);
+        return null;
+      }
+
       setState({ uploading: true, progress: 0, error: null });
       try {
         const presign = await api.uploads.presign({
@@ -31,21 +42,9 @@ export function useUpload(projectId: string) {
           type,
         });
 
-        const formData = new FormData();
-        Object.entries(presign.fields).forEach(([k, v]) => formData.append(k, v));
-        formData.append("file", file);
+        const asset = await uploadWithProgress(presign.url, file, presign.fields);
 
-        const putRes = await fetch(presign.url, {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!putRes.ok) {
-          throw new Error(`Upload failed: ${putRes.status} ${putRes.statusText}`);
-        }
-
-        // Extract ETag from response headers if available
-        const etag = putRes.headers.get("etag") || putRes.headers.get("ETag") || "";
+        const etag = asset.etag || "";
 
         const complete = await api.uploads.complete(presign.assetId, {
           sizeBytes: file.size,
@@ -55,8 +54,9 @@ export function useUpload(projectId: string) {
         setState({ uploading: false, progress: 100, error: null });
         return complete.asset;
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : "Upload failed";
+        const message = err instanceof APIError ? err.userMessage : err instanceof Error ? err.message : "Upload failed";
         setState({ uploading: false, progress: 0, error: message });
+        toast.error(message);
         return null;
       }
     },
@@ -64,4 +64,38 @@ export function useUpload(projectId: string) {
   );
 
   return { ...state, uploadFile };
+}
+
+function uploadWithProgress(
+  url: string,
+  file: File,
+  fields: Record<string, string>
+): Promise<{ etag: string }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+
+    xhr.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) {
+        const percent = Math.round((event.loaded / event.total) * 100);
+        // Progress callback could be wired here
+      }
+    });
+
+    xhr.addEventListener("load", () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        const etag = xhr.getResponseHeader("etag") || xhr.getResponseHeader("ETag") || "";
+        resolve({ etag });
+      } else {
+        reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`));
+      }
+    });
+
+    xhr.addEventListener("error", () => reject(new Error("Upload failed: network error")));
+    xhr.addEventListener("abort", () => reject(new Error("Upload aborted")));
+
+    // Presigned PUT URL from R2/MinIO
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("Content-Type", file.type);
+    xhr.send(file);
+  });
 }

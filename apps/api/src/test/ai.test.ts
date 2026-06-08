@@ -41,6 +41,7 @@ describe("AI Service", () => {
       );
 
       const result = await applyPromptEdit({
+        userId: "user-1",
         prompt: "fade in the first clip",
         cutList: mockCutList,
       });
@@ -61,6 +62,7 @@ describe("AI Service", () => {
         );
 
       const result = await applyPromptEdit({
+        userId: "user-1",
         prompt: "add overlays",
         cutList: mockCutList,
       });
@@ -76,6 +78,7 @@ describe("AI Service", () => {
       );
 
       const result = await applyPromptEdit({
+        userId: "user-1",
         prompt: "increase tempo",
         cutList: mockCutList,
       });
@@ -96,7 +99,7 @@ describe("AI Service", () => {
         ) as any
       );
 
-      const result = await applyPromptEdit({ prompt: "edit", cutList: mockCutList });
+      const result = await applyPromptEdit({ userId: "user-1", prompt: "edit", cutList: mockCutList });
       const list = result.newCutList as any;
       expect(list.slots).toHaveLength(2);
       expect(list.slots[0].duration_s).toBe(3);
@@ -117,7 +120,7 @@ describe("AI Service", () => {
         makeClaudeResponse([{ op: "move", from: "/slots/0", path: "/slots/1" }], "Moved") as any
       );
 
-      const result = await applyPromptEdit({ prompt: "move", cutList: listWithSlots });
+      const result = await applyPromptEdit({ userId: "user-1", prompt: "move", cutList: listWithSlots });
       expect((result.newCutList as any).slots).toHaveLength(2);
     });
 
@@ -128,7 +131,7 @@ describe("AI Service", () => {
         makeClaudeResponse([{ op: "copy", from: "/slots/0", path: "/slots/1" }], "Copied") as any
       );
 
-      const result = await applyPromptEdit({ prompt: "copy", cutList: mockCutList });
+      const result = await applyPromptEdit({ userId: "user-1", prompt: "copy", cutList: mockCutList });
       expect((result.newCutList as any).slots).toHaveLength(2);
     });
 
@@ -138,7 +141,7 @@ describe("AI Service", () => {
       vi.stubEnv("AI_PROVIDER", "claude");
 
       await expect(
-        applyPromptEdit({ prompt: "test", cutList: mockCutList })
+        applyPromptEdit({ userId: "user-1", prompt: "test", cutList: mockCutList })
       ).rejects.toThrow("AI prompt edit failed");
     });
 
@@ -151,7 +154,7 @@ describe("AI Service", () => {
         status: 200,
       } as any);
 
-      const result = await applyPromptEdit({ prompt: "test", cutList: mockCutList });
+      const result = await applyPromptEdit({ userId: "user-1", prompt: "test", cutList: mockCutList });
       expect(result.diff).toEqual([]);
       expect(result.explanation).toContain("changed the fade");
     });
@@ -167,7 +170,7 @@ describe("AI Service", () => {
         status: 200,
       } as any);
 
-      const result = await applyPromptEdit({ prompt: "test", cutList: mockCutList });
+      const result = await applyPromptEdit({ userId: "user-1", prompt: "test", cutList: mockCutList });
       expect(result.explanation).toBe("ok");
     });
   });
@@ -186,7 +189,7 @@ describe("AI Service", () => {
         status: 200,
       } as any);
 
-      const result = await transcribeAudio(Buffer.from("audio"), "test.mp3");
+      const result = await transcribeAudio("user-1", Buffer.from("audio"), "test.mp3");
       expect(result).toHaveLength(2);
       expect(result[0].text).toBe("Hello world");
       expect(result[0].start).toBe(0);
@@ -200,7 +203,7 @@ describe("AI Service", () => {
         status: 200,
       } as any);
 
-      const result = await transcribeAudio(Buffer.from("audio"), "test.mp3");
+      const result = await transcribeAudio("user-1", Buffer.from("audio"), "test.mp3");
       expect(result).toHaveLength(1);
       expect(result[0].text).toBe("Only text");
     });
@@ -213,12 +216,12 @@ describe("AI Service", () => {
         text: async () => "Rate limited",
       } as any);
 
-      await expect(transcribeAudio(Buffer.from("audio"), "test.mp3")).rejects.toThrow("Whisper API error");
+      await expect(transcribeAudio("user-1", Buffer.from("audio"), "test.mp3")).rejects.toThrow("Whisper API error");
     });
 
     it("throws when OPENAI_API_KEY is missing", async () => {
       vi.stubEnv("OPENAI_API_KEY", "");
-      await expect(transcribeAudio(Buffer.from("audio"), "test.mp3")).rejects.toThrow("not configured");
+      await expect(transcribeAudio("user-1", Buffer.from("audio"), "test.mp3")).rejects.toThrow("not configured");
     });
   });
 });

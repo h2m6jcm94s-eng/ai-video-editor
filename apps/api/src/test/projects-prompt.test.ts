@@ -103,8 +103,11 @@ describe("Project Prompt Route", () => {
 
   it("POST returns 500 when AI service fails", async () => {
     vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(mockProject);
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValueOnce(new Error("AI down")));
+    vi.stubGlobal("fetch", vi.fn()
+      .mockRejectedValueOnce(new Error("Claude down"))
+      .mockRejectedValueOnce(new Error("OpenAI down")));
     vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+    vi.stubEnv("OPENAI_API_KEY", "sk-openai-test");
     vi.stubEnv("AI_PROVIDER", "claude");
 
     const app = await buildApp();
@@ -114,6 +117,6 @@ describe("Project Prompt Route", () => {
       payload: { prompt: "test" },
     });
     expect(res.statusCode).toBe(500);
-    expect(JSON.parse(res.body).code).toBe("AI_ERROR");
+    expect(JSON.parse(res.body).code).toBe("INTERNAL_ERROR");
   });
 });

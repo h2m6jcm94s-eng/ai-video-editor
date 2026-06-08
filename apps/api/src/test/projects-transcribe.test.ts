@@ -140,6 +140,6 @@ describe("Project Transcribe Route", () => {
       payload: { assetId: "asset-1" },
     });
     expect(res.statusCode).toBe(500);
-    expect(JSON.parse(res.body).code).toBe("TRANSCRIBE_ERROR");
+    expect(JSON.parse(res.body).code).toBe("PROVIDER_RATE_LIMITED");
   });
 });

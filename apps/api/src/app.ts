@@ -17,12 +17,13 @@ import { requireAuth } from "./middleware/auth";
 
 export async function buildApp() {
   const app = Fastify({
-    logger: false,
+    logger: { level: process.env.LOG_LEVEL || "info" },
     bodyLimit: 1024 * 1024 * 1024,
+    genReqId: () => `req_${crypto.randomUUID().slice(0, 8)}`,
   });
 
   app.setErrorHandler((error, request, reply) => {
-    app.log.error({ err: error, url: request.url }, "Request error");
+    request.log.error({ err: error, url: request.url }, "Request error");
 
     if (error.validation) {
       return reply.status(422).send({
@@ -55,6 +56,12 @@ export async function buildApp() {
     max: process.env.NODE_ENV === "test" ? 10000 : 60,
     timeWindow: "1 minute",
     keyGenerator: (req) => req.userId ?? req.ip,
+  });
+
+  // Propagate request ID via response header
+  app.addHook("onSend", async (request, reply, payload) => {
+    reply.header("x-request-id", request.id);
+    return payload;
   });
 
   await app.register(healthRoutes, { prefix: "/api/health" });

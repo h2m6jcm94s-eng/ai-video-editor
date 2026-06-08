@@ -159,7 +159,7 @@ export async function projectRoutes(app: FastifyInstance) {
     try {
       await downloadAsset(asset.storageKey, tmpFile);
       const audioBuffer = fs.readFileSync(tmpFile);
-      const segments = await transcribeAudio(audioBuffer, asset.filename);
+      const segments = await transcribeAudio(userId, audioBuffer, asset.filename);
 
       const subtitles = segments.map((s, i) => ({
         id: `sub-${i}`,
@@ -170,10 +170,15 @@ export async function projectRoutes(app: FastifyInstance) {
 
       return { subtitles };
     } catch (err) {
-      console.error("Transcription failed:", err);
-      return reply.status(500).send({
+      request.log.error({ err }, "Transcription failed");
+      const code =
+        err && typeof err === "object" && "code" in err
+          ? (err as { code?: string }).code
+          : "INTERNAL_ERROR";
+      const status = code === "PROVIDER_KEY_MISSING" ? 400 : 500;
+      return reply.status(status).send({
         error: err instanceof Error ? err.message : "Transcription failed",
-        code: "TRANSCRIBE_ERROR",
+        code,
       });
     } finally {
       try {
@@ -210,6 +215,7 @@ export async function projectRoutes(app: FastifyInstance) {
 
     try {
       const result = await applyPromptEdit({
+        userId,
         prompt: body.prompt,
         cutList: project.cutList,
         assets: (projectAssets || []).map((a) => ({
@@ -236,10 +242,15 @@ export async function projectRoutes(app: FastifyInstance) {
         explanation: result.explanation,
       };
     } catch (err) {
-      console.error("Prompt edit failed:", err);
-      return reply.status(500).send({
+      request.log.error({ err }, "Prompt edit failed");
+      const code =
+        err && typeof err === "object" && "code" in err
+          ? (err as { code?: string }).code
+          : "INTERNAL_ERROR";
+      const status = code === "PROVIDER_KEY_MISSING" ? 400 : 500;
+      return reply.status(status).send({
         error: err instanceof Error ? err.message : "AI edit failed",
-        code: "AI_ERROR",
+        code,
       });
     }
   });
