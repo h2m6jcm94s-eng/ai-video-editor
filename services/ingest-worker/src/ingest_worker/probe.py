@@ -3,10 +3,8 @@
 # Commercial SaaS use is prohibited without written permission.
 try:
     import av
-    _HAS_AV = True
 except ImportError:
     av = None  # type: ignore[assignment]
-    _HAS_AV = False
 
 from typing import Dict, Any
 

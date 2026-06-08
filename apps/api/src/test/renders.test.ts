@@ -41,6 +41,7 @@ describe("Render Routes", () => {
 
   it("POST /api/renders starts a render job", async () => {
     vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(mockProject as any);
+    vi.mocked(db.query.assets.findMany).mockResolvedValueOnce([]);
     vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(undefined);
     vi.mocked(db.insert).mockReturnValueOnce({
       values: vi.fn().mockReturnValueOnce({

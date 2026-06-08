@@ -5,7 +5,7 @@
 import { useEffect, useCallback, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
-import { ChevronLeft, Play, Pause, RotateCcw, Subtitles, Smartphone, Save, FolderOpen, CheckCircle2, AlertCircle, Loader2, Command as CommandIcon, Wand2, Film, Type, Music, Zap, Settings } from "lucide-react";
+import { ChevronLeft, Play, Pause, RotateCcw, Subtitles, Smartphone, Save, FolderOpen, CheckCircle2, AlertCircle, Loader2, Command as CommandIcon, Wand2, Film, Type, Music, Settings } from "lucide-react";
 import { MediaPanel } from "./panels/MediaPanel";
 import { PreviewPanel } from "./panels/PreviewPanel";
 import { InspectorPanel } from "./panels/InspectorPanel";

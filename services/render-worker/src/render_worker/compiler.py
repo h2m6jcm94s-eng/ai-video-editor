@@ -7,10 +7,8 @@ import os
 import tempfile
 import subprocess
 from typing import List, Optional, Dict
-import json
-
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import ImageFont
 
 from shared_py.models import CutList, Slot, Overlay, RenderConfig, Effect, AudioTrack
 
@@ -80,7 +78,6 @@ def _apply_video_effects(slot: Slot, base_vf: str) -> str:
         if etype == "zoom_punch_in":
             scale = getattr(params, "target_scale", 1.3)
             dur = getattr(params, "duration_ms", 300) / 1000.0
-            easing = "ease_out" if getattr(params, "easing", "easeOut") == "easeOut" else "linear"
             filters.append(
                 f"zoompan=z='1+({scale}-1)*min(t/{dur},1)':d=1:s=1280x720"
             )

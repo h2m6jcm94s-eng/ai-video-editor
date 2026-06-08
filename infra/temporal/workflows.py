@@ -1,4 +1,4 @@
-﻿# Copyright (c) 2025 Devayan Dewri. All rights reserved.
+# Copyright (c) 2025 Devayan Dewri. All rights reserved.
 # Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 # Commercial SaaS use is prohibited without written permission.
 """Temporal workflow definitions for the AI video editor pipeline."""
@@ -21,6 +21,7 @@ class VideoRenderInput:
     style_tier: str
     mode: str
     user_id: str
+    asset_key_map: Dict[str, str]
 
 
 @dataclass
@@ -43,12 +44,15 @@ class VideoRenderWorkflow:
 
     @workflow.run
     async def run(self, input: VideoRenderInput) -> str:
+        # Build per-asset key maps for activities
+        clip_key_map = {cid: input.asset_key_map.get(cid, "") for cid in input.clip_asset_ids}
+
         # 1. Probe inputs
         self._stage = "probing"
         self._progress = 5
-        await workflow.execute_activity(
+        probe = await workflow.execute_activity(
             "probe_inputs",
-            args=(input.reference_asset_id, input.song_asset_id, input.clip_asset_ids),
+            args=(input.reference_asset_id, input.song_asset_id, input.clip_asset_ids, input.asset_key_map),
             start_to_close_timeout=60,
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
@@ -58,7 +62,7 @@ class VideoRenderWorkflow:
         self._progress = 15
         beats = await workflow.execute_activity(
             "detect_beats",
-            args=(input.song_asset_id,),
+            args=(input.song_asset_id, input.asset_key_map),
             start_to_close_timeout=120,
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
@@ -68,7 +72,7 @@ class VideoRenderWorkflow:
         self._progress = 25
         shots = await workflow.execute_activity(
             "detect_shots",
-            args=(input.reference_asset_id,),
+            args=(input.reference_asset_id, input.asset_key_map),
             start_to_close_timeout=180,
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
@@ -78,7 +82,7 @@ class VideoRenderWorkflow:
         self._progress = 40
         style = await workflow.execute_activity(
             "analyze_reference_style",
-            args=(input.reference_asset_id, input.style_tier),
+            args=(input.reference_asset_id, input.style_tier, input.asset_key_map),
             start_to_close_timeout=300,
             retry_policy=RetryPolicy(maximum_attempts=2),
         )
@@ -88,17 +92,20 @@ class VideoRenderWorkflow:
         self._progress = 55
         await workflow.execute_activity(
             "embed_user_clips",
-            args=(input.clip_asset_ids,),
+            args=(input.clip_asset_ids, input.asset_key_map),
             start_to_close_timeout=300,
             retry_policy=RetryPolicy(maximum_attempts=2),
         )
+
+        # Compute energy curve from beats (placeholder)
+        energy_curve = []
 
         # 6. Generate cut-list
         self._stage = "cutlist_generation"
         self._progress = 70
         cutlist = await workflow.execute_activity(
             "generate_cutlist_claude",
-            args=(beats, shots, style, input.style_tier),
+            args=(beats, shots, style, input.style_tier, energy_curve),
             start_to_close_timeout=120,
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
@@ -106,9 +113,19 @@ class VideoRenderWorkflow:
         # 7. Rank clips
         self._stage = "ranking"
         self._progress = 75
+        clip_metadata = {}
+        for cid, meta in probe.get("clips", {}).items():
+            if isinstance(meta, dict) and "error" not in meta:
+                clip_metadata[cid] = {
+                    "duration_sec": meta.get("duration_sec", 5.0),
+                    "shot_type": meta.get("shot_type", "medium"),
+                    "aesthetic_score": 0.5,
+                    "motion_energy": 0.5,
+                }
+
         await workflow.execute_activity(
             "rank_clips_per_slot",
-            args=(cutlist, input.clip_asset_ids),
+            args=(cutlist, input.clip_asset_ids, clip_metadata, None),
             start_to_close_timeout=60,
             retry_policy=RetryPolicy(maximum_attempts=2),
         )
@@ -119,7 +136,7 @@ class VideoRenderWorkflow:
             self._progress = 80
             cutlist = await workflow.wait_for_external_signal(
                 "cutlist_approved",
-                CutList,
+                dict,
                 timeout=3600 * 24,  # 24 hours
             )
 
@@ -128,7 +145,7 @@ class VideoRenderWorkflow:
         self._progress = 85
         output_path = await workflow.execute_activity(
             "render_720p",
-            args=(cutlist, input.clip_asset_ids, style.get("lut_path")),
+            args=(cutlist, input.clip_asset_ids, clip_key_map, style.get("lut_path"), input.song_asset_id, input.asset_key_map),
             start_to_close_timeout=600,
             retry_policy=RetryPolicy(maximum_attempts=2),
         )

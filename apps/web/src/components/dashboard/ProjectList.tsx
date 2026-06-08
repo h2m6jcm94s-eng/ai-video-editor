@@ -2,7 +2,7 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import { Film, Plus } from "lucide-react";
+import { Film } from "lucide-react";
 import { ProjectCard } from "./ProjectCard";
 import type { Project } from "@/types/api";
 

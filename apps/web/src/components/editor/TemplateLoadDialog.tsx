@@ -3,7 +3,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FolderOpen, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,

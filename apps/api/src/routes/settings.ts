@@ -7,7 +7,6 @@ import { db } from "../db";
 import { providerKeys } from "../db/schema";
 import { providerKeySchema, testProviderKeySchema } from "@ai-video-editor/shared-types";
 import { validateBody } from "../middleware/validate";
-import { createClerkClient } from "@clerk/fastify";
 
 // Simple XOR encryption for demo — replace with AES-256-GCM + KEK in production
 function encrypt(key: string, secret: string): string {
@@ -31,8 +30,6 @@ function decrypt(cipher: string, secret: string): string {
 }
 
 const ENCRYPTION_SECRET = process.env.PROVIDER_ENCRYPTION_SECRET || "dev-secret-do-not-use-in-production";
-
-const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
 
 export async function settingsRoutes(app: FastifyInstance) {
   // List user's provider keys (masked)

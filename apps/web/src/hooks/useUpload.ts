@@ -76,7 +76,7 @@ function uploadWithProgress(
 
     xhr.upload.addEventListener("progress", (event) => {
       if (event.lengthComputable) {
-        const percent = Math.round((event.loaded / event.total) * 100);
+        // Progress: Math.round((event.loaded / event.total) * 100)
         // Progress callback could be wired here
       }
     });
