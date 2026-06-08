@@ -66,6 +66,7 @@ export async function uploadRoutes(app: FastifyInstance) {
 
     const assetRow = await db.query.assets.findFirst({
       where: eq(assets.id, assetId),
+      with: { project: true },
     });
     if (!assetRow) {
       return reply.status(404).send({ error: "Asset not found", code: "NOT_FOUND" });
@@ -73,10 +74,7 @@ export async function uploadRoutes(app: FastifyInstance) {
 
     // Ownership check via project
     const userId = request.userId;
-    const project = await db.query.projects.findFirst({
-      where: eq(projects.id, assetRow.projectId),
-    });
-    if (!project || project.userId !== userId) {
+    if (!assetRow.project || assetRow.project.userId !== userId) {
       return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
     }
 
@@ -104,6 +102,7 @@ export async function uploadRoutes(app: FastifyInstance) {
     const { assetId } = request.params as { assetId: string };
     const asset = await db.query.assets.findFirst({
       where: eq(assets.id, assetId),
+      with: { project: true },
     });
 
     if (!asset) {
@@ -112,10 +111,7 @@ export async function uploadRoutes(app: FastifyInstance) {
 
     // Ownership check
     const userId = request.userId;
-    const project = await db.query.projects.findFirst({
-      where: eq(projects.id, asset.projectId),
-    });
-    if (!project || project.userId !== userId) {
+    if (!asset.project || asset.project.userId !== userId) {
       return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
     }
 
@@ -127,6 +123,7 @@ export async function uploadRoutes(app: FastifyInstance) {
     const { assetId } = request.params as { assetId: string };
     const asset = await db.query.assets.findFirst({
       where: eq(assets.id, assetId),
+      with: { project: true },
     });
 
     if (!asset) {
@@ -135,10 +132,7 @@ export async function uploadRoutes(app: FastifyInstance) {
 
     // Ownership check
     const userId = request.userId;
-    const project = await db.query.projects.findFirst({
-      where: eq(projects.id, asset.projectId),
-    });
-    if (!project || project.userId !== userId) {
+    if (!asset.project || asset.project.userId !== userId) {
       return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
     }
 

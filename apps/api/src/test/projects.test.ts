@@ -63,9 +63,7 @@ describe("Project Routes", () => {
   });
 
   it("GET /api/projects/:id returns project", async () => {
-    vi.mocked(db.query.projects.findFirst)
-      .mockResolvedValueOnce(mockProject)
-      .mockResolvedValueOnce(mockProject);
+    vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(mockProject);
 
     const app = await buildApp();
     const res = await app.inject({ method: "GET", url: "/api/projects/proj-1" });

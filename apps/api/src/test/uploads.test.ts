@@ -98,8 +98,7 @@ describe("Upload Routes", () => {
   });
 
   it("POST /api/uploads/:assetId/complete updates asset", async () => {
-    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce(mockAsset as any);
-    vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(mockProject as any);
+    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce({ ...mockAsset, project: mockProject } as any);
     vi.mocked(db.update).mockReturnValueOnce({
       set: vi.fn().mockReturnValueOnce({
         where: vi.fn().mockReturnValueOnce({
@@ -130,8 +129,7 @@ describe("Upload Routes", () => {
   });
 
   it("GET /api/uploads/:assetId returns asset", async () => {
-    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce(mockAsset as any);
-    vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(mockProject as any);
+    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce({ ...mockAsset, project: mockProject } as any);
 
     const app = await buildApp();
     const res = await app.inject({ method: "GET", url: `/api/uploads/${ASSET_ID}` });

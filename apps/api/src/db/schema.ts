@@ -14,6 +14,7 @@ import {
   index,
   primaryKey,
 } from "drizzle-orm/pg-core";
+import { relations } from "drizzle-orm";
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -131,6 +132,30 @@ export const providerKeys = pgTable(
     pk: primaryKey({ columns: [table.userId, table.provider] }),
   })
 );
+
+export const usersRelations = relations(users, ({ many }) => ({
+  projects: many(projects),
+  templates: many(templates),
+  providerKeys: many(providerKeys),
+}));
+
+export const projectsRelations = relations(projects, ({ one, many }) => ({
+  user: one(users, { fields: [projects.userId], references: [users.id] }),
+  assets: many(assets),
+  renders: many(renders),
+}));
+
+export const assetsRelations = relations(assets, ({ one }) => ({
+  project: one(projects, { fields: [assets.projectId], references: [projects.id] }),
+}));
+
+export const rendersRelations = relations(renders, ({ one }) => ({
+  project: one(projects, { fields: [renders.projectId], references: [projects.id] }),
+}));
+
+export const templatesRelations = relations(templates, ({ one }) => ({
+  user: one(users, { fields: [templates.userId], references: [users.id] }),
+}));
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
