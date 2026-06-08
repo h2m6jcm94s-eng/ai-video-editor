@@ -2,52 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
 ### Added
+- Shared schemas package (`packages/shared-types`) with Zod schemas, enums, errors, and effects.
+- In-app provider key management with encrypted storage and test-connection endpoint.
+- Settings page with sidebar tabs (Account, API Keys, Appearance, Shortcuts, Advanced).
+- Command palette (Cmd+K / Ctrl+K) for editor actions.
+- Effect library shared types with 15 effects (zoom, focus pull, freeze frame, speed ramp, shake, glitch, vignette, film grain, color pop, text kinetic, lower third, callout arrow, SFX).
+- Multi-audio track types (`AudioTrack[]`) in cut list.
+- Render completion webhook (`POST /api/renders/:jobId/complete`).
+- Contract tests for all shared schemas and upload validation.
+- Structured logging with request IDs and Fastify logger.
+- Layered AGENTS.md and CONTEXT.md documentation.
 
-- Production hardening: startup env validation, connection probes (DB, R2, Redis)
-- Auth middleware with Clerk JWT validation on all API routes
-- Rate limiting (`@fastify/rate-limit`) on API endpoints
-- Zod request validation on all write routes
-- API test suite with 26 vitest tests covering health, projects, uploads, renders, progress
-- Python worker startup validation (`shared_py/startup.py`)
-- AI provider init key validation (Claude, Gemini, Groq, OpenAI, OpenRouter, Qwen)
-- FFmpeg error context wrappers in compiler.py and beat_detect.py
-- Cross-platform font fallback in render compiler
-- Next.js error boundaries (`error.tsx`, `global-error.tsx`)
-- Typed API client with `APIError` class
-- Redis SSE subscriber memory leak fix (shared map + refcount)
-- Queue safe JSON parse + priority via zadd/zpopmin
-- Temporal workflow idempotency with collision-free workflow IDs
-- Project asset cleanup on delete (async R2 deletion)
-- `workflowId` column on renders with cascade deletes
-- CI/CD workflows for tests, typecheck, Docker builds, security audits
+### Changed
+- API client split into server (`apiServer`) and browser (`useApi`) surfaces with shared `createAPI` factory.
+- All editor forms migrated to `react-hook-form` + shared Zod schemas.
+- AI model fixes: Claude → `claude-3-5-sonnet-20241022`, OpenAI → `gpt-4o`.
+- AI service reads per-user provider keys from DB, falls back to env.
+- SSE progress reconnects with exponential backoff on disconnect.
+- Upload uses PUT raw file with XMLHttpRequest progress and mime gate.
 
 ### Fixed
+- Clerk auth now syncs users to local DB and sets `request.userId` to local UUID.
+- 401 errors return proper `UNAUTHORIZED` code with user-facing toasts.
+- Upload no longer sends POST to a PUT presigned URL.
+- Render route returns 409 when a render is already in progress.
 
-- FFmpeg filter injection (LUT path + overlay text escaping)
-- Audio mapping in compiler.py
-- Negative xfade offset handling
-- Shot detection hardcoded 30fps → parameterized
-- Optical flow drift in camera_motion.py (p0 reset)
-- Zero-norm guard in clip_rank.py
-- Cross-platform temp dir (`tempfile.gettempdir()`)
-- `GEMINI_API_KEY` → `GOOGLE_API_KEY` consistency across codebase
-
-## [0.1.0] - 2024-05-13
+## [0.1.0] — 2025-06-01
 
 ### Added
-
-- Initial MVP release
-- Fastify API with project/asset/render CRUD
-- Next.js web frontend
-- Python workers: ingest, style, reason, render
-- Temporal workflow orchestration
-- R2/S3-compatible storage integration
-- PostgreSQL + Drizzle ORM
-- Redis queue + SSE progress streaming
-- Multi-provider AI support (Claude, Gemini, OpenAI, Groq, OpenRouter, Qwen, Kimi)
+- Initial monorepo setup with Next.js, Fastify, Temporal, Drizzle, MinIO.
+- Project creation, asset upload, AI prompt editing, render pipeline.
+- Basic editor with timeline, inspector, preview, and subtitles.
