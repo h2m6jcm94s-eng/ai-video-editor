@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch, AsyncMock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "services", "shared-py", "src"))
 
-from shared_py.models import BeatGrid, ShotBoundary, StyleAnalysis, BeatSegment, Overlay
+from shared_py.models import BeatGrid, ShotBoundary, StyleAnalysis, BeatSegment
 from shared_py.ai_providers.factory import get_ai_provider
 from shared_py.ai_providers.base import AIProvider
 from reason_worker.cutlist_gen import generate_cutlist_programmatic

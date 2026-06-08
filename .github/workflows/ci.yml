@@ -81,7 +81,9 @@ jobs:
           version: ${{ env.UV_VERSION }}
       - run: uv sync --no-install-project --dev
       - run: uv run --no-project ruff check services/ || true
+        continue-on-error: true
       - run: uv run --no-project mypy services/ --ignore-missing-imports || true
+        continue-on-error: true
       - name: Run Python tests with coverage
         run: uv run --no-project pytest tests/ -v --tb=short --cov=services/shared-py/src --cov-report=xml:coverage-python.xml -m "not requires_anthropic and not requires_google and not requires_groq and not requires_openai and not requires_kimi and not requires_qwen and not requires_openrouter"
       - name: Upload Python coverage to Codecov

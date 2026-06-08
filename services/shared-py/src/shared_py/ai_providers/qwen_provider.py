@@ -24,7 +24,7 @@ class QwenProvider(AIProvider):
     name = "qwen"
     BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
-    def __init__(self, api_key: str = None, model: str = "qwen-max"):
+    def __init__(self, api_key: str = None, model: str = "qwen-plus-latest"):
         if OpenAI is None:
             raise ImportError("openai package not installed. Run: pip install openai")
         key = api_key or os.environ.get("QWEN_API_KEY", "")

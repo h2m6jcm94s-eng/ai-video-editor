@@ -1,16 +1,15 @@
-﻿// Copyright (c) 2025 Devayan Dewri. All rights reserved.
-// Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
-// Commercial SaaS use is prohibited without written permission.
+// Copyright (c) 2025 Devayan Dewri. All rights reserved.
+// Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 export interface Project {
   id: string;
   name: string;
-  status: string;
+  status: "uploading" | "processing" | "complete" | "failed";
   styleTier: string;
   mode: string;
   referenceAssetId: string | null;
   songAssetId: string | null;
   clipAssetIds: string[];
-  cutList: unknown;
+  cutList: CutList | null;
   renderAssetId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -19,7 +18,7 @@ export interface Project {
 export interface Asset {
   id: string;
   projectId: string;
-  type: string;
+  type: "reference" | "song" | "clip";
   filename: string;
   mimeType: string;
   sizeBytes: number;
@@ -36,7 +35,7 @@ export interface Asset {
 export interface RenderJob {
   id: string;
   projectId: string;
-  status: string;
+  status: "queued" | "running" | "complete" | "failed";
   stage: string;
   progress: number;
   workflowId: string | null;
@@ -46,6 +45,62 @@ export interface RenderJob {
   startedAt: string | null;
   completedAt: string | null;
   createdAt: string;
+}
+
+export interface CutListGlobals {
+  total_duration_s: number;
+  tempo_bpm: number;
+  time_signature: string;
+  energy_curve: number[];
+  section_markers: string[];
+  aspect_ratio: string;
+}
+
+export interface Slot {
+  index: number;
+  start_s: number;
+  duration_s: number;
+  beat_index: number;
+  section: string;
+  transition_in: string;
+  transition_out: string;
+  target_shot_type: string;
+  subject_hint: string;
+  motion_hint: string;
+  energy_level: number;
+  required_tags: string[];
+  avoid_tags: string[];
+  selected_clip_id: string | null;
+  ranked_clip_ids: string[] | null;
+  confidence: number | null;
+}
+
+export interface Overlay {
+  id: string;
+  type: "text" | "shape" | "effect";
+  text?: string;
+  start_time: number;
+  end_time: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  style?: Record<string, unknown>;
+}
+
+export interface CutList {
+  globals: CutListGlobals;
+  slots: Slot[];
+  overlays: Overlay[];
+}
+
+export interface BeatGrid {
+  bpm: number;
+  time_signature: string;
+  beats: number[];
+  beat_positions: number[];
+  segments: { start: number; end: number; label: string }[];
+  downbeats: number[];
 }
 
 export class APIError extends Error {

@@ -1,7 +1,6 @@
-﻿// Copyright (c) 2025 Devayan Dewri. All rights reserved.
-// Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
-// Commercial SaaS use is prohibited without written permission.
-import { APIError, type Project, type Asset, type RenderJob } from "@/types/api";
+// Copyright (c) 2025 Devayan Dewri. All rights reserved.
+// Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
+import { APIError, type Project, type Asset, type RenderJob, type CutList } from "@/types/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
 
@@ -38,7 +37,7 @@ export const api = {
       fetchAPI(`/projects/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     delete: (id: string): Promise<{ success: boolean }> =>
       fetchAPI(`/projects/${id}`, { method: "DELETE" }),
-    updateCutlist: (id: string, cutList: unknown): Promise<{ project: Project }> =>
+    updateCutlist: (id: string, cutList: CutList): Promise<{ project: Project }> =>
       fetchAPI(`/projects/${id}/cutlist`, { method: "PATCH", body: JSON.stringify({ cutList }) }),
   },
   uploads: {
