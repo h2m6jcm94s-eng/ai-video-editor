@@ -36,6 +36,15 @@ infra/           Docker, Temporal, deployment configs
 - Editor state: `apps/web/src/hooks/useEditor.ts`
 - Domain glossary: `CONTEXT.md` (create if missing)
 
+## Workflow norms (issue-first, small PRs)
+
+1. **Every change starts with an issue.** Open a GitHub issue describing the bug/feature/refactor before writing code.
+2. **Branch naming**: `feat/<issue-number>-short-desc`, `fix/<issue-number>-short-desc`, `chore/<issue-number>-short-desc`.
+3. **One concern per PR.** A PR should be reviewable in under 15 minutes. If it's longer, split it.
+4. **PR description must reference the issue**: `Closes #<issue-number>`.
+5. **No spam bots.** We intentionally do NOT use pr-agent, Danger, semantic-pr, or any workflow that posts PR comments or sends email spam. Auto-labels only (path-based + first-time contributor + keyword matching).
+6. **Merge when CI is green.** Use squash merge. Keep commit messages descriptive.
+
 ## Before you make changes
 
 1. Run `pnpm typecheck` after any TS change.

@@ -1,0 +1,41 @@
+api:
+  - changed-files:
+      - any-glob-to-any-file:
+          - apps/api/**
+          - packages/shared-types/**
+
+web:
+  - changed-files:
+      - any-glob-to-any-file:
+          - apps/web/**
+
+python-workers:
+  - changed-files:
+      - any-glob-to-any-file:
+          - services/**
+          - infra/temporal/**
+
+database:
+  - changed-files:
+      - any-glob-to-any-file:
+          - apps/api/src/db/**
+          - apps/api/src/db/migrations/**
+
+infra:
+  - changed-files:
+      - any-glob-to-any-file:
+          - infra/docker/**
+          - infra/modal/**
+
+docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+          - AGENTS.md
+          - CONTEXT.md
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/workflows/**
+          - .husky/**
