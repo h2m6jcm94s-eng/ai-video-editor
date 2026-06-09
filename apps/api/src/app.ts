@@ -57,6 +57,22 @@ export async function buildApp() {
     keyGenerator: (req) => req.userId ?? req.ip,
   });
 
+  // Request timing: track slow endpoints
+  const SLOW_REQUEST_MS = 500;
+  app.addHook("onRequest", async (request) => {
+    (request as any)._startTime = performance.now();
+  });
+  app.addHook("onResponse", async (request, reply) => {
+    const start = (request as any)._startTime as number | undefined;
+    if (start !== undefined) {
+      const duration = Math.round(performance.now() - start);
+      reply.header("x-response-time", `${duration}ms`);
+      if (duration > SLOW_REQUEST_MS) {
+        request.log.warn({ url: request.url, method: request.method, duration }, "Slow request detected");
+      }
+    }
+  });
+
   // Propagate request ID via response header
   app.addHook("onSend", async (request, reply, payload) => {
     reply.header("x-request-id", request.id);
