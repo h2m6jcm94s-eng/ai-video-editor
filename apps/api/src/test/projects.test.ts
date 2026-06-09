@@ -124,4 +124,23 @@ describe("Project Routes", () => {
     const body = JSON.parse(res.body);
     expect(body.success).toBe(true);
   });
+
+  it("DELETE /api/projects/:id returns 404 for missing project", async () => {
+    vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(undefined);
+
+    const app = await buildApp();
+    const res = await app.inject({ method: "DELETE", url: "/api/projects/proj-999" });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("DELETE /api/projects/:id returns 403 for other user's project", async () => {
+    vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce({
+      ...mockProject,
+      userId: "other-user-id",
+    });
+
+    const app = await buildApp();
+    const res = await app.inject({ method: "DELETE", url: "/api/projects/proj-1" });
+    expect(res.statusCode).toBe(403);
+  });
 });
