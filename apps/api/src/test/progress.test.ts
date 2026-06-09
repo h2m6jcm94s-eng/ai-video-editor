@@ -55,5 +55,4 @@ describe("Progress Routes", () => {
     expect(JSON.parse(res.body).code).toBe("FORBIDDEN");
   });
 
-
 });
