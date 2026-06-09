@@ -2,7 +2,7 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import { useState } from "react";
+import { useState, memo } from "react";
 import { Send, X, Wand2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,7 +27,7 @@ interface PromptPanelProps {
 
 type PromptForm = z.infer<typeof promptEditSchema>;
 
-export function PromptPanel({ projectId, cutList, onUpdateCutlist, onUndo, onClose }: PromptPanelProps) {
+function PromptPanelInner({ projectId, cutList, onUpdateCutlist, onUndo, onClose }: PromptPanelProps) {
   const [history, setHistory] = useState<{ prompt: string; response: string; error?: boolean }[]>([]);
   const [loading, setLoading] = useState(false);
   const api = useApi();
@@ -127,3 +127,5 @@ export function PromptPanel({ projectId, cutList, onUpdateCutlist, onUndo, onClo
     </div>
   );
 }
+
+export const PromptPanel = memo(PromptPanelInner);

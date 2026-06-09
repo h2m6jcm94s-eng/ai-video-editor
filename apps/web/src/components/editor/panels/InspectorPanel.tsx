@@ -2,7 +2,7 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, memo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -63,21 +63,23 @@ interface InspectorPanelProps {
   onUpdateEffects?: (effects: PreviewEffects) => void;
 }
 
-function EffectSlider({
-  label,
-  value,
-  min,
-  max,
-  step,
-  onChange,
-}: {
+interface EffectSliderProps {
   label: string;
   value: number;
   min: number;
   max: number;
   step: number;
   onChange: (v: number) => void;
-}) {
+}
+
+const EffectSlider = memo(function EffectSlider({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: EffectSliderProps) {
   return (
     <div className="space-y-1">
       <div className="flex justify-between">
@@ -95,9 +97,9 @@ function EffectSlider({
       />
     </div>
   );
-}
+});
 
-export function InspectorPanel({
+function InspectorPanelInner({
   selectedSlot,
   selectedSlotIndex,
   selectedOverlayId,
@@ -442,3 +444,5 @@ export function InspectorPanel({
     </div>
   );
 }
+
+export const InspectorPanel = memo(InspectorPanelInner);

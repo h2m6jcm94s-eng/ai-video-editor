@@ -2,7 +2,7 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import { useEffect, useCallback, useState, useRef } from "react";
+import { useEffect, useCallback, useState, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import { ChevronLeft, Play, Pause, RotateCcw, Subtitles, Smartphone, Save, FolderOpen, CheckCircle2, AlertCircle, Loader2, Command as CommandIcon, Wand2, Film, Type, Music, Settings } from "lucide-react";
@@ -138,17 +138,20 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
     actions.setCutList(cutList);
   }, [actions, pushUndo]);
 
-  const commandActions: CommandAction[] = [
-    { id: "play-pause", title: "Play / Pause", shortcut: "Space", icon: <Play className="h-4 w-4" />, section: "Playback", perform: () => timeline.togglePlay() },
-    { id: "seek-start", title: "Seek to start", shortcut: "Home", icon: <RotateCcw className="h-4 w-4" />, section: "Playback", perform: () => timeline.seek(0) },
-    { id: "ai-prompt", title: "Open AI Prompt", shortcut: "P", icon: <Wand2 className="h-4 w-4" />, section: "AI", perform: () => setPromptOpen(true) },
-    { id: "render", title: "Render video", icon: <Film className="h-4 w-4" />, section: "Export", perform: () => { /* render button handles its own state */ } },
-    { id: "add-text", title: "Add text overlay", icon: <Type className="h-4 w-4" />, section: "Overlays", perform: () => toast.info("Select a slot and use the Inspector to add overlays.") },
-    { id: "add-audio", title: "Add audio track", icon: <Music className="h-4 w-4" />, section: "Audio", perform: () => toast.info("Drag a song asset onto the timeline.") },
-    { id: "save-template", title: "Save as template", icon: <Save className="h-4 w-4" />, section: "Templates", perform: () => state.cutList && setSaveTemplateOpen(true) },
-    { id: "load-template", title: "Load template", icon: <FolderOpen className="h-4 w-4" />, section: "Templates", perform: () => setLoadTemplateOpen(true) },
-    { id: "open-settings", title: "Open Settings — API Keys", icon: <Settings className="h-4 w-4" />, section: "Settings", perform: () => router.push("/settings/keys") },
-  ];
+  const commandActions = useMemo<CommandAction[]>(
+    () => [
+      { id: "play-pause", title: "Play / Pause", shortcut: "Space", icon: <Play className="h-4 w-4" />, section: "Playback", perform: () => timeline.togglePlay() },
+      { id: "seek-start", title: "Seek to start", shortcut: "Home", icon: <RotateCcw className="h-4 w-4" />, section: "Playback", perform: () => timeline.seek(0) },
+      { id: "ai-prompt", title: "Open AI Prompt", shortcut: "P", icon: <Wand2 className="h-4 w-4" />, section: "AI", perform: () => setPromptOpen(true) },
+      { id: "render", title: "Render video", icon: <Film className="h-4 w-4" />, section: "Export", perform: () => { /* render button handles its own state */ } },
+      { id: "add-text", title: "Add text overlay", icon: <Type className="h-4 w-4" />, section: "Overlays", perform: () => toast.info("Select a slot and use the Inspector to add overlays.") },
+      { id: "add-audio", title: "Add audio track", icon: <Music className="h-4 w-4" />, section: "Audio", perform: () => toast.info("Drag a song asset onto the timeline.") },
+      { id: "save-template", title: "Save as template", icon: <Save className="h-4 w-4" />, section: "Templates", perform: () => state.cutList && setSaveTemplateOpen(true) },
+      { id: "load-template", title: "Load template", icon: <FolderOpen className="h-4 w-4" />, section: "Templates", perform: () => setLoadTemplateOpen(true) },
+      { id: "open-settings", title: "Open Settings — API Keys", icon: <Settings className="h-4 w-4" />, section: "Settings", perform: () => router.push("/settings/keys") },
+    ],
+    [timeline, state.cutList, router]
+  );
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
