@@ -9,6 +9,19 @@ import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { env } from "./env";
 
+// Global error handlers for unhandled rejections and uncaught exceptions
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection at:", promise, "reason:", reason);
+  // Allow the process to continue but log the error
+  // In production, you may want to exit and let the orchestrator restart
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught Exception:", err);
+  // Exit the process since the application is in an unknown state
+  process.exit(1);
+});
+
 async function main() {
   // Startup probes
   try {

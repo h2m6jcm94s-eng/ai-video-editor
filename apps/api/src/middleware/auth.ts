@@ -49,13 +49,13 @@ export async function requireAuth(
         email = clerkUser.emailAddresses[0]?.emailAddress ?? email;
         name = clerkUser.fullName ?? name;
       } catch (clerkErr) {
-        console.warn("Clerk API user lookup failed (using placeholder):", clerkErr);
+        request.log.warn({ err: clerkErr }, "Clerk API user lookup failed (using placeholder)");
       }
       localUser = await upsertUser(auth.userId, email, name);
     }
     request.userId = localUser.id;
   } catch (err) {
-    console.error("User resolution failed:", err);
+    request.log.error({ err }, "User resolution failed");
     return reply.status(500).send({ error: "Failed to resolve user", code: "USER_RESOLUTION_ERROR" });
   }
 }
