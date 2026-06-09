@@ -11,6 +11,8 @@ const isTest = process.env.NODE_ENV === "test";
 // Set test-mode defaults on process.env so all modules see them
 if (isTest) {
   process.env.GUARDRAILS_ENABLED = process.env.GUARDRAILS_ENABLED || "false";
+  // 32-byte test KEK for AES-256-GCM (64 hex chars)
+  process.env.PROVIDER_KEK = process.env.PROVIDER_KEK || "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 }
 
 const schema = z.object({
@@ -28,6 +30,11 @@ const schema = z.object({
   GUARDRAILS_TIMEOUT_MS: z.coerce.number().int().min(100).max(30000).default(3000),
   GUARDRAILS_ENABLED: z.enum(["true", "false"]).default("true"),
   DEFAULT_DAILY_TOKEN_LIMIT: z.coerce.number().int().min(1000).default(100000),
+  PROVIDER_KEK: z
+    .string()
+    .length(64, "PROVIDER_KEK must be exactly 64 hex characters (32 bytes)")
+    .regex(/^[0-9a-fA-F]+$/, "PROVIDER_KEK must be a hex string")
+    .optional(),
 });
 
 const result = schema.safeParse(process.env);

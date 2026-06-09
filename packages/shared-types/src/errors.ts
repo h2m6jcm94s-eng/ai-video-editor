@@ -44,6 +44,11 @@ export const API_ERROR_CODES = [
   "R2_UNAVAILABLE",
   "RATE_LIMITED",
   "INTERNAL_ERROR",
+  "GUARDRAILS_VIOLATION",
+  "MISSING_ASSETS",
+  "TEMPORAL_ERROR",
+  "BUDGET_EXCEEDED",
+  "NO_CUTLIST",
 ] as const;
 
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];

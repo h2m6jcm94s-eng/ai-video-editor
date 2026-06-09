@@ -11,5 +11,6 @@ declare module "fastify" {
     auth: SignedInAuthObject;
     validatedBody?: unknown;
     project?: Project;
+    _startTime?: number;
   }
 }

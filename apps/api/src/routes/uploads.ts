@@ -3,10 +3,12 @@
 // Commercial SaaS use is prohibited without written permission.
 import { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
+import { HeadObjectCommand } from "@aws-sdk/client-s3";
+import { z } from "zod";
 import { db } from "../db";
 import { assets, projects } from "../db/schema";
 import type { AssetType } from "@ai-video-editor/shared-types";
-import { createPresignedUploadUrl, createPresignedDownloadUrl } from "../services/storage";
+import { createPresignedUploadUrl, createPresignedDownloadUrl, s3, BUCKET } from "../services/storage";
 import { validateBody, presignedUploadSchema } from "../middleware/validate";
 import { sendError } from "../lib/errors";
 
@@ -56,47 +58,70 @@ export async function uploadRoutes(app: FastifyInstance) {
     return { assetId, url, fields, key, asset };
   });
 
+  const completeBodySchema = z.object({
+    sizeBytes: z.number().int().min(0).max(5 * 1024 * 1024 * 1024),
+    etag: z.string().min(1),
+    metadata: z.record(z.unknown()).optional(),
+  }).strict();
+
   // Complete upload and probe video metadata
-  app.post("/:assetId/complete", async (request, reply) => {
-    const { assetId } = request.params as { assetId: string };
-    const body = request.body as { sizeBytes: number; etag: string; metadata?: any };
+  app.post("/:assetId/complete",
+    { preHandler: validateBody(completeBodySchema) },
+    async (request, reply) => {
+      const { assetId } = request.params as { assetId: string };
+      const body = request.validatedBody as z.infer<typeof completeBodySchema>;
 
-    if (body.sizeBytes < 0 || body.sizeBytes > 5 * 1024 * 1024 * 1024) {
-      return sendError(reply, 422, "sizeBytes must be between 0 and 5GB", "VALIDATION_ERROR");
+      const assetRow = await db.query.assets.findFirst({
+        where: eq(assets.id, assetId),
+        with: { project: true },
+      });
+      if (!assetRow) {
+        return sendError(reply, 404, "Asset not found", "NOT_FOUND");
+      }
+
+      // Ownership check via project
+      const userId = request.userId;
+      if (!assetRow.project || assetRow.project.userId !== userId) {
+        return sendError(reply, 403, "Forbidden", "FORBIDDEN");
+      }
+
+      // Verify what's actually in R2 matches what client claims
+      try {
+        const head = await s3.send(new HeadObjectCommand({
+          Bucket: BUCKET,
+          Key: assetRow.storageKey,
+        }));
+        const actualEtag = head.ETag?.replace(/"/g, "");
+        const claimedEtag = body.etag.replace(/"/g, "");
+        if (actualEtag !== claimedEtag) {
+          return sendError(reply, 409, "Upload ETag mismatch — content corrupted in transit", "ETAG_MISMATCH");
+        }
+        if (head.ContentLength !== body.sizeBytes) {
+          return sendError(reply, 409, "Upload size mismatch", "ETAG_MISMATCH");
+        }
+      } catch (err) {
+        return sendError(reply, 404, "Upload not found in storage", "UPLOAD_INCOMPLETE");
+      }
+
+      const storageUrl = await createPresignedDownloadUrl(assetRow.storageKey || "");
+
+      const [asset] = await db
+        .update(assets)
+        .set({
+          sizeBytes: body.sizeBytes,
+          storageUrl,
+          metadata: body.metadata || {},
+        })
+        .where(eq(assets.id, assetId))
+        .returning();
+
+      if (!asset) {
+        return sendError(reply, 404, "Asset not found", "NOT_FOUND");
+      }
+
+      return { asset };
     }
-
-    const assetRow = await db.query.assets.findFirst({
-      where: eq(assets.id, assetId),
-      with: { project: true },
-    });
-    if (!assetRow) {
-      return sendError(reply, 404, "Asset not found", "NOT_FOUND");
-    }
-
-    // Ownership check via project
-    const userId = request.userId;
-    if (!assetRow.project || assetRow.project.userId !== userId) {
-      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
-    }
-
-    const storageUrl = await createPresignedDownloadUrl(assetRow.storageKey || "");
-
-    const [asset] = await db
-      .update(assets)
-      .set({
-        sizeBytes: body.sizeBytes,
-        storageUrl,
-        metadata: body.metadata || {},
-      })
-      .where(eq(assets.id, assetId))
-      .returning();
-
-    if (!asset) {
-      return reply.status(404).send({ error: "Asset not found", code: "NOT_FOUND" });
-    }
-
-    return { asset };
-  });
+  );
 
   // Get asset
   app.get("/:assetId", async (request, reply) => {

@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { renders } from "../db/schema";
 import { sendError } from "../lib/errors";
+import { getBufferedEvents } from "../services/queue";
 
 const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
 const subscriberMap = new Map<string, Redis>();
@@ -36,6 +37,16 @@ export async function progressRoutes(app: FastifyInstance) {
       Connection: "keep-alive",
     });
 
+    // Replay missed events if client reconnects with Last-Event-ID
+    const lastEventIdHeader = (request.headers["last-event-id"] as string) || "";
+    const lastEventId = parseInt(lastEventIdHeader, 10);
+    if (!isNaN(lastEventId) && lastEventId > 0) {
+      const missed = await getBufferedEvents(jobId, lastEventId);
+      for (const event of missed) {
+        reply.raw.write(`id: ${event.id}\ndata: ${event.data}\n\n`);
+      }
+    }
+
     // Send initial connection message
     reply.raw.write(`data: ${JSON.stringify({ type: "connected", jobId })}\n\n`);
 
@@ -55,7 +66,16 @@ export async function progressRoutes(app: FastifyInstance) {
 
     const messageHandler = (ch: string, message: string) => {
       if (ch === channel) {
-        reply.raw.write(`data: ${message}\n\n`);
+        try {
+          const parsed = JSON.parse(message);
+          if (parsed.id && parsed.data) {
+            reply.raw.write(`id: ${parsed.id}\ndata: ${parsed.data}\n\n`);
+          } else {
+            reply.raw.write(`data: ${message}\n\n`);
+          }
+        } catch {
+          reply.raw.write(`data: ${message}\n\n`);
+        }
       }
     };
     subscriber.on("message", messageHandler);

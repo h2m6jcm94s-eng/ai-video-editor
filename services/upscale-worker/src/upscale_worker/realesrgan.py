@@ -29,15 +29,24 @@ def upscale_with_realesrgan(
     os.makedirs(frames_dir, exist_ok=True)
     os.makedirs(upscaled_dir, exist_ok=True)
 
+    def _run(cmd, context):
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr.decode("utf-8", errors="replace")[:2000] if e.stderr else ""
+            raise RuntimeError(
+                f"{context} failed (exit {e.returncode}): {stderr}"
+            ) from e
+
     try:
         # Extract frames
-        subprocess.run(
+        _run(
             [
                 "ffmpeg", "-y", "-i", input_path,
                 "-vf", "fps=30",
                 os.path.join(frames_dir, "frame_%06d.png"),
             ],
-            check=True, capture_output=True,
+            "Frame extraction",
         )
 
         # Upscale frames
@@ -45,7 +54,7 @@ def upscale_with_realesrgan(
         for frame in frames:
             in_frame = os.path.join(frames_dir, frame)
             out_frame = os.path.join(upscaled_dir, frame)
-            subprocess.run(
+            _run(
                 [
                     binary,
                     "-i", in_frame,
@@ -54,11 +63,11 @@ def upscale_with_realesrgan(
                     "-n", model,
                     "-t", str(tile_size),
                 ],
-                check=True, capture_output=True,
+                f"Upscale frame {frame}",
             )
 
         # Re-encode
-        subprocess.run(
+        _run(
             [
                 "ffmpeg", "-y",
                 "-i", os.path.join(upscaled_dir, "frame_%06d.png"),
@@ -69,7 +78,7 @@ def upscale_with_realesrgan(
                 "-shortest",
                 output_path,
             ],
-            check=True, capture_output=True,
+            "Re-encode video",
         )
 
     finally:

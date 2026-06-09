@@ -2,7 +2,16 @@
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
 import { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { sendError } from "../lib/errors";
+
+const presenceSchema = z
+  .object({
+    x: z.number().int(),
+    y: z.number().int(),
+    name: z.string().max(100).optional(),
+  })
+  .strict();
 
 interface CursorData {
   x: number;
@@ -42,14 +51,22 @@ function hashColor(str: string): string {
 
 export async function presenceRoutes(app: FastifyInstance) {
   // Report presence
-  app.post("/:id/presence", async (request, reply) => {
+  app.post("/:id/presence", {
+    config: {
+      rateLimit: {
+        max: 30,
+        timeWindow: "1 minute",
+      },
+    },
+  }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = request.userId;
-    const body = request.body as { x?: number; y?: number; name?: string };
 
-    if (typeof body.x !== "number" || typeof body.y !== "number") {
-      return reply.status(400).send({ error: "x and y required", code: "VALIDATION_ERROR" });
+    const parsed = presenceSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return sendError(reply, 422, "Validation failed", "VALIDATION_ERROR", parsed.error.issues);
     }
+    const body = parsed.data;
 
     let projectMap = presenceStore.get(id);
     if (!projectMap) {

@@ -25,7 +25,7 @@ describe("Presence Routes", () => {
       url: "/api/presence/proj-1/presence",
       payload: { x: 50 },
     });
-    expect(res.statusCode).toBe(400);
+    expect(res.statusCode).toBe(422);
     expect(JSON.parse(res.body).code).toBe("VALIDATION_ERROR");
   });
 

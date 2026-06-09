@@ -80,6 +80,15 @@ vi.mock("../services/storage", () => ({
   downloadAsset: vi.fn(async () => "/tmp/test.mp3"),
   deleteProjectAssets: vi.fn(async () => {}),
   probeS3Connection: vi.fn(async () => {}),
+  s3: {
+    send: vi.fn(async (command: any) => {
+      if (command.constructor.name === "HeadObjectCommand") {
+        return { ETag: '"abc123"', ContentLength: 1024 };
+      }
+      return {};
+    }),
+  },
+  BUCKET: "test",
 }));
 
 // Mock fs

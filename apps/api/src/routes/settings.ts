@@ -9,29 +9,7 @@ import { providerKeySchema, testProviderKeySchema } from "@ai-video-editor/share
 import { validateBody } from "../middleware/validate";
 import { sendError } from "../lib/errors";
 import { getUsageForUser } from "../middleware/tokenBudget";
-
-// Simple XOR encryption for demo — replace with AES-256-GCM + KEK in production
-function encrypt(key: string, secret: string): string {
-  const buf = Buffer.from(key);
-  const sec = Buffer.from(secret);
-  const out = Buffer.alloc(buf.length);
-  for (let i = 0; i < buf.length; i++) {
-    out[i] = buf[i] ^ sec[i % sec.length];
-  }
-  return out.toString("base64");
-}
-
-function decrypt(cipher: string, secret: string): string {
-  const buf = Buffer.from(cipher, "base64");
-  const sec = Buffer.from(secret);
-  const out = Buffer.alloc(buf.length);
-  for (let i = 0; i < buf.length; i++) {
-    out[i] = buf[i] ^ sec[i % sec.length];
-  }
-  return out.toString("utf-8");
-}
-
-const ENCRYPTION_SECRET = process.env.PROVIDER_ENCRYPTION_SECRET || "dev-secret-do-not-use-in-production";
+import { encrypt as aesEncrypt, decrypt as aesDecrypt } from "../lib/crypto";
 
 export async function settingsRoutes(app: FastifyInstance) {
   // Get user's AI token usage
@@ -50,7 +28,7 @@ export async function settingsRoutes(app: FastifyInstance) {
     return {
       keys: rows.map((r) => ({
         provider: r.provider,
-        masked: maskKey(decrypt(r.encryptedKey, ENCRYPTION_SECRET)),
+        masked: maskKey(aesDecrypt(r.encryptedKey)),
         createdAt: r.createdAt,
       })),
     };
@@ -61,7 +39,7 @@ export async function settingsRoutes(app: FastifyInstance) {
     const body = request.validatedBody as { provider: string; key: string };
     const userId = request.userId;
 
-    const encrypted = encrypt(body.key, ENCRYPTION_SECRET);
+    const encrypted = aesEncrypt(body.key);
 
     await db
       .insert(providerKeys)
@@ -99,7 +77,7 @@ export async function settingsRoutes(app: FastifyInstance) {
       return sendError(reply, 404, "Key not found", "NOT_FOUND");
     }
 
-    const key = decrypt(row.encryptedKey, ENCRYPTION_SECRET);
+    const key = aesDecrypt(row.encryptedKey);
 
     try {
       if (body.provider === "anthropic") {
