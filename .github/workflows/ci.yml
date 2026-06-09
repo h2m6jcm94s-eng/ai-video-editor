@@ -33,6 +33,26 @@ jobs:
           NEXT_PUBLIC_API_URL: http://localhost:4000
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_dummy00000000000000000000000000000000000000000000000000
 
+  test-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @ai-video-editor/shared-types build
+      - run: pnpm --filter @ai-video-editor/web typecheck
+      - name: Run web tests
+        run: pnpm --filter @ai-video-editor/web test
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:4000
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_dummy00000000000000000000000000000000000000000000000000
+
   test-api:
     runs-on: ubuntu-latest
     steps:
@@ -107,12 +127,12 @@ jobs:
   # Single gate that branch protection can require. Adding new test jobs is a one-line change.
   ci-gate:
     runs-on: ubuntu-latest
-    needs: [test-js, test-api, test-py, docker]
+    needs: [test-js, test-web, test-api, test-py, docker]
     if: always()
     steps:
       - name: Require all required jobs to pass
         run: |
-          results=("${{ needs.test-js.result }}" "${{ needs.test-api.result }}" "${{ needs.test-py.result }}" "${{ needs.docker.result }}")
+          results=("${{ needs.test-js.result }}" "${{ needs.test-web.result }}" "${{ needs.test-api.result }}" "${{ needs.test-py.result }}" "${{ needs.docker.result }}")
           for result in "${results[@]}"; do
             if [[ "$result" != "success" ]]; then
               echo "::error::Required job failed with result: $result"

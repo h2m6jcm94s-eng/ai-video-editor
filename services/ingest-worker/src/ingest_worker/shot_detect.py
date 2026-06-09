@@ -21,7 +21,20 @@ except ImportError:
     torch = None
     TransNetV2 = None
 
+from shared_py.logging_config import StructuredLogger
 from shared_py.models import ShotBoundary
+
+logger = StructuredLogger("ingest_worker.shot_detect")
+
+try:
+    import av
+except ImportError:
+    av = None  # type: ignore[assignment]
+
+try:
+    import cv2
+except ImportError:
+    cv2 = None  # type: ignore[assignment]
 
 
 def detect_shot_boundaries_pyscenedetect(
@@ -62,7 +75,8 @@ def detect_shot_boundaries_transnet(
     model.eval()
 
     # Read video frames at TransNet's native resolution (48x27)
-    import av
+    if av is None:
+        raise ImportError("av not installed")
     container = av.open(video_path)
     stream = container.streams.video[0]
 
@@ -71,7 +85,8 @@ def detect_shot_boundaries_transnet(
         for frame in packet.decode():
             # Resize to 48x27
             img = frame.to_ndarray(format="rgb24")
-            import cv2
+            if cv2 is None:
+                raise ImportError("cv2 not installed")
             img = cv2.resize(img, (48, 27), interpolation=cv2.INTER_LINEAR)
             frames.append(img)
 
@@ -142,6 +157,6 @@ def detect_shot_boundaries(
         try:
             return detect_shot_boundaries_transnet(video_path, device, fps)
         except Exception as e:
-            print(f"TransNet failed, falling back to PySceneDetect: {e}")
+            logger.warning("TransNet failed, falling back to PySceneDetect", error=str(e))
             return detect_shot_boundaries_pyscenedetect(video_path)
     return detect_shot_boundaries_pyscenedetect(video_path)

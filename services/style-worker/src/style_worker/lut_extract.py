@@ -24,11 +24,17 @@ try:
 except ImportError:
     colour = None
 
+from shared_py.logging_config import StructuredLogger
 from shared_py.models import StyleAnalysis
+
+logger = StructuredLogger("style_worker.lut_extract")
 
 
 def sample_frames(video_path: str, n_samples: int = 50) -> list:
     """Sample n frames evenly across the video, skipping first/last 0.5s."""
+    if cv2 is None:
+        logger.warning("cv2 not available, cannot sample frames")
+        return []
     cap = cv2.VideoCapture(video_path)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS)
@@ -132,10 +138,14 @@ def extract_lut_from_reference(
     kmeans.fit(samples)
     palette = [f"#{int(c[2]):02x}{int(c[1]):02x}{int(c[0]):02x}" for c in kmeans.cluster_centers_]
 
+    saturation = 0.5
+    if cv2 is not None:
+        saturation = float(cv2.cvtColor(median_frame, cv2.COLOR_BGR2HSV)[:, :, 1].mean() / 128.0)
+
     analysis = StyleAnalysis(
         color_palette=palette,
         contrast_level=float(std_color.mean() / 60.0),
-        saturation_level=float(cv2.cvtColor(median_frame, cv2.COLOR_BGR2HSV)[:, :, 1].mean() / 128.0),
+        saturation_level=saturation,
         brightness_level=float(mean_color.mean() / 128.0),
         lut_extracted=True,
         lut_storage_key=cube_path,

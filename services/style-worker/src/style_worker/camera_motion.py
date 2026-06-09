@@ -6,15 +6,21 @@
 from typing import List
 import numpy as np
 
+from shared_py.logging_config import StructuredLogger
+
 try:
     import cv2
 except ImportError:
     cv2 = None  # type: ignore[assignment]
 
+logger = StructuredLogger("style_worker.camera_motion")
 
 
 def analyze_camera_motion(video_path: str, shot_boundaries: list) -> List[str]:
     """Analyze camera motion per shot."""
+    if cv2 is None:
+        logger.warning("cv2 not available, skipping camera motion analysis")
+        return ["static"] * len(shot_boundaries)
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))

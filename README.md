@@ -69,10 +69,11 @@ AI provider keys are stored per-user in the `provider_keys` table, encrypted at 
 ## Scripts
 
 ```bash
-pnpm dev          # Start web + api + shared-types watch
-pnpm typecheck    # Type-check all packages
-pnpm test         # Run API tests
-pnpm test:coverage # Run API tests with coverage report
+pnpm dev           # Start web + api + shared-types watch
+pnpm typecheck     # Type-check all packages
+pnpm --filter api test           # Run API tests
+pnpm --filter api test:coverage  # Run API tests with coverage report
+pnpm --filter web test           # Run frontend tests
 ```
 
 ## License

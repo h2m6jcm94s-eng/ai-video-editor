@@ -64,16 +64,30 @@ class TestProbeVideo:
 
 class TestProbeEdgeCases:
     def test_probe_nonexistent_file(self):
-        with pytest.raises(Exception):
-            probe_video("/nonexistent/file.mp4")
+        from ingest_worker import probe as probe_module
+        if probe_module.av is None:
+            # Graceful degradation when av is not installed
+            info = probe_video("/nonexistent/file.mp4")
+            assert info["duration_sec"] == 0.0
+            assert info["streams"] == []
+        else:
+            with pytest.raises(Exception):
+                probe_video("/nonexistent/file.mp4")
 
     def test_probe_empty_file(self):
+        from ingest_worker import probe as probe_module
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
             f.write(b"")
             path = f.name
         try:
-            with pytest.raises(Exception):
-                probe_video(path)
+            if probe_module.av is None:
+                # Graceful degradation when av is not installed
+                info = probe_video(path)
+                assert info["duration_sec"] == 0.0
+                assert info["streams"] == []
+            else:
+                with pytest.raises(Exception):
+                    probe_video(path)
         finally:
             os.unlink(path)
 

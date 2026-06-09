@@ -15,8 +15,8 @@ make dev
 ## Project Structure
 
 - **Monorepo**: pnpm workspaces (JS) + uv workspaces (Python)
-- **API**: Fastify 5 in `apps/api/`
-- **Web**: Next.js 14 in `apps/web/`
+- **API**: Fastify 4 in `apps/api/`
+- **Web**: Next.js 15 in `apps/web/`
 - **Workers**: Python services in `services/`
 - **Shared**: `@ai-video-editor/shared-types` for TS, `shared-py` for Python
 
@@ -29,7 +29,14 @@ make dev
 ## Testing
 
 ```bash
-make test
+# TypeScript tests
+pnpm --filter @ai-video-editor/api test
+pnpm --filter @ai-video-editor/web test
+
+# Python tests
+.venv/Scripts/python -m pytest tests/
+# or on Unix:
+python -m pytest tests/
 ```
 
 ## Adding a New Worker
@@ -43,7 +50,7 @@ make test
 
 ## Pull Request Process
 
-1. Branch from `develop`
+1. Branch from `main`
 2. Add tests for new functionality
 3. Ensure CI passes
 4. Request review from maintainers

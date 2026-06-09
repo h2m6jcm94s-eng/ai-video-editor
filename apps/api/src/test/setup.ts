@@ -113,6 +113,8 @@ vi.mock("ioredis", () => ({
     publish = vi.fn().mockResolvedValue(1);
     get = vi.fn().mockResolvedValue(null);
     setex = vi.fn().mockResolvedValue("OK");
+    del = vi.fn().mockResolvedValue(1);
+    keys = vi.fn().mockResolvedValue([]);
   },
 }));
 

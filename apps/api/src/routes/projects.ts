@@ -11,6 +11,7 @@ import { deleteProjectAssets, downloadAsset } from "../services/storage";
 import { validateBody, createProjectSchema, patchProjectSchema, updateCutlistSchema, promptEditSchema } from "../middleware/validate";
 import { applyPromptEdit, transcribeAudio } from "../services/ai";
 import { sendError } from "../lib/errors";
+import { cacheGet, cacheSet, cacheDel } from "../lib/cache";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -19,6 +20,11 @@ export async function projectRoutes(app: FastifyInstance) {
   // List projects for user
   app.get("/", async (request, reply) => {
     const userId = request.userId;
+    const cacheKey = `projects:list:${userId}`;
+    const cached = await cacheGet<typeof userProjects>(cacheKey);
+    if (cached) {
+      return { projects: cached };
+    }
     const userProjects = await db.query.projects.findMany({
       where: eq(projects.userId, userId),
       orderBy: [desc(projects.updatedAt)],
@@ -26,6 +32,7 @@ export async function projectRoutes(app: FastifyInstance) {
         assets: true,
       },
     });
+    await cacheSet(cacheKey, userProjects);
     return { projects: userProjects };
   });
 
@@ -46,6 +53,7 @@ export async function projectRoutes(app: FastifyInstance) {
       })
       .returning();
 
+    await cacheDel(`projects:list:${userId}`);
     return { project };
   });
 
@@ -87,6 +95,7 @@ export async function projectRoutes(app: FastifyInstance) {
       .where(eq(projects.id, id))
       .returning();
 
+    await cacheDel(`projects:list:${userId}`);
     return { project: updated };
   });
 
@@ -290,6 +299,7 @@ export async function projectRoutes(app: FastifyInstance) {
     });
 
     await db.delete(projects).where(eq(projects.id, id));
+    await cacheDel(`projects:list:${userId}`);
     return { success: true };
   });
 }

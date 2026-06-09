@@ -7,15 +7,22 @@ import { db } from "../db";
 import { templates } from "../db/schema";
 import { validateBody, createTemplateSchema } from "../middleware/validate";
 import { sendError } from "../lib/errors";
+import { cacheGet, cacheSet, cacheDel } from "../lib/cache";
 
 export async function templateRoutes(app: FastifyInstance) {
   // List templates (user's own + public)
   app.get("/", async (request, reply) => {
     const userId = request.userId;
+    const cacheKey = `templates:list:${userId}`;
+    const cached = await cacheGet<typeof userTemplates>(cacheKey);
+    if (cached) {
+      return { templates: cached };
+    }
     const userTemplates = await db.query.templates.findMany({
       where: or(eq(templates.userId, userId), eq(templates.isPublic, true)),
       orderBy: [desc(templates.updatedAt)],
     });
+    await cacheSet(cacheKey, userTemplates);
     return { templates: userTemplates };
   });
 
@@ -42,6 +49,7 @@ export async function templateRoutes(app: FastifyInstance) {
       })
       .returning();
 
+    await cacheDel(`templates:list:${userId}`);
     return { template };
   });
 
@@ -82,6 +90,7 @@ export async function templateRoutes(app: FastifyInstance) {
       .where(eq(templates.id, id))
       .returning();
 
+    await cacheDel(`templates:list:${userId}`);
     return { template: updated };
   });
 
@@ -100,6 +109,7 @@ export async function templateRoutes(app: FastifyInstance) {
     }
 
     await db.delete(templates).where(eq(templates.id, id));
+    await cacheDel(`templates:list:${userId}`);
     return { success: true };
   });
 

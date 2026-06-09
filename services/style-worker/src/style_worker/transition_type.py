@@ -11,13 +11,21 @@ try:
 except ImportError:
     cv2 = None  # type: ignore[assignment]
 
+from shared_py.logging_config import StructuredLogger
 from shared_py.models import ShotBoundary
+
+logger = StructuredLogger("style_worker.transition_type")
 
 
 def classify_transitions(
     video_path: str, boundaries: List[ShotBoundary]
 ) -> List[ShotBoundary]:
     """Classify transition type for each boundary."""
+    if cv2 is None:
+        logger.warning("cv2 not available, skipping transition classification")
+        for b in boundaries:
+            b.transition_in = "hard_cut"
+        return boundaries
     cap = cv2.VideoCapture(video_path)
 
     for boundary in boundaries:

@@ -26,6 +26,8 @@ infra/           Docker, Temporal, deployment configs
 5. **Forbidden additions**: Redux, Zustand, Jotai, Mobx, CSS Modules, styled-components, emotion. Use vanilla `useState`/`useReducer` and Tailwind only.
 6. **Auth**: Server components use `apiServer`. Client components use `useApi()`. Never pass Clerk tokens manually.
 7. **Effect catalog**: Every new effect needs shared schema → web preview → Python render impl → test.
+8. **Redis caching**: List endpoints use `cacheGet`/`cacheSet` with per-user keys (`{resource}:list:{userId}`) and 30s TTL. Invalidate on mutations via `cacheDel`.
+9. **Coverage ratchet**: API tests enforce `statements: 70%, branches: 55%, functions: 60%, lines: 70%`. Don't let coverage drop.
 
 ## Where to find things
 
@@ -35,6 +37,9 @@ infra/           Docker, Temporal, deployment configs
 - Backend validation: `apps/api/src/middleware/validate.ts`
 - Editor state: `apps/web/src/hooks/useEditor.ts`
 - Domain glossary: `CONTEXT.md` (create if missing)
+- Cache helpers: `apps/api/src/lib/cache.ts`
+- Shared Redis client: `apps/api/src/lib/redis.ts`
+- Structured logger: `services/shared-py/src/shared_py/logging_config.py`
 
 ## Workflow norms (issue-first, small PRs)
 
@@ -48,6 +53,8 @@ infra/           Docker, Temporal, deployment configs
 ## Before you make changes
 
 1. Run `pnpm typecheck` after any TS change.
-2. Run `pnpm test --filter=@ai-video-editor/api` after any backend change.
-3. Update this file or the layer-specific `AGENTS.md` if you add a new convention.
-4. Prefer minimal changes. The codebase is fragile; small PRs win.
+2. Run `pnpm --filter @ai-video-editor/api test` after any backend change.
+3. Run `pnpm --filter @ai-video-editor/web test` after any frontend change.
+4. Run `.venv/Scripts/python -m pytest tests/` after any Python change.
+5. Update this file or the layer-specific `AGENTS.md` if you add a new convention.
+6. Prefer minimal changes. The codebase is fragile; small PRs win.
