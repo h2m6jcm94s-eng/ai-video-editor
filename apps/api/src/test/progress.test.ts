@@ -7,45 +7,53 @@ describe("Progress Routes", () => {
     vi.clearAllMocks();
   });
 
-  const PROJ_ID = "8562dc1a-1493-42ee-ab6e-1075b83c88d6";
-  const JOB_ID = "fc6b55b4-01cd-431b-808a-35b4f28613e1";
+  const mockRender = {
+    id: "render-1",
+    projectId: "proj-1",
+    status: "running",
+    workflowId: "wf-1",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
 
   const mockProject = {
-    id: PROJ_ID,
+    id: "proj-1",
     userId: "test-user-id",
-    name: "Test",
-    status: "rendering",
+    name: "Test Project",
   };
 
-  const mockRender = {
-    id: JOB_ID,
-    projectId: PROJ_ID,
-    status: "running",
-    stage: "compiling",
-    progress: 50,
-  };
-
-  it.skip("GET /api/progress/:jobId/events returns SSE headers", async () => {
-    // SSE endpoints keep connections open; test via integration or manual verification.
-    // Auth + ownership coverage is provided by the 404/403 tests above.
-  });
-
-  it("GET /api/progress/:jobId/events returns 404 for missing job", async () => {
+  it("GET /api/progress/:jobId/events returns 404 when job not found", async () => {
     vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(undefined);
 
     const app = await buildApp();
-    const res = await app.inject({ method: "GET", url: `/api/progress/${JOB_ID}/events` });
+    const res = await app.inject({ method: "GET", url: "/api/progress/render-999/events" });
     expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.body).code).toBe("NOT_FOUND");
   });
 
-  it("GET /api/progress/:jobId/events returns 403 for other user's job", async () => {
+  it("GET /api/progress/:jobId/events returns 403 when job belongs to another user", async () => {
     vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce({
       ...mockRender,
       project: { ...mockProject, userId: "other-user-id" },
-    } as any);
+    });
 
     const app = await buildApp();
-    const res = await app.inject({ method: "GET", url: `/api/progress/${JOB_ID}/events` });
+    const res = await app.inject({ method: "GET", url: "/api/progress/render-1/events" });
     expect(res.statusCode).toBe(403);
+    expect(JSON.parse(res.body).code).toBe("FORBIDDEN");
   });
+
+  it("GET /api/progress/:jobId/events returns 403 when project is missing", async () => {
+    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce({
+      ...mockRender,
+      project: null,
+    });
+
+    const app = await buildApp();
+    const res = await app.inject({ method: "GET", url: "/api/progress/render-1/events" });
+    expect(res.statusCode).toBe(403);
+    expect(JSON.parse(res.body).code).toBe("FORBIDDEN");
+  });
+
+
 });
