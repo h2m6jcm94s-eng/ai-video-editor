@@ -21,7 +21,10 @@ except ImportError:
     torch = None
     TransNetV2 = None
 
+from shared_py.logging_config import StructuredLogger
 from shared_py.models import ShotBoundary
+
+logger = StructuredLogger("ingest_worker.shot_detect")
 
 
 def detect_shot_boundaries_pyscenedetect(
@@ -142,6 +145,6 @@ def detect_shot_boundaries(
         try:
             return detect_shot_boundaries_transnet(video_path, device, fps)
         except Exception as e:
-            print(f"TransNet failed, falling back to PySceneDetect: {e}")
+            logger.warning("TransNet failed, falling back to PySceneDetect", error=str(e))
             return detect_shot_boundaries_pyscenedetect(video_path)
     return detect_shot_boundaries_pyscenedetect(video_path)

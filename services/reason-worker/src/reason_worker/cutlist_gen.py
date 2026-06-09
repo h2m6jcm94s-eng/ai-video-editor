@@ -15,7 +15,10 @@ if shared_py_path not in sys.path:
     sys.path.insert(0, shared_py_path)
 
 from shared_py.ai_providers.factory import get_ai_provider
+from shared_py.logging_config import StructuredLogger
 from shared_py.models import CutList, CutListGlobals, Slot, Overlay, BeatGrid, ShotBoundary, SectionMarker
+
+logger = StructuredLogger("reason_worker.cutlist_gen")
 
 
 CUTLIST_SCHEMA = {
@@ -121,10 +124,10 @@ def generate_cutlist(
             )
             return provider.generate_cutlist(context, CUTLIST_SCHEMA)
         except Exception as e:
-            print(f"AI provider '{name}' failed: {e}. Trying next...")
+            logger.warning("AI provider failed, trying next", provider=name, error=str(e))
             continue
 
-    print("All AI providers exhausted. Falling back to programmatic.")
+    logger.warning("All AI providers exhausted, falling back to programmatic")
     return generate_cutlist_programmatic(
         beat_grid, shot_boundaries, energy_curve, available_shot_types, total_duration
     )

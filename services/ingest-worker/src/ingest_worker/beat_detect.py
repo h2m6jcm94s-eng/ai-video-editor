@@ -15,7 +15,10 @@ except ImportError:
     librosa = None  # type: ignore[assignment]
     _HAS_LIBROSA = False
 
+from shared_py.logging_config import StructuredLogger
 from shared_py.models import BeatGrid, BeatSegment
+
+logger = StructuredLogger("ingest_worker.beat_detect")
 
 
 def decode_to_wav(input_path: str) -> str:
@@ -56,7 +59,7 @@ def detect_beats_allin1(audio_path: str) -> Optional[BeatGrid]:
     except ImportError:
         return None
     except Exception as e:
-        print(f"allin1 failed: {e}")
+        logger.warning("allin1 beat detection failed", error=str(e))
         return None
 
 

@@ -28,7 +28,10 @@ from style_worker.camera_motion import analyze_camera_motion
 from reason_worker.cutlist_gen import generate_cutlist
 from reason_worker.clip_rank import rank_clips_for_slots, select_top_k_per_slot, compute_confidence
 from render_worker.compiler import compile_timeline, render_preview
+from shared_py.logging_config import StructuredLogger, configure_logging
 from shared_py.models import CutList, RenderConfig
+
+logger = StructuredLogger("orchestrator")
 
 
 def run_pipeline(
@@ -43,22 +46,20 @@ def run_pipeline(
     """Run the full AI video editing pipeline."""
     os.makedirs(temp_dir, exist_ok=True)
 
-    print("=" * 60)
-    print("AI VIDEO EDITOR - Reference Style Matching")
-    print("=" * 60)
+    logger.info("Pipeline started", phase="init", style_tier=style_tier, mode=mode)
 
     # Phase 1: Ingest
-    print("\n[1/7] Probing reference video...")
+    logger.info("Probing reference video", phase="ingest", step=1)
     ref_info = probe_video(reference_path)
-    print(f"  Duration: {ref_info.get('duration_sec', 0):.2f}s")
+    logger.info("Reference probed", duration_sec=round(ref_info.get("duration_sec", 0), 2))
 
-    print("\n[2/7] Detecting shot boundaries...")
+    logger.info("Detecting shot boundaries", phase="ingest", step=2)
     shots = detect_shot_boundaries(reference_path)
-    print(f"  Found {len(shots)} shots")
+    logger.info("Shot boundaries detected", shot_count=len(shots))
 
-    print("\n[3/7] Detecting beat grid...")
+    logger.info("Detecting beat grid", phase="ingest", step=3)
     beats = detect_beats(song_path)
-    print(f"  BPM: {beats.bpm:.1f}, Beats: {len(beats.beats)}")
+    logger.info("Beat grid detected", bpm=round(beats.bpm, 1), beat_count=len(beats.beats))
 
     energy_curve = compute_energy_curve(song_path)
 
@@ -67,29 +68,29 @@ def run_pipeline(
     lut_path = None
 
     if style_tier in ("with_color", "full_style"):
-        print("\n[4/7] Extracting color grade (LUT)...")
+        logger.info("Extracting color grade (LUT)", phase="style", step=4)
         lut_path, style_analysis = extract_lut_from_reference(
             reference_path, temp_dir
         )
-        print(f"  LUT extracted: {lut_path is not None}")
+        logger.info("LUT extracted", lut_extracted=lut_path is not None)
 
     if style_tier in ("with_text", "full_style"):
-        print("\n[5/7] Extracting text overlays...")
+        logger.info("Extracting text overlays", phase="style", step=5)
         overlays = extract_text_overlays(reference_path)
-        print(f"  Found {len(overlays)} text overlays")
+        logger.info("Text overlays extracted", overlay_count=len(overlays))
         style_analysis["detected_overlays"] = [o.model_dump() for o in overlays]
 
     if style_tier == "full_style":
-        print("\n[6/7] Analyzing camera motion...")
+        logger.info("Analyzing camera motion", phase="style", step=6)
         motions = analyze_camera_motion(reference_path, shots)
-        print(f"  Motions: {set(motions)}")
+        logger.info("Camera motion analyzed", motions=list(set(motions)))
         style_analysis["camera_motions"] = motions
 
-        print("\n  Classifying transitions...")
+        logger.info("Classifying transitions", phase="style")
         shots = classify_transitions(reference_path, shots)
 
     # Phase 3: Reasoning
-    print("\n[7/7] Generating cut-list...")
+    logger.info("Generating cut-list", phase="reasoning", step=7)
     # Mock clip metadata for MVP
     clip_metadata = {
         f"clip_{i}": {
@@ -124,16 +125,16 @@ def run_pipeline(
             slot.selected_clip_id = top_k[slot.index][0]
             slot.confidence = confidences.get(slot.index, 0.5)
 
-    print(f"  Generated {len(cutlist.slots)} slots")
+    logger.info("Cut-list generated", slot_count=len(cutlist.slots))
 
     # Save cutlist
     cutlist_path = os.path.join(temp_dir, "cutlist.json")
     with open(cutlist_path, "w") as f:
         json.dump(cutlist.model_dump(), f, indent=2)
-    print(f"  Cut-list saved: {cutlist_path}")
+    logger.info("Cut-list saved", path=cutlist_path)
 
     # Phase 4: Render
-    print("\n[RENDER] Compiling final video...")
+    logger.info("Compiling final video", phase="render")
     config = RenderConfig(
         output_path=output_path,
         width=1280,
@@ -144,15 +145,16 @@ def run_pipeline(
 
     try:
         result = compile_timeline(cutlist, clip_paths_dict, output_path, config)
-        print(f"  Render complete: {result}")
+        logger.info("Render complete", result=result)
     except Exception as e:
-        print(f"  Render failed: {e}")
+        logger.error("Render failed", error=str(e))
         raise
 
     return output_path
 
 
 def main():
+    configure_logging()
     parser = argparse.ArgumentParser(description="AI Video Editor CLI")
     parser.add_argument("--reference", required=True, help="Reference video path")
     parser.add_argument("--song", required=True, help="Song/audio path")
