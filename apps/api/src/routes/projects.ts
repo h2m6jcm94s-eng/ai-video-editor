@@ -12,6 +12,7 @@ import { validateBody, createProjectSchema, patchProjectSchema, updateCutlistSch
 import { applyPromptEdit, transcribeAudio } from "../services/ai";
 import { sendError } from "../lib/errors";
 import { cacheGet, cacheSet, cacheDel } from "../lib/cache";
+import { validatePromptGuardrails } from "../middleware/guardrails";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -136,6 +137,7 @@ export async function projectRoutes(app: FastifyInstance) {
 
   // Transcribe audio asset to subtitles
   app.post("/:id/transcribe", {
+    preHandler: validatePromptGuardrails,
     config: {
       rateLimit: {
         max: 5,
@@ -206,7 +208,7 @@ export async function projectRoutes(app: FastifyInstance) {
 
   // Prompt-to-edit (AI powered)
   app.post("/:id/prompt", {
-    preHandler: validateBody(promptEditSchema),
+    preHandler: [validateBody(promptEditSchema), validatePromptGuardrails],
     config: {
       rateLimit: {
         max: 10,

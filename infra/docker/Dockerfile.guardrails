@@ -1,0 +1,29 @@
+# Copyright (c) 2025 Devayan Dewri. All rights reserved.
+# Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY services/guardrails/pyproject.toml ./
+RUN pip install --no-cache-dir -e "."
+
+# Copy source code
+COPY services/guardrails/src/ ./src/
+COPY services/guardrails/src/guardrails/config/ ./src/guardrails/config/
+
+ENV PYTHONPATH=/app/src
+ENV GUARDRAILS_HOST=0.0.0.0
+ENV GUARDRAILS_PORT=8000
+ENV GUARDRAILS_LOG_LEVEL=info
+ENV GUARDRAILS_ENABLED=true
+
+EXPOSE 8000
+
+CMD ["python", "-m", "uvicorn", "guardrails.main:app", "--host", "0.0.0.0", "--port", "8000"]

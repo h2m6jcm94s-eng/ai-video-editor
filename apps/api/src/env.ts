@@ -8,6 +8,11 @@ config({ path: ".env.local" });
 
 const isTest = process.env.NODE_ENV === "test";
 
+// Set test-mode defaults on process.env so all modules see them
+if (isTest) {
+  process.env.GUARDRAILS_ENABLED = process.env.GUARDRAILS_ENABLED || "false";
+}
+
 const schema = z.object({
   DATABASE_URL: z.string().url("DATABASE_URL must be a valid postgres:// URL").default("postgresql://localhost:5432/test"),
   CLERK_SECRET_KEY: z.string().min(1, "CLERK_SECRET_KEY is missing").default("sk_test_dummy"),
@@ -19,6 +24,9 @@ const schema = z.object({
   REDIS_URL: z.string().url("REDIS_URL must be a valid redis:// URL").default("redis://localhost:6379"),
   TEMPORAL_HOST: z.string().min(1, "TEMPORAL_HOST is missing (e.g. localhost:7233)").default("localhost:7233"),
   API_PORT: z.coerce.number().int().min(1).max(65535).default(4000),
+  GUARDRAILS_URL: z.string().url().optional(),
+  GUARDRAILS_TIMEOUT_MS: z.coerce.number().int().min(100).max(30000).default(3000),
+  GUARDRAILS_ENABLED: z.enum(["true", "false"]).default("true"),
 });
 
 const result = schema.safeParse(process.env);

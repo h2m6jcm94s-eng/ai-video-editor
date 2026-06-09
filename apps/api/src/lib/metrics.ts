@@ -128,6 +128,14 @@ export const rateLimitHitsTotal = getOrCreateCounter({
   labelNames: ["route"],
 });
 
+// ─── Guardrails Metrics ─────────────────────────────────────────────────────
+
+export const guardrailsBlocksTotal = getOrCreateCounter({
+  name: "ave_guardrails_blocks_total",
+  help: "Total guardrails blocks by category and route",
+  labelNames: ["category", "route"],
+});
+
 // ─── Startup / Health ───────────────────────────────────────────────────────
 
 export const startupTimestamp = getOrCreateGauge({
