@@ -125,6 +125,31 @@ describe("Render Routes", () => {
     expect(res.statusCode).toBe(409);
   });
 
+  it("POST /api/renders returns 500 when Temporal workflow fails", async () => {
+    vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(mockProject as any);
+    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(undefined);
+    vi.mocked(db.insert).mockReturnValueOnce({
+      values: vi.fn().mockReturnValueOnce({
+        returning: vi.fn().mockResolvedValueOnce([mockRender]),
+      }),
+    } as any);
+    vi.mocked(db.update).mockReturnValueOnce({
+      set: vi.fn().mockReturnValueOnce({
+        where: vi.fn().mockResolvedValueOnce(undefined),
+      }),
+    } as any);
+    vi.mocked(startRenderWorkflow).mockRejectedValueOnce(new Error("Temporal down"));
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/renders",
+      payload: { projectId: PROJ_ID },
+    });
+    expect(res.statusCode).toBe(500);
+    expect(JSON.parse(res.body).code).toBe("TEMPORAL_ERROR");
+  });
+
   it("GET /api/renders/:jobId returns render job", async () => {
     vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce({ ...mockRender, project: mockProject } as any);
 
@@ -144,5 +169,32 @@ describe("Render Routes", () => {
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(body.jobs).toHaveLength(1);
+  });
+
+  it("GET /api/renders/:jobId returns 404 for missing job", async () => {
+    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(undefined);
+
+    const app = await buildApp();
+    const res = await app.inject({ method: "GET", url: `/api/renders/${RENDER_ID}` });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("GET /api/renders/:jobId returns 403 for other user's job", async () => {
+    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce({
+      ...mockRender,
+      project: { ...mockProject, userId: "other-user-id" },
+    } as any);
+
+    const app = await buildApp();
+    const res = await app.inject({ method: "GET", url: `/api/renders/${RENDER_ID}` });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("GET /api/renders/project/:projectId returns 403 for missing project", async () => {
+    vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(undefined);
+
+    const app = await buildApp();
+    const res = await app.inject({ method: "GET", url: `/api/renders/project/${PROJ_ID}` });
+    expect(res.statusCode).toBe(403);
   });
 });

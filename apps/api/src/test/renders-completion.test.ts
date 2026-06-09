@@ -47,4 +47,36 @@ describe("Render completion webhook", () => {
     expect(res.statusCode).toBe(422);
     expect(JSON.parse(res.body).code).toBe("VALIDATION_ERROR");
   });
+
+  it("POST /api/renders/:jobId/complete returns 404 for missing render", async () => {
+    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(undefined);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/renders/job-1/complete",
+      payload: { status: "complete" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("POST /api/renders/:jobId/complete marks project failed on failed status", async () => {
+    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(mockRender);
+
+    const returningMock = vi.fn().mockResolvedValue([{ ...mockRender, status: "failed", errorMessage: "Encoder error" }]);
+    const whereMock = vi.fn().mockReturnValue({ returning: returningMock });
+    const setMock = vi.fn().mockReturnValue({ where: whereMock });
+    vi.mocked(db.update).mockReturnValue({ set: setMock } as any);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/renders/job-1/complete",
+      payload: { status: "failed", errorMessage: "Encoder error" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.job.status).toBe("failed");
+  });
 });
