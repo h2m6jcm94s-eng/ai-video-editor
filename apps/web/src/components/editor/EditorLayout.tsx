@@ -4,16 +4,23 @@
 
 import { useEffect, useCallback, useState, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import { useUser } from "@clerk/nextjs";
 import { ChevronLeft, Play, Pause, RotateCcw, Subtitles, Smartphone, Save, FolderOpen, CheckCircle2, AlertCircle, Loader2, Command as CommandIcon, Wand2, Film, Type, Music, Settings } from "lucide-react";
 import { MediaPanel } from "./panels/MediaPanel";
 import { PreviewPanel } from "./panels/PreviewPanel";
 import { InspectorPanel } from "./panels/InspectorPanel";
 import { TimelinePanel } from "./panels/TimelinePanel";
-import { PromptPanel } from "./panels/PromptPanel";
 import { RenderButton } from "./RenderButton";
 import { ProgressBar } from "./ProgressBar";
 import { PresenceCursors } from "./PresenceCursors";
+const PromptPanel = dynamic(() => import("./panels/PromptPanel").then((m) => m.PromptPanel), {
+  loading: () => (
+    <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl flex flex-col h-[400px] items-center justify-center">
+      <Loader2 className="w-5 h-5 animate-spin text-zinc-500" />
+    </div>
+  ),
+});
 import { TemplateSaveDialog } from "./TemplateSaveDialog";
 import { TemplateLoadDialog } from "./TemplateLoadDialog";
 import { CommandPalette, useCommandPalette, type CommandAction } from "@/components/cmdk/CommandPalette";
