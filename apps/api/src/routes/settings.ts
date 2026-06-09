@@ -8,6 +8,7 @@ import { providerKeys } from "../db/schema";
 import { providerKeySchema, testProviderKeySchema } from "@ai-video-editor/shared-types";
 import { validateBody } from "../middleware/validate";
 import { sendError } from "../lib/errors";
+import { getUsageForUser } from "../middleware/tokenBudget";
 
 // Simple XOR encryption for demo — replace with AES-256-GCM + KEK in production
 function encrypt(key: string, secret: string): string {
@@ -33,6 +34,13 @@ function decrypt(cipher: string, secret: string): string {
 const ENCRYPTION_SECRET = process.env.PROVIDER_ENCRYPTION_SECRET || "dev-secret-do-not-use-in-production";
 
 export async function settingsRoutes(app: FastifyInstance) {
+  // Get user's AI token usage
+  app.get("/usage", async (request) => {
+    const userId = request.userId;
+    const usage = await getUsageForUser(userId);
+    return usage;
+  });
+
   // List user's provider keys (masked)
   app.get("/provider-keys", async (request, reply) => {
     const userId = request.userId;

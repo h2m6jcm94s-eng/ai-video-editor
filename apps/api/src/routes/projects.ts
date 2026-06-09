@@ -13,6 +13,7 @@ import { applyPromptEdit, transcribeAudio } from "../services/ai";
 import { sendError } from "../lib/errors";
 import { cacheGet, cacheSet, cacheDel } from "../lib/cache";
 import { validatePromptGuardrails } from "../middleware/guardrails";
+import { enforceTokenBudget, incrementTokenUsage, getUsageForUser } from "../middleware/tokenBudget";
 import fs from "fs";
 import path from "path";
 import os from "os";
@@ -208,7 +209,7 @@ export async function projectRoutes(app: FastifyInstance) {
 
   // Prompt-to-edit (AI powered)
   app.post("/:id/prompt", {
-    preHandler: [validateBody(promptEditSchema), validatePromptGuardrails],
+    preHandler: [validateBody(promptEditSchema), validatePromptGuardrails, enforceTokenBudget],
     config: {
       rateLimit: {
         max: 10,
@@ -251,6 +252,10 @@ export async function projectRoutes(app: FastifyInstance) {
         })),
       });
 
+      // Track token usage
+      const provider = process.env.AI_PROVIDER?.split(",")[0]?.trim() || "claude";
+      await incrementTokenUsage(userId, result.usage.totalTokens, provider, "/api/projects/:id/prompt");
+
       // Save the new cutlist
       const [updated] = await db
         .update(projects)
@@ -265,6 +270,7 @@ export async function projectRoutes(app: FastifyInstance) {
         project: updated,
         diff: result.diff,
         explanation: result.explanation,
+        usage: result.usage,
       };
     } catch (err) {
       request.log.error({ err }, "Prompt edit failed");
