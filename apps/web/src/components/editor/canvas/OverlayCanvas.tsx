@@ -2,6 +2,7 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
+import { memo } from "react";
 import { TextOverlay } from "./TextOverlay";
 import { ShapeOverlay } from "./ShapeOverlay";
 import { EffectOverlay } from "./EffectOverlay";
@@ -11,7 +12,7 @@ interface OverlayCanvasProps {
   overlays: Overlay[];
 }
 
-export function OverlayCanvas({ overlays }: OverlayCanvasProps) {
+function OverlayCanvasInner({ overlays }: OverlayCanvasProps) {
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden">
       {overlays.map((overlay) => {
@@ -29,3 +30,5 @@ export function OverlayCanvas({ overlays }: OverlayCanvasProps) {
     </div>
   );
 }
+
+export const OverlayCanvas = memo(OverlayCanvasInner);
