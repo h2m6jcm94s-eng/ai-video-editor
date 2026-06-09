@@ -110,6 +110,33 @@ describe("Template Routes", () => {
     expect(JSON.parse(res.body).template.name).toBe("Updated");
   });
 
+  it("PATCH /api/templates/:id returns 404 for missing template", async () => {
+    vi.mocked(db.query.templates.findFirst).mockResolvedValueOnce(undefined);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/templates/tmpl-999",
+      payload: { name: "Updated" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("PATCH /api/templates/:id returns 403 for other user's template", async () => {
+    vi.mocked(db.query.templates.findFirst).mockResolvedValueOnce({
+      ...mockTemplate,
+      userId: "other-user-id",
+    });
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/templates/tmpl-1",
+      payload: { name: "Updated" },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
   it("DELETE /api/templates/:id deletes template", async () => {
     vi.mocked(db.query.templates.findFirst).mockResolvedValueOnce(mockTemplate);
     vi.mocked(db.delete).mockReturnValueOnce({
@@ -120,6 +147,25 @@ describe("Template Routes", () => {
     const res = await app.inject({ method: "DELETE", url: "/api/templates/tmpl-1" });
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.body).success).toBe(true);
+  });
+
+  it("DELETE /api/templates/:id returns 404 for missing template", async () => {
+    vi.mocked(db.query.templates.findFirst).mockResolvedValueOnce(undefined);
+
+    const app = await buildApp();
+    const res = await app.inject({ method: "DELETE", url: "/api/templates/tmpl-999" });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("DELETE /api/templates/:id returns 403 for other user's template", async () => {
+    vi.mocked(db.query.templates.findFirst).mockResolvedValueOnce({
+      ...mockTemplate,
+      userId: "other-user-id",
+    });
+
+    const app = await buildApp();
+    const res = await app.inject({ method: "DELETE", url: "/api/templates/tmpl-1" });
+    expect(res.statusCode).toBe(403);
   });
 
   it("POST /api/templates/:id/apply returns cutList and increments usage", async () => {
@@ -147,5 +193,13 @@ describe("Template Routes", () => {
     const app = await buildApp();
     const res = await app.inject({ method: "POST", url: "/api/templates/tmpl-1/apply" });
     expect(res.statusCode).toBe(403);
+  });
+
+  it("POST /api/templates/:id/apply returns 404 for missing template", async () => {
+    vi.mocked(db.query.templates.findFirst).mockResolvedValueOnce(undefined);
+
+    const app = await buildApp();
+    const res = await app.inject({ method: "POST", url: "/api/templates/tmpl-999/apply" });
+    expect(res.statusCode).toBe(404);
   });
 });
