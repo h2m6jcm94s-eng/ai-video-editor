@@ -9,6 +9,7 @@ import { enqueueJob } from "../services/queue";
 import { startRenderWorkflow } from "../services/temporal";
 import { validateBody, createRenderSchema } from "../middleware/validate";
 import { sendError } from "../lib/errors";
+import { rendersActive, rendersTotal } from "../lib/metrics";
 import { z } from "zod";
 
 const completeRenderSchema = z.object({
@@ -126,6 +127,9 @@ export async function renderRoutes(app: FastifyInstance) {
       createdAt: new Date().toISOString(),
     });
 
+    rendersActive.inc();
+    rendersTotal.inc({ status: "started" });
+
     // Update project status
     await db
       .update(projects)
@@ -198,11 +202,15 @@ export async function renderRoutes(app: FastifyInstance) {
       .returning();
 
     if (body.status === "complete") {
+      rendersActive.dec();
+      rendersTotal.inc({ status: "complete" });
       await db
         .update(projects)
         .set({ status: "complete", updatedAt: new Date(), renderAssetId: body.outputAssetId ?? null })
         .where(eq(projects.id, job.projectId));
     } else {
+      rendersActive.dec();
+      rendersTotal.inc({ status: "failed" });
       await db
         .update(projects)
         .set({ status: "failed", updatedAt: new Date() })

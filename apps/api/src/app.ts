@@ -13,9 +13,11 @@ import { templateRoutes } from "./routes/templates";
 import { presenceRoutes } from "./routes/presence";
 import { settingsRoutes } from "./routes/settings";
 import { healthRoutes } from "./routes/health";
+import { metricsRoutes } from "./routes/metrics";
 import { requireAuth } from "./middleware/auth";
 import { sendError } from "./lib/errors";
 import { getLoggerConfig, generateRequestId, buildRequestContext } from "./lib/logger";
+import { httpRequestsTotal, httpRequestDurationSeconds, rateLimitHitsTotal, normalizeRoutePath } from "./lib/metrics";
 
 export async function buildApp() {
   const app = Fastify({
@@ -59,6 +61,11 @@ export async function buildApp() {
     max: process.env.NODE_ENV === "test" ? 10000 : 60,
     timeWindow: "1 minute",
     keyGenerator: (req) => req.userId ?? req.ip,
+    onExceeded: async (req) => {
+      const route = normalizeRoutePath(req.url);
+      rateLimitHitsTotal.inc({ route });
+      req.log.warn({ route }, "Rate limit exceeded");
+    },
   });
 
   // Request timing: track slow endpoints
@@ -69,15 +76,23 @@ export async function buildApp() {
   app.addHook("onResponse", async (request, reply) => {
     const start = (request as any)._startTime as number | undefined;
     if (start !== undefined) {
-      const duration = Math.round(performance.now() - start);
-      reply.header("x-response-time", `${duration}ms`);
+      const durationMs = Math.round(performance.now() - start);
+      const durationSec = durationMs / 1000;
+      reply.header("x-response-time", `${durationMs}ms`);
       const statusCode = reply.statusCode;
+      const route = normalizeRoutePath(request.routeOptions?.url || request.url);
+      const method = request.method;
       const logData = {
         statusCode,
-        duration,
-        route: request.routerPath || request.url,
+        duration: durationMs,
+        route: request.routeOptions?.url || request.url,
       };
-      if (duration > SLOW_REQUEST_MS) {
+
+      // Record Prometheus metrics
+      httpRequestsTotal.inc({ method, route, status_code: String(statusCode) });
+      httpRequestDurationSeconds.observe({ method, route }, durationSec);
+
+      if (durationMs > SLOW_REQUEST_MS) {
         request.log.warn(logData, "Slow request detected");
       } else if (statusCode >= 400) {
         request.log.warn(logData, "Request completed with error status");
@@ -101,9 +116,13 @@ export async function buildApp() {
   });
 
   await app.register(healthRoutes, { prefix: "/api/health" });
+  await app.register(metricsRoutes, { prefix: "/api/metrics" });
 
   app.addHook("onRequest", async (request, reply) => {
     if (request.url === "/api/health" || request.url.startsWith("/api/health/")) {
+      return;
+    }
+    if (request.url === "/api/metrics" || request.url.startsWith("/api/metrics/")) {
       return;
     }
     await requireAuth(request, reply);
