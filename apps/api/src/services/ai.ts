@@ -8,6 +8,7 @@
 import { eq, and } from "drizzle-orm";
 import { db } from "../db";
 import { providerKeys } from "../db/schema";
+import { aiCallsTotal, aiCallDurationSeconds } from "../lib/metrics";
 
 const ENCRYPTION_SECRET = process.env.PROVIDER_ENCRYPTION_SECRET || "dev-secret-do-not-use-in-production";
 
@@ -63,8 +64,10 @@ Return ONLY this JSON structure:
 }`;
 
 async function callClaude(context: PromptEditContext): Promise<PromptEditResult> {
+  const start = performance.now();
   const anthropicKey = (await getProviderKey(context.userId, "anthropic")) || process.env.ANTHROPIC_API_KEY || "";
   if (!anthropicKey) {
+    aiCallsTotal.inc({ provider: "claude", status: "missing_key" });
     const err: Error & { code?: string } = new Error("ANTHROPIC_API_KEY not configured");
     err.code = "PROVIDER_KEY_MISSING";
     throw err;
@@ -88,6 +91,9 @@ async function callClaude(context: PromptEditContext): Promise<PromptEditResult>
 
   if (!res.ok) {
     const err = await res.text();
+    const status = res.status === 429 ? "rate_limited" : res.status >= 500 ? "server_error" : "client_error";
+    aiCallsTotal.inc({ provider: "claude", status });
+    aiCallDurationSeconds.observe({ provider: "claude" }, (performance.now() - start) / 1000);
     const error: Error & { code?: string } = new Error(`Claude API error: ${res.status} ${err}`);
     if (res.status === 401 || res.status === 403) error.code = "PROVIDER_INVALID_RESPONSE";
     if (res.status === 429) error.code = "PROVIDER_RATE_LIMITED";
@@ -96,12 +102,16 @@ async function callClaude(context: PromptEditContext): Promise<PromptEditResult>
 
   const data = (await res.json()) as { content: Array<{ type: string; text: string }> };
   const text = data.content?.[0]?.text || "{}";
+  aiCallsTotal.inc({ provider: "claude", status: "success" });
+  aiCallDurationSeconds.observe({ provider: "claude" }, (performance.now() - start) / 1000);
   return parseResponse(text);
 }
 
 async function callOpenAI(context: PromptEditContext): Promise<PromptEditResult> {
+  const start = performance.now();
   const openaiKey = (await getProviderKey(context.userId, "openai")) || process.env.OPENAI_API_KEY || "";
   if (!openaiKey) {
+    aiCallsTotal.inc({ provider: "openai", status: "missing_key" });
     const err: Error & { code?: string } = new Error("OPENAI_API_KEY not configured");
     err.code = "PROVIDER_KEY_MISSING";
     throw err;
@@ -127,6 +137,9 @@ async function callOpenAI(context: PromptEditContext): Promise<PromptEditResult>
 
   if (!res.ok) {
     const err = await res.text();
+    const status = res.status === 429 ? "rate_limited" : res.status >= 500 ? "server_error" : "client_error";
+    aiCallsTotal.inc({ provider: "openai", status });
+    aiCallDurationSeconds.observe({ provider: "openai" }, (performance.now() - start) / 1000);
     const error: Error & { code?: string } = new Error(`OpenAI API error: ${res.status} ${err}`);
     if (res.status === 401 || res.status === 403) error.code = "PROVIDER_INVALID_RESPONSE";
     if (res.status === 429) error.code = "PROVIDER_RATE_LIMITED";
@@ -135,6 +148,8 @@ async function callOpenAI(context: PromptEditContext): Promise<PromptEditResult>
 
   const data = (await res.json()) as { choices: Array<{ message: { content: string } }> };
   const text = data.choices?.[0]?.message?.content || "{}";
+  aiCallsTotal.inc({ provider: "openai", status: "success" });
+  aiCallDurationSeconds.observe({ provider: "openai" }, (performance.now() - start) / 1000);
   return parseResponse(text);
 }
 
@@ -259,8 +274,10 @@ export async function transcribeAudio(
   audioBuffer: Buffer,
   filename: string
 ): Promise<Array<{ text: string; start: number; end: number }>> {
+  const start = performance.now();
   const openaiKey = (await getProviderKey(userId, "openai")) || process.env.OPENAI_API_KEY || "";
   if (!openaiKey) {
+    aiCallsTotal.inc({ provider: "openai", status: "missing_key" });
     const err: Error & { code?: string } = new Error("OPENAI_API_KEY not configured");
     err.code = "PROVIDER_KEY_MISSING";
     throw err;
@@ -282,6 +299,9 @@ export async function transcribeAudio(
 
   if (!res.ok) {
     const err = await res.text();
+    const status = res.status === 429 ? "rate_limited" : res.status >= 500 ? "server_error" : "client_error";
+    aiCallsTotal.inc({ provider: "openai", status });
+    aiCallDurationSeconds.observe({ provider: "openai" }, (performance.now() - start) / 1000);
     const error: Error & { code?: string } = new Error(`Whisper API error: ${res.status} ${err}`);
     if (res.status === 429) error.code = "PROVIDER_RATE_LIMITED";
     throw error;
@@ -289,6 +309,8 @@ export async function transcribeAudio(
 
   const data = (await res.json()) as { segments?: Array<{ text: string; start: number; end: number }>; text?: string };
 
+  aiCallsTotal.inc({ provider: "openai", status: "success" });
+  aiCallDurationSeconds.observe({ provider: "openai" }, (performance.now() - start) / 1000);
   if (data.segments) {
     return data.segments.map((s) => ({ text: s.text.trim(), start: s.start, end: s.end }));
   }

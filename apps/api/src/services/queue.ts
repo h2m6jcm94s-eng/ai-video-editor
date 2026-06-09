@@ -2,6 +2,7 @@
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
 import Redis from "ioredis";
+import { queueDepth } from "../lib/metrics";
 
 const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
 
@@ -18,10 +19,14 @@ export async function enqueueJob(message: JobMessage): Promise<void> {
   // Use a scored set for priority instead of a simple list
   const score = message.priority || 1;
   await redis.zadd("ave:jobs:queue", score, JSON.stringify(message));
+  const depth = await redis.zcard("ave:jobs:queue");
+  queueDepth.set(depth);
 }
 
 export async function dequeueJob(): Promise<JobMessage | null> {
   const data = await redis.zpopmin("ave:jobs:queue");
+  const depth = await redis.zcard("ave:jobs:queue");
+  queueDepth.set(depth);
   if (!data || data.length === 0) return null;
   try {
     return JSON.parse(data[1]);

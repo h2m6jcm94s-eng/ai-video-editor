@@ -302,41 +302,89 @@ NEXT_PUBLIC_API_URL=https://api.aivideo.example.com
 - Component tags for filtering
 - Workflow ID correlation
 
-### Metrics
+### Prometheus Metrics
 
-Recommended metrics to track:
+The API exposes built-in Prometheus metrics at `GET /api/metrics`. Protect the endpoint in production with `METRICS_AUTH_TOKEN`.
 
-| Metric | Source | Alert Threshold |
-|---|---|---|
-| API request latency (p99) | Fastify | > 500ms |
-| API error rate | Fastify | > 1% |
-| Active renders | Temporal | — |
-| Render failure rate | Temporal | > 5% |
-| Queue depth | Redis | > 100 |
-| Worker processing time | Temporal | > 10 min |
-| Database connections | PostgreSQL | > 80% of max |
-| Redis memory usage | Redis | > 80% |
-| Storage costs | R2/MinIO | Monthly budget |
+#### Available Metrics
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `ave_http_requests_total` | Counter | `method`, `route`, `status_code` | Total HTTP requests |
+| `ave_http_request_duration_seconds` | Histogram | `method`, `route` | Request latency distribution |
+| `ave_renders_active` | Gauge | — | Renders currently queued or running |
+| `ave_renders_total` | Counter | `status` (started/complete/failed) | Render lifecycle events |
+| `ave_ai_calls_total` | Counter | `provider`, `status` | AI provider API calls |
+| `ave_ai_call_duration_seconds` | Histogram | `provider` | AI call latency distribution |
+| `ave_cache_operations_total` | Counter | `operation`, `result` | Cache hits and misses |
+| `ave_queue_depth` | Gauge | — | Current Redis job queue depth |
+| `ave_errors_total` | Counter | `code`, `route` | Application errors |
+| `ave_rate_limit_hits_total` | Counter | `route` | Rate limit triggers |
+| `ave_startup_timestamp_seconds` | Gauge | — | Last app startup Unix timestamp |
+
+#### Running Prometheus + Grafana Locally
+
+```bash
+# Start the monitoring stack
+docker compose -f infra/docker/monitoring/docker-compose.yml up -d
+
+# Access:
+# Prometheus UI: http://localhost:9090
+# Grafana UI:    http://localhost:3001 (admin/admin)
+```
+
+Grafana is pre-provisioned with:
+- **Prometheus datasource** at `http://prometheus:9090`
+- **AVE API Overview dashboard** (`infra/grafana/dashboards/api-overview.json`)
+
+Import the dashboard in Grafana via **Dashboards → Import** and paste the JSON, or copy it to `/var/lib/grafana/dashboards/` if using the Docker Compose setup.
 
 ### Alerting Rules
 
 ```yaml
-# Example Prometheus alerting rules
-- alert: HighErrorRate
-  expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.01
-  for: 2m
-  labels:
-    severity: critical
-  annotations:
-    summary: "High error rate on {{ $labels.route }}"
+# Prometheus alerting rules (save as infra/docker/monitoring/alerts.yml)
+groups:
+  - name: ave
+    rules:
+      - alert: HighErrorRate
+        expr: rate(ave_http_requests_total{status_code=~"4..|5.."}[5m]) / rate(ave_http_requests_total[5m]) > 0.01
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate on {{ $labels.route }}"
 
-- alert: WorkerQueueBacklog
-  expr: redis_queue_depth > 100
-  for: 5m
-  labels:
-    severity: warning
-  annotations:
-    summary: "Worker queue backlog detected"
+      - alert: SlowRequests
+        expr: histogram_quantile(0.99, rate(ave_http_request_duration_seconds_bucket[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P99 latency > 500ms on {{ $labels.route }}"
+
+      - alert: QueueBacklog
+        expr: ave_queue_depth > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Job queue backlog: {{ $value }} jobs"
+
+      - alert: RenderFailureRate
+        expr: rate(ave_renders_total{status="failed"}[5m]) / rate(ave_renders_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Render failure rate > 5%"
+
+      - alert: AIProviderErrors
+        expr: rate(ave_ai_calls_total{status!="success"}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High AI provider error rate for {{ $labels.provider }}"
 ```
 
 ---
