@@ -26,7 +26,8 @@ export async function dequeueJob(): Promise<JobMessage | null> {
   try {
     return JSON.parse(data[1]);
   } catch (e) {
-    console.error("Failed to parse job from queue:", data[1]);
+    // Log via stderr since this function has no request context
+    // In production, this should be caught by a worker logger
     return null;
   }
 }

@@ -16,6 +16,20 @@ export function sendError(
   code: string,
   details?: unknown
 ) {
+  // Log the error via the request logger if available
+  try {
+    const req = (reply as any).request;
+    if (req?.log) {
+      if (status >= 500) {
+        req.log.error({ status, code, error, details }, "Error response sent");
+      } else {
+        req.log.warn({ status, code, error, details }, "Error response sent");
+      }
+    }
+  } catch {
+    // If logging fails, don't block the error response
+  }
+
   const payload: ApiError = { error, code };
   if (details !== undefined) payload.details = details;
   return reply.status(status).send(payload);

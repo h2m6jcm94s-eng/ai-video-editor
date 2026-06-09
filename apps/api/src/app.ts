@@ -15,16 +15,20 @@ import { settingsRoutes } from "./routes/settings";
 import { healthRoutes } from "./routes/health";
 import { requireAuth } from "./middleware/auth";
 import { sendError } from "./lib/errors";
+import { getLoggerConfig, generateRequestId, buildRequestContext } from "./lib/logger";
 
 export async function buildApp() {
   const app = Fastify({
-    logger: { level: process.env.LOG_LEVEL || "info" },
+    logger: getLoggerConfig(),
     bodyLimit: 1024 * 1024 * 1024,
-    genReqId: () => `req_${crypto.randomUUID().slice(0, 8)}`,
+    genReqId: (req) => generateRequestId(req),
   });
 
   app.setErrorHandler((error, request, reply) => {
-    request.log.error({ err: error, url: request.url }, "Request error");
+    request.log.error(
+      { err: error, statusCode: error.statusCode || 500 },
+      "Request error"
+    );
 
     if (error.validation) {
       return sendError(reply, 422, "Validation failed", "VALIDATION_ERROR", error.validation);
@@ -67,8 +71,18 @@ export async function buildApp() {
     if (start !== undefined) {
       const duration = Math.round(performance.now() - start);
       reply.header("x-response-time", `${duration}ms`);
+      const statusCode = reply.statusCode;
+      const logData = {
+        statusCode,
+        duration,
+        route: request.routerPath || request.url,
+      };
       if (duration > SLOW_REQUEST_MS) {
-        request.log.warn({ url: request.url, method: request.method, duration }, "Slow request detected");
+        request.log.warn(logData, "Slow request detected");
+      } else if (statusCode >= 400) {
+        request.log.warn(logData, "Request completed with error status");
+      } else {
+        request.log.info(logData, "Request completed");
       }
     }
   });
@@ -77,6 +91,13 @@ export async function buildApp() {
   app.addHook("onSend", async (request, reply, payload) => {
     reply.header("x-request-id", request.id);
     return payload;
+  });
+
+  // Bind user context to request logger after auth
+  app.addHook("onRequest", async (request) => {
+    if (request.userId) {
+      request.log = request.log.child(buildRequestContext(request));
+    }
   });
 
   await app.register(healthRoutes, { prefix: "/api/health" });

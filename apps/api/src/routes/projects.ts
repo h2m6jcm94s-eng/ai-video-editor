@@ -295,7 +295,7 @@ export async function projectRoutes(app: FastifyInstance) {
 
     // Clean up assets from R2 asynchronously (don't block response)
     deleteProjectAssets(id).catch((err) => {
-      console.error("Failed to delete assets for project", { projectId: id, err });
+      request.log.error({ err, projectId: id }, "Failed to delete assets for project");
     });
 
     await db.delete(projects).where(eq(projects.id, id));

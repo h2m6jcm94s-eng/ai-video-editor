@@ -23,6 +23,11 @@ class JsonFormatter(logging.Formatter):
         }
         if hasattr(record, "extra") and isinstance(record.extra, dict):
             obj.update(record.extra)
+        # Support correlation ID propagation from upstream services
+        if hasattr(record, "correlationId"):
+            obj["correlationId"] = record.correlationId
+        if hasattr(record, "requestId"):
+            obj["requestId"] = record.requestId
         if record.exc_info:
             obj["error"] = self.formatException(record.exc_info)
         return json.dumps(obj, default=str)
@@ -47,11 +52,14 @@ def get_logger(name: str) -> logging.Logger:
 class StructuredLogger:
     """Thin wrapper so callers can do logger.info("msg", key=value)."""
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, correlation_id: str | None = None) -> None:
         self._logger = logging.getLogger(name)
+        self._correlation_id = correlation_id
 
     def _log(self, method: str, msg: str, **kwargs: Any) -> None:
-        extra = {"extra": kwargs} if kwargs else {}
+        extra: dict[str, Any] = {"extra": kwargs} if kwargs else {}
+        if self._correlation_id:
+            extra["correlationId"] = self._correlation_id
         getattr(self._logger, method)(msg, extra=extra)
 
     def debug(self, msg: str, **kwargs: Any) -> None:
@@ -67,5 +75,11 @@ class StructuredLogger:
         self._log("error", msg, **kwargs)
 
     def exception(self, msg: str, **kwargs: Any) -> None:
-        extra = {"extra": kwargs} if kwargs else {}
+        extra: dict[str, Any] = {"extra": kwargs} if kwargs else {}
+        if self._correlation_id:
+            extra["correlationId"] = self._correlation_id
         self._logger.exception(msg, extra=extra)
+
+    def bind(self, correlation_id: str | None = None) -> "StructuredLogger":
+        """Return a new logger bound to a correlation ID."""
+        return StructuredLogger(self._logger.name, correlation_id)
