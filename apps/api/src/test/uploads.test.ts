@@ -128,13 +128,155 @@ describe("Upload Routes", () => {
     expect(res.statusCode).toBe(422);
   });
 
-  it("GET /api/uploads/:assetId returns asset", async () => {
-    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce({ ...mockAsset, project: mockProject } as any);
+  it("POST /api/uploads/presigned returns 404 when project not found", async () => {
+    vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(undefined);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/uploads/presigned",
+      payload: { projectId: PROJ_ID, filename: "test.mp4", mimeType: "video/mp4", type: "clip" },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.body).code).toBe("NOT_FOUND");
+  });
+
+  it("POST /api/uploads/:assetId/complete returns 404 when asset not found", async () => {
+    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce(undefined);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/uploads/${ASSET_ID}/complete`,
+      payload: { sizeBytes: 1024, etag: '"abc123"' },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.body).code).toBe("NOT_FOUND");
+  });
+
+  it("POST /api/uploads/:assetId/complete returns 403 for other user's asset", async () => {
+    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce({
+      ...mockAsset,
+      project: { ...mockProject, userId: "other-user-id" },
+    } as any);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/uploads/${ASSET_ID}/complete`,
+      payload: { sizeBytes: 1024, etag: '"abc123"' },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(JSON.parse(res.body).code).toBe("FORBIDDEN");
+  });
+
+  it("POST /api/uploads/:assetId/complete rejects size > 5GB", async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/uploads/${ASSET_ID}/complete`,
+      payload: { sizeBytes: 6 * 1024 * 1024 * 1024, etag: '"abc123"' },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(JSON.parse(res.body).code).toBe("VALIDATION_ERROR");
+  });
+
+  it("GET /api/uploads/:assetId returns 404 when asset not found", async () => {
+    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce(undefined);
 
     const app = await buildApp();
     const res = await app.inject({ method: "GET", url: `/api/uploads/${ASSET_ID}` });
+    expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.body).code).toBe("NOT_FOUND");
+  });
+
+  it("GET /api/uploads/:assetId returns 403 for other user's asset", async () => {
+    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce({
+      ...mockAsset,
+      project: { ...mockProject, userId: "other-user-id" },
+    } as any);
+
+    const app = await buildApp();
+    const res = await app.inject({ method: "GET", url: `/api/uploads/${ASSET_ID}` });
+    expect(res.statusCode).toBe(403);
+    expect(JSON.parse(res.body).code).toBe("FORBIDDEN");
+  });
+
+  it("POST /api/uploads/:assetId/probe updates metadata", async () => {
+    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce({ ...mockAsset, project: mockProject } as any);
+    vi.mocked(db.update).mockReturnValueOnce({
+      set: vi.fn().mockReturnValueOnce({
+        where: vi.fn().mockReturnValueOnce({
+          returning: vi.fn().mockResolvedValueOnce([{ ...mockAsset, durationSec: 30, width: 1920, height: 1080, fps: 30 }]),
+        }),
+      }),
+    } as any);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/uploads/${ASSET_ID}/probe`,
+      payload: { durationSec: 30, width: 1920, height: 1080, fps: 30 },
+    });
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.asset.id).toBe(ASSET_ID);
+    expect(body.asset.durationSec).toBe(30);
+    expect(body.asset.width).toBe(1920);
+  });
+
+  it("POST /api/uploads/:assetId/probe returns 404 when asset not found", async () => {
+    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce(undefined);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/uploads/${ASSET_ID}/probe`,
+      payload: { durationSec: 30 },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.body).code).toBe("NOT_FOUND");
+  });
+
+  it("POST /api/uploads/:assetId/probe returns 403 for other user's asset", async () => {
+    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce({
+      ...mockAsset,
+      project: { ...mockProject, userId: "other-user-id" },
+    } as any);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/uploads/${ASSET_ID}/probe`,
+      payload: { durationSec: 30 },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(JSON.parse(res.body).code).toBe("FORBIDDEN");
+  });
+
+  it("POST /api/uploads/:assetId/probe rejects invalid metadata", async () => {
+    vi.mocked(db.query.assets.findFirst).mockResolvedValue({ ...mockAsset, project: mockProject } as any);
+
+    const app = await buildApp();
+
+    const cases = [
+      { payload: { durationSec: -1 }, field: "durationSec" },
+      { payload: { durationSec: 90000 }, field: "durationSec" },
+      { payload: { width: 0 }, field: "width" },
+      { payload: { width: 8000 }, field: "width" },
+      { payload: { height: 0 }, field: "height" },
+      { payload: { height: 8000 }, field: "height" },
+      { payload: { fps: 0 }, field: "fps" },
+      { payload: { fps: 200 }, field: "fps" },
+    ];
+
+    for (const { payload } of cases) {
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/uploads/${ASSET_ID}/probe`,
+        payload,
+      });
+      expect(res.statusCode).toBe(422);
+      expect(JSON.parse(res.body).code).toBe("VALIDATION_ERROR");
+    }
   });
 });
