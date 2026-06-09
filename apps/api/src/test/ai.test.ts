@@ -86,6 +86,22 @@ describe("AI Service", () => {
       expect((result.newCutList as any).globals.tempo_bpm).toBe(140);
     });
 
+    it("falls back to Claude when provider is unknown", async () => {
+      vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+      vi.stubEnv("AI_PROVIDER", "unknown-provider");
+      vi.mocked(fetch).mockResolvedValueOnce(
+        makeClaudeResponse([{ op: "replace", path: "/globals/tempo_bpm", value: 130 }], "Adjusted") as any
+      );
+
+      const result = await applyPromptEdit({
+        userId: "user-1",
+        prompt: "adjust tempo",
+        cutList: mockCutList,
+      });
+
+      expect((result.newCutList as any).globals.tempo_bpm).toBe(130);
+    });
+
     it("applies multiple JSON Patch operations", async () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
       vi.stubEnv("AI_PROVIDER", "claude");
@@ -135,6 +151,54 @@ describe("AI Service", () => {
       expect((result.newCutList as any).slots).toHaveLength(2);
     });
 
+    it("handles remove operation on arrays", async () => {
+      vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+      vi.stubEnv("AI_PROVIDER", "claude");
+      const listWithSlots = {
+        ...mockCutList,
+        slots: [
+          { index: 0, start_s: 0, duration_s: 2 },
+          { index: 1, start_s: 2, duration_s: 3 },
+        ],
+      };
+      vi.mocked(fetch).mockResolvedValueOnce(
+        makeClaudeResponse([{ op: "remove", path: "/slots/0" }], "Removed first") as any
+      );
+
+      const result = await applyPromptEdit({ userId: "user-1", prompt: "remove first", cutList: listWithSlots });
+      expect((result.newCutList as any).slots).toHaveLength(1);
+      expect((result.newCutList as any).slots[0].index).toBe(1);
+    });
+
+    it("handles remove operation on nested array path", async () => {
+      vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+      vi.stubEnv("AI_PROVIDER", "claude");
+      const listWithNested = {
+        ...mockCutList,
+        slots: [
+          { index: 0, start_s: 0, duration_s: 2, children: [{ id: "a" }, { id: "b" }] },
+        ],
+      };
+      vi.mocked(fetch).mockResolvedValueOnce(
+        makeClaudeResponse([{ op: "remove", path: "/slots/0/children/0" }], "Removed nested") as any
+      );
+
+      const result = await applyPromptEdit({ userId: "user-1", prompt: "remove nested", cutList: listWithNested });
+      expect((result.newCutList as any).slots[0].children).toHaveLength(1);
+      expect((result.newCutList as any).slots[0].children[0].id).toBe("b");
+    });
+
+    it("handles remove operation on objects", async () => {
+      vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+      vi.stubEnv("AI_PROVIDER", "claude");
+      vi.mocked(fetch).mockResolvedValueOnce(
+        makeClaudeResponse([{ op: "remove", path: "/globals/tempo_bpm" }], "Removed tempo") as any
+      );
+
+      const result = await applyPromptEdit({ userId: "user-1", prompt: "remove tempo", cutList: mockCutList });
+      expect((result.newCutList as any).globals).not.toHaveProperty("tempo_bpm");
+    });
+
     it("throws when no API keys are configured", async () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "");
       vi.stubEnv("OPENAI_API_KEY", "");
@@ -172,6 +236,27 @@ describe("AI Service", () => {
 
       const result = await applyPromptEdit({ userId: "user-1", prompt: "test", cutList: mockCutList });
       expect(result.explanation).toBe("ok");
+    });
+
+    it("throws on OpenAI 401 with PROVIDER_INVALID_RESPONSE code", async () => {
+      vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+      vi.stubEnv("OPENAI_API_KEY", "sk-openai-test");
+      vi.stubEnv("AI_PROVIDER", "openai");
+      vi.mocked(fetch)
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          text: async () => "Unauthorized",
+        } as any)
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          text: async () => "Unauthorized",
+        } as any);
+
+      await expect(
+        applyPromptEdit({ userId: "user-1", prompt: "test", cutList: mockCutList })
+      ).rejects.toThrow("AI prompt edit failed");
     });
   });
 
