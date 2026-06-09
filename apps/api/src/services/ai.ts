@@ -9,6 +9,7 @@ import { eq, and } from "drizzle-orm";
 import { db } from "../db";
 import { providerKeys } from "../db/schema";
 import { aiCallsTotal, aiCallDurationSeconds } from "../lib/metrics";
+import { countTokens } from "../lib/tokens";
 
 const ENCRYPTION_SECRET = process.env.PROVIDER_ENCRYPTION_SECRET || "dev-secret-do-not-use-in-production";
 
@@ -43,6 +44,11 @@ export interface PromptEditResult {
   diff: unknown[];
   explanation: string;
   newCutList?: unknown;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
 }
 
 const SYSTEM_PROMPT = `You are an expert video editor AI assistant. The user describes an edit they want to make in natural language. You must analyze their request and return a JSON Patch (RFC 6902) diff that transforms the current cut-list into the desired state.
@@ -104,7 +110,14 @@ async function callClaude(context: PromptEditContext): Promise<PromptEditResult>
   const text = data.content?.[0]?.text || "{}";
   aiCallsTotal.inc({ provider: "claude", status: "success" });
   aiCallDurationSeconds.observe({ provider: "claude" }, (performance.now() - start) / 1000);
-  return parseResponse(text);
+  const result = parseResponse(text);
+  const promptText = buildPrompt(context);
+  result.usage = {
+    promptTokens: await countTokens(promptText),
+    completionTokens: await countTokens(text),
+    totalTokens: await countTokens(promptText) + await countTokens(text),
+  };
+  return result;
 }
 
 async function callOpenAI(context: PromptEditContext): Promise<PromptEditResult> {
@@ -150,7 +163,14 @@ async function callOpenAI(context: PromptEditContext): Promise<PromptEditResult>
   const text = data.choices?.[0]?.message?.content || "{}";
   aiCallsTotal.inc({ provider: "openai", status: "success" });
   aiCallDurationSeconds.observe({ provider: "openai" }, (performance.now() - start) / 1000);
-  return parseResponse(text);
+  const result = parseResponse(text);
+  const promptText = buildPrompt(context);
+  result.usage = {
+    promptTokens: await countTokens(promptText),
+    completionTokens: await countTokens(text),
+    totalTokens: await countTokens(promptText) + await countTokens(text),
+  };
+  return result;
 }
 
 function buildPrompt(context: PromptEditContext): string {
@@ -319,7 +339,7 @@ export async function transcribeAudio(
 
 export async function applyPromptEdit(
   context: PromptEditContext
-): Promise<PromptEditResult & { newCutList: unknown }> {
+): Promise<PromptEditResult & { newCutList: unknown; usage: { promptTokens: number; completionTokens: number; totalTokens: number } }> {
   const provider = process.env.AI_PROVIDER?.split(",")[0]?.trim() || "claude";
 
   let result: PromptEditResult;
@@ -355,5 +375,14 @@ export async function applyPromptEdit(
   }
 
   const newCutList = applyJsonPatch(context.cutList, result.diff);
-  return { ...result, newCutList };
+  const promptText = buildPrompt(context);
+  const usage = result.usage || {
+    promptTokens: await countTokens(promptText),
+    completionTokens: await countTokens(result.explanation) + await countTokens(JSON.stringify(result.diff)),
+    totalTokens: 0,
+  };
+  if (!result.usage) {
+    usage.totalTokens = usage.promptTokens + usage.completionTokens;
+  }
+  return { ...result, newCutList, usage };
 }

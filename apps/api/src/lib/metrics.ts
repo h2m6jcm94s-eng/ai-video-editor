@@ -136,6 +136,20 @@ export const guardrailsBlocksTotal = getOrCreateCounter({
   labelNames: ["category", "route"],
 });
 
+// ─── Token Budget Metrics ───────────────────────────────────────────────────
+
+export const tokensConsumedTotal = getOrCreateCounter({
+  name: "ave_tokens_consumed_total",
+  help: "Total tokens consumed by provider and endpoint",
+  labelNames: ["provider", "endpoint"],
+});
+
+export const budgetViolationsTotal = getOrCreateCounter({
+  name: "ave_budget_violations_total",
+  help: "Total budget violations by user",
+  labelNames: ["user_id"],
+});
+
 // ─── Startup / Health ───────────────────────────────────────────────────────
 
 export const startupTimestamp = getOrCreateGauge({

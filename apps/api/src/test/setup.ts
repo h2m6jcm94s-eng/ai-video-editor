@@ -115,6 +115,13 @@ vi.mock("ioredis", () => ({
     setex = vi.fn().mockResolvedValue("OK");
     del = vi.fn().mockResolvedValue(1);
     keys = vi.fn().mockResolvedValue([]);
+    incrby = vi.fn().mockResolvedValue(1);
+    expire = vi.fn().mockResolvedValue(1);
+    pipeline = vi.fn(() => ({
+      incrby: vi.fn().mockReturnThis(),
+      expire: vi.fn().mockReturnThis(),
+      exec: vi.fn().mockResolvedValue([]),
+    }));
   },
 }));
 
