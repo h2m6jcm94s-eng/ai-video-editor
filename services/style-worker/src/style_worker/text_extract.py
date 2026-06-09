@@ -16,7 +16,10 @@ try:
 except ImportError:
     PaddleOCR = None
 
+from shared_py.logging_config import StructuredLogger
 from shared_py.models import Overlay
+
+logger = StructuredLogger("style_worker.text_extract")
 
 
 def extract_text_overlays(
@@ -25,7 +28,11 @@ def extract_text_overlays(
     iou_threshold: float = 0.5,
 ) -> List[Overlay]:
     """Extract text overlays from video using PaddleOCR."""
+    if cv2 is None:
+        logger.warning("cv2 not available, skipping text extraction")
+        return []
     if PaddleOCR is None:
+        logger.warning("PaddleOCR not available, skipping text extraction")
         return []
 
     ocr = PaddleOCR(

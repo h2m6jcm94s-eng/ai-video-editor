@@ -6,11 +6,17 @@ try:
 except ImportError:
     av = None  # type: ignore[assignment]
 
+from shared_py.logging_config import StructuredLogger
 from typing import Dict, Any
+
+logger = StructuredLogger("ingest_worker.probe")
 
 
 def probe_video(video_path: str) -> Dict[str, Any]:
     """Probe video metadata using PyAV."""
+    if av is None:
+        logger.warning("av not available, cannot probe video")
+        return {"duration_sec": 0.0, "format": None, "streams": []}
     try:
         container = av.open(video_path)
     except Exception as e:
