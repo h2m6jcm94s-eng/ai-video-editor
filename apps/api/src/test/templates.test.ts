@@ -12,7 +12,10 @@ describe("Template Routes", () => {
     userId: "test-user-id",
     name: "Cinematic Intro",
     description: "A dramatic opening",
-    cutList: { globals: { total_duration_s: 10 }, slots: [] },
+    cutList: {
+      globals: { totalDurationS: 10, tempoBpm: 120 },
+      slots: [{ index: 0, startS: 0, durationS: 5, beatIndex: 0, section: "intro", targetShotType: "medium", subjectHint: "person", motionHint: "static" }],
+    },
     tags: ["intro", "cinematic"],
     isPublic: true,
     usageCount: 5,
@@ -44,7 +47,10 @@ describe("Template Routes", () => {
       url: "/api/templates",
       payload: {
         name: "Cinematic Intro",
-        cutList: { globals: { total_duration_s: 10 }, slots: [] },
+        cutList: {
+          globals: { totalDurationS: 10, tempoBpm: 120 },
+          slots: [{ index: 0, startS: 0, durationS: 5, beatIndex: 0, section: "intro", targetShotType: "medium", subjectHint: "person", motionHint: "static" }],
+        },
       },
     });
     expect(res.statusCode).toBe(200);

@@ -11,6 +11,7 @@ import { deleteProjectAssets, downloadAsset } from "../services/storage";
 import { validateBody, createProjectSchema, patchProjectSchema, updateCutlistSchema, promptEditSchema } from "../middleware/validate";
 import { applyPromptEdit, transcribeAudio } from "../services/ai";
 import { sendError } from "../lib/errors";
+import { API_ERROR_CODES } from "@ai-video-editor/shared-types";
 import { cacheGet, cacheSet, cacheDel } from "../lib/cache";
 import { validatePromptGuardrails } from "../middleware/guardrails";
 import { enforceTokenBudget, incrementTokenUsage, getUsageForUser } from "../middleware/tokenBudget";
@@ -188,10 +189,13 @@ export async function projectRoutes(app: FastifyInstance) {
       return { subtitles };
     } catch (err) {
       request.log.error({ err }, "Transcription failed");
-      const code =
+      const rawCode =
         err && typeof err === "object" && "code" in err
-          ? (err as { code?: string }).code || "INTERNAL_ERROR"
-          : "INTERNAL_ERROR";
+          ? (err as { code?: string }).code
+          : undefined;
+      const code = rawCode && API_ERROR_CODES.includes(rawCode as any)
+        ? (rawCode as (typeof API_ERROR_CODES)[number])
+        : "INTERNAL_ERROR";
       const status = code === "PROVIDER_KEY_MISSING" ? 400 : 500;
       if (err instanceof Error) {
         const message = err.message || "Transcription failed";
@@ -274,10 +278,13 @@ export async function projectRoutes(app: FastifyInstance) {
       };
     } catch (err) {
       request.log.error({ err }, "Prompt edit failed");
-      const code =
+      const rawCode =
         err && typeof err === "object" && "code" in err
-          ? (err as { code?: string }).code || "INTERNAL_ERROR"
-          : "INTERNAL_ERROR";
+          ? (err as { code?: string }).code
+          : undefined;
+      const code = rawCode && API_ERROR_CODES.includes(rawCode as any)
+        ? (rawCode as (typeof API_ERROR_CODES)[number])
+        : "INTERNAL_ERROR";
       const status = code === "PROVIDER_KEY_MISSING" ? 400 : 500;
       if (err instanceof Error) {
         const message = err.message || "AI edit failed";

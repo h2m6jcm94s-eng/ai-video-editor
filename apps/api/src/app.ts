@@ -17,6 +17,7 @@ import { healthRoutes } from "./routes/health";
 import { metricsRoutes } from "./routes/metrics";
 import { requireAuth } from "./middleware/auth";
 import { sendError } from "./lib/errors";
+import { API_ERROR_CODES } from "@ai-video-editor/shared-types";
 import { getLoggerConfig, generateRequestId, buildRequestContext } from "./lib/logger";
 import { httpRequestsTotal, httpRequestDurationSeconds, rateLimitHitsTotal, normalizeRoutePath } from "./lib/metrics";
 
@@ -38,11 +39,15 @@ export async function buildApp() {
     }
 
     const isClientError = (error.statusCode ?? 500) < 500;
+    const errorCode =
+      error.code && API_ERROR_CODES.includes(error.code as any)
+        ? (error.code as (typeof API_ERROR_CODES)[number])
+        : "INTERNAL_ERROR";
     return sendError(
       reply,
       error.statusCode || 500,
       isClientError ? error.message : "Internal server error",
-      error.code || "INTERNAL_ERROR"
+      errorCode
     );
   });
 
@@ -72,10 +77,10 @@ export async function buildApp() {
   // Request timing: track slow endpoints
   const SLOW_REQUEST_MS = 500;
   app.addHook("onRequest", async (request) => {
-    (request as any)._startTime = performance.now();
+    request._startTime = performance.now();
   });
   app.addHook("onResponse", async (request, reply) => {
-    const start = (request as any)._startTime as number | undefined;
+    const start = request._startTime;
     if (start !== undefined) {
       const durationMs = Math.round(performance.now() - start);
       const durationSec = durationMs / 1000;

@@ -37,16 +37,46 @@ export async function dequeueJob(): Promise<JobMessage | null> {
   }
 }
 
+const SSE_HISTORY_TTL_SEC = 300; // 5 minutes
+const SSE_HISTORY_MAX = 50;
+
 export async function publishProgress(
   jobId: string,
   stage: string,
   progress: number,
   message: string
 ): Promise<void> {
-  await redis.publish(
-    `job:${jobId}`,
-    JSON.stringify({ jobId, stage, progress, message, timestamp: new Date().toISOString() })
-  );
+  const eventId = await redis.incr(`ave:job:${jobId}:eventId`);
+  const payload = JSON.stringify({ jobId, stage, progress, message, timestamp: new Date().toISOString() });
+
+  // Publish to live subscribers
+  await redis.publish(`job:${jobId}`, JSON.stringify({ id: eventId, data: payload }));
+
+  // Buffer for reconnect resume
+  const listKey = `ave:job:${jobId}:events`;
+  await redis.lpush(listKey, JSON.stringify({ id: eventId, data: payload }));
+  await redis.ltrim(listKey, 0, SSE_HISTORY_MAX - 1);
+  await redis.expire(listKey, SSE_HISTORY_TTL_SEC);
+}
+
+export async function getBufferedEvents(
+  jobId: string,
+  afterId: number
+): Promise<{ id: number; data: string }[]> {
+  const listKey = `ave:job:${jobId}:events`;
+  const raw = await redis.lrange(listKey, 0, SSE_HISTORY_MAX - 1);
+  const events: { id: number; data: string }[] = [];
+  for (const item of raw.reverse()) {
+    try {
+      const parsed = JSON.parse(item);
+      if (typeof parsed.id === "number" && parsed.id > afterId) {
+        events.push(parsed);
+      }
+    } catch {
+      // skip corrupt entries
+    }
+  }
+  return events;
 }
 
 export async function getJobStatus(jobId: string): Promise<{

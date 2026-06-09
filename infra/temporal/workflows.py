@@ -7,9 +7,25 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 from dataclasses import dataclass
 from typing import List, Dict
+from enum import Enum
 
 with workflow.unsafe.imports_passed_through():
     from shared_py.models import CutList, BeatGrid, ShotBoundary
+
+
+class RenderStage(str, Enum):
+    INITIALIZED = "initialized"
+    PROBING = "probing"
+    BEAT_DETECTION = "beat_detection"
+    SHOT_DETECTION = "shot_detection"
+    STYLE_ANALYSIS = "style_analysis"
+    EMBEDDING = "embedding"
+    CUTLIST_GENERATION = "cutlist_generation"
+    RANKING = "ranking"
+    AWAITING_REVIEW = "awaiting_review"
+    RENDERING = "rendering"
+    UPLOADING = "uploading"
+    COMPLETED = "completed"
 
 
 @dataclass
@@ -40,7 +56,7 @@ class VideoRenderWorkflow:
 
     def __init__(self) -> None:
         self._progress = 0
-        self._stage = "initialized"
+        self._stage = RenderStage.INITIALIZED
 
     @workflow.run
     async def run(self, input: VideoRenderInput) -> str:
@@ -48,7 +64,7 @@ class VideoRenderWorkflow:
         clip_key_map = {cid: input.asset_key_map.get(cid, "") for cid in input.clip_asset_ids}
 
         # 1. Probe inputs
-        self._stage = "probing"
+        self._stage = RenderStage.PROBING
         self._progress = 5
         probe = await workflow.execute_activity(
             "probe_inputs",
@@ -58,7 +74,7 @@ class VideoRenderWorkflow:
         )
 
         # 2. Detect beats
-        self._stage = "beat_detection"
+        self._stage = RenderStage.BEAT_DETECTION
         self._progress = 15
         beats = await workflow.execute_activity(
             "detect_beats",
@@ -68,7 +84,7 @@ class VideoRenderWorkflow:
         )
 
         # 3. Detect shots
-        self._stage = "shot_detection"
+        self._stage = RenderStage.SHOT_DETECTION
         self._progress = 25
         shots = await workflow.execute_activity(
             "detect_shots",
@@ -78,7 +94,7 @@ class VideoRenderWorkflow:
         )
 
         # 4. Analyze style
-        self._stage = "style_analysis"
+        self._stage = RenderStage.STYLE_ANALYSIS
         self._progress = 40
         style = await workflow.execute_activity(
             "analyze_reference_style",
@@ -88,7 +104,7 @@ class VideoRenderWorkflow:
         )
 
         # 5. Embed clips
-        self._stage = "embedding"
+        self._stage = RenderStage.EMBEDDING
         self._progress = 55
         await workflow.execute_activity(
             "embed_user_clips",
@@ -101,7 +117,7 @@ class VideoRenderWorkflow:
         energy_curve = []
 
         # 6. Generate cut-list
-        self._stage = "cutlist_generation"
+        self._stage = RenderStage.CUTLIST_GENERATION
         self._progress = 70
         cutlist = await workflow.execute_activity(
             "generate_cutlist_claude",
@@ -111,7 +127,7 @@ class VideoRenderWorkflow:
         )
 
         # 7. Rank clips
-        self._stage = "ranking"
+        self._stage = RenderStage.RANKING
         self._progress = 75
         clip_metadata = {}
         for cid, meta in probe.get("clips", {}).items():
@@ -132,7 +148,7 @@ class VideoRenderWorkflow:
 
         # If assisted mode, wait for user signal
         if input.mode == "assisted":
-            self._stage = "awaiting_review"
+            self._stage = RenderStage.AWAITING_REVIEW
             self._progress = 80
             cutlist = await workflow.wait_for_external_signal(
                 "cutlist_approved",
@@ -141,7 +157,7 @@ class VideoRenderWorkflow:
             )
 
         # 8. Render
-        self._stage = "rendering"
+        self._stage = RenderStage.RENDERING
         self._progress = 85
         output_path = await workflow.execute_activity(
             "render_720p",
@@ -151,7 +167,7 @@ class VideoRenderWorkflow:
         )
 
         # 9. Upload
-        self._stage = "uploading"
+        self._stage = RenderStage.UPLOADING
         self._progress = 95
         await workflow.execute_activity(
             "upload_to_r2",
@@ -161,7 +177,7 @@ class VideoRenderWorkflow:
         )
 
         # 10. Notify
-        self._stage = "completed"
+        self._stage = RenderStage.COMPLETED
         self._progress = 100
         await workflow.execute_activity(
             "notify_user",

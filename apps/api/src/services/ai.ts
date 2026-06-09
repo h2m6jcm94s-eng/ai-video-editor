@@ -10,25 +10,13 @@ import { db } from "../db";
 import { providerKeys } from "../db/schema";
 import { aiCallsTotal, aiCallDurationSeconds } from "../lib/metrics";
 import { countTokens } from "../lib/tokens";
-
-const ENCRYPTION_SECRET = process.env.PROVIDER_ENCRYPTION_SECRET || "dev-secret-do-not-use-in-production";
-
-// Simple XOR for demo — production should use AES-256-GCM + KEK
-function decrypt(cipher: string, secret: string): string {
-  const buf = Buffer.from(cipher, "base64");
-  const sec = Buffer.from(secret);
-  const out = Buffer.alloc(buf.length);
-  for (let i = 0; i < buf.length; i++) {
-    out[i] = buf[i] ^ sec[i % sec.length];
-  }
-  return out.toString("utf-8");
-}
+import { decrypt as aesDecrypt } from "../lib/crypto";
 
 async function getProviderKey(userId: string, provider: "anthropic" | "openai"): Promise<string | undefined> {
   const row = await db.query.providerKeys.findFirst({
     where: and(eq(providerKeys.userId, userId), eq(providerKeys.provider, provider)),
   });
-  if (row) return decrypt(row.encryptedKey, ENCRYPTION_SECRET);
+  if (row) return aesDecrypt(row.encryptedKey);
   return undefined;
 }
 

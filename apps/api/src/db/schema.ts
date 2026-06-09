@@ -33,7 +33,7 @@ export const projects = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     name: varchar("name", { length: 255 }).notNull(),
     status: varchar("status", { length: 50 }).notNull().default("uploading"),
-    styleTier: varchar("style_tier", { length: 50 }).notNull().default("full_style"),
+    styleTier: varchar("style_tier", { length: 50 }).notNull().default("with_effects"),
     mode: varchar("mode", { length: 50 }).notNull().default("auto"),
     referenceAssetId: uuid("reference_asset_id"),
     songAssetId: uuid("song_asset_id"),

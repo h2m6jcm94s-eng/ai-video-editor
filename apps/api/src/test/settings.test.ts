@@ -10,7 +10,7 @@ describe("Settings Routes", () => {
   const mockKeyRow = {
     userId: "test-user-id",
     provider: "anthropic",
-    encryptedKey: "+9Pj4+jl6uDk4Q==", // "sk-test-key" XOR with "dev-secret-do-not-use-in-production"
+    encryptedKey: "pfnELPNxJc270LgwWoqj8FpUlAgdLNlc9od6fSImDAOhNRqudME9", // "sk-test-key" encrypted with AES-256-GCM (test KEK)
     createdAt: new Date(),
     updatedAt: new Date(),
   };

@@ -21,7 +21,7 @@ class OpenAIProvider(AIProvider):
 
     name = "openai"
 
-    def __init__(self, api_key: str = None, model: str = "gpt-4.1"):
+    def __init__(self, api_key: str = None, model: str = "gpt-4o"):
         if OpenAI is None:
             raise ImportError("openai package not installed. Run: pip install openai")
         resolved_key = api_key or os.environ.get("OPENAI_API_KEY", "")

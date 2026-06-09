@@ -33,20 +33,8 @@ export const RENDER_STATUS = [
   "failed",
 ] as const;
 
-export const ERROR_CODE = [
-  "VALIDATION_ERROR",
-  "UNAUTHORIZED",
-  "FORBIDDEN",
-  "NOT_FOUND",
-  "CONFLICT",
-  "RATE_LIMITED",
-  "INTERNAL_ERROR",
-  "PROVIDER_KEY_MISSING",
-] as const;
-
 export type StyleTier = (typeof STYLE_TIER)[number];
 export type EditMode = (typeof EDIT_MODE)[number];
 export type AssetType = (typeof ASSET_TYPE)[number];
 export type ProjectStatus = (typeof PROJECT_STATUS)[number];
 export type RenderStatus = (typeof RENDER_STATUS)[number];
-export type ErrorCode = (typeof ERROR_CODE)[number];

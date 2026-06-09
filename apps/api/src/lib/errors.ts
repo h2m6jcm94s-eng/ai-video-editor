@@ -2,10 +2,11 @@
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
 import type { FastifyReply } from "fastify";
+import type { ApiErrorCode } from "@ai-video-editor/shared-types";
 
 export interface ApiError {
   error: string;
-  code: string;
+  code: ApiErrorCode;
   details?: unknown;
 }
 
@@ -13,7 +14,7 @@ export function sendError(
   reply: FastifyReply,
   status: number,
   error: string,
-  code: string,
+  code: ApiErrorCode,
   details?: unknown
 ) {
   // Log the error via the request logger if available

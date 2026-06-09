@@ -16,7 +16,7 @@ import path from "path";
 const endpoint = process.env.R2_ENDPOINT || "";
 const isLocal = endpoint.includes("localhost") || endpoint.includes("127.0.0.1") || endpoint.includes("minio") || endpoint.includes(":9000");
 
-const s3 = new S3Client({
+export const s3 = new S3Client({
   region: "auto",
   endpoint: endpoint || undefined,
   credentials: {
@@ -26,7 +26,7 @@ const s3 = new S3Client({
   forcePathStyle: isLocal,
 });
 
-const BUCKET = process.env.R2_BUCKET_NAME || "ai-video-editor";
+export const BUCKET = process.env.R2_BUCKET_NAME || "ai-video-editor";
 
 export async function createPresignedUploadUrl(key: string, contentType: string, expiresIn = 900) {
   const command = new PutObjectCommand({
