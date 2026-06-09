@@ -8,6 +8,7 @@ import {
   createTemplateSchema,
   providerKeySchema,
   testProviderKeySchema,
+  cutListSchema,
 } from "@ai-video-editor/shared-types";
 import { STYLE_TIER, EDIT_MODE, ASSET_TYPE } from "@ai-video-editor/shared-types";
 
@@ -85,8 +86,12 @@ describe("Contract tests — shared schemas match backend expectations", () => {
   });
 
   it("createTemplateSchema requires trimmed name", () => {
-    expect(createTemplateSchema.safeParse({ name: "Template A", cutList: {} }).success).toBe(true);
-    expect(createTemplateSchema.safeParse({ name: "   ", cutList: {} }).success).toBe(false);
+    const validCutList = {
+      globals: { totalDurationS: 30, tempoBpm: 120 },
+      slots: [{ index: 0, startS: 0, durationS: 5, beatIndex: 0, section: "intro", targetShotType: "medium", subjectHint: "person", motionHint: "static" }],
+    };
+    expect(createTemplateSchema.safeParse({ name: "Template A", cutList: validCutList }).success).toBe(true);
+    expect(createTemplateSchema.safeParse({ name: "   ", cutList: validCutList }).success).toBe(false);
   });
 
   it("providerKeySchema requires non-empty provider and key", () => {
@@ -103,5 +108,73 @@ describe("Contract tests — shared schemas match backend expectations", () => {
   it("testProviderKeySchema requires provider", () => {
     expect(testProviderKeySchema.safeParse({ provider: "openai" }).success).toBe(true);
     expect(testProviderKeySchema.safeParse({}).success).toBe(false);
+  });
+
+  it("ASSET_TYPE includes lut + sfx", () => {
+    expect(ASSET_TYPE).toContain("lut");
+    expect(ASSET_TYPE).toContain("sfx");
+  });
+});
+
+describe("Contract tests — cutList camelCase invariant", () => {
+  it("rejects snake_case keys", () => {
+    const bad = {
+      globals: { totalDurationS: 10, tempoBpm: 120, timeSignature: "4/4", energyCurve: [], sectionMarkers: [], aspectRatio: "9:16" },
+      slots: [{ start_s: 0, duration_s: 5 }],
+    };
+    expect(cutListSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it("accepts camelCase keys", () => {
+    const good = {
+      globals: { totalDurationS: 10, tempoBpm: 120, timeSignature: "4/4", energyCurve: [], sectionMarkers: [], aspectRatio: "9:16" },
+      slots: [
+        {
+          index: 0,
+          startS: 0,
+          durationS: 5,
+          beatIndex: 0,
+          section: "intro",
+          transitionIn: "hard_cut",
+          transitionOut: "hard_cut",
+          targetShotType: "medium",
+          subjectHint: "person",
+          motionHint: "static",
+          energyLevel: 0.5,
+          requiredTags: [],
+          avoidTags: [],
+        },
+      ],
+      overlays: [],
+      audioTracks: [],
+    };
+    expect(cutListSchema.safeParse(good).success).toBe(true);
+  });
+
+  it("rejects extra fields when .strict()", () => {
+    const withExtra = {
+      globals: { totalDurationS: 10, tempoBpm: 120, timeSignature: "4/4", energyCurve: [], sectionMarkers: [], aspectRatio: "9:16" },
+      slots: [
+        {
+          index: 0,
+          startS: 0,
+          durationS: 5,
+          beatIndex: 0,
+          section: "intro",
+          transitionIn: "hard_cut",
+          transitionOut: "hard_cut",
+          targetShotType: "medium",
+          subjectHint: "person",
+          motionHint: "static",
+          energyLevel: 0.5,
+          requiredTags: [],
+          avoidTags: [],
+          evil: true,
+        },
+      ],
+      overlays: [],
+      audioTracks: [],
+    };
+    expect(cutListSchema.safeParse(withExtra).success).toBe(false);
   });
 });

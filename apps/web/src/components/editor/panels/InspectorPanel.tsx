@@ -39,7 +39,7 @@ const previewEffectsSchema = z.object({
 
 const slotSchema = z.object({
   startS: z.number().min(0),
-  duration_s: z.number().min(0.1),
+  durationS: z.number().min(0.1),
   transitionIn: z.enum(TRANSITIONS),
   transitionOut: z.enum(TRANSITIONS),
   targetShotType: z.string().max(255),
@@ -133,7 +133,7 @@ function InspectorPanelInner({
     resolver: zodResolver(slotSchema),
     defaultValues: {
       startS: selectedSlot?.startS ?? 0,
-      duration_s: selectedSlot?.duration_s ?? 0,
+      durationS: selectedSlot?.durationS ?? 0,
       transitionIn: (selectedSlot?.transitionIn as typeof TRANSITIONS[number]) ?? "hard_cut",
       transitionOut: (selectedSlot?.transitionOut as typeof TRANSITIONS[number]) ?? "hard_cut",
       targetShotType: selectedSlot?.targetShotType ?? "",
@@ -145,7 +145,7 @@ function InspectorPanelInner({
     if (selectedSlot && selectedSlotIndex !== null) {
       slotForm.reset({
         startS: selectedSlot.startS,
-        duration_s: selectedSlot.duration_s,
+        durationS: selectedSlot.durationS,
         transitionIn: (selectedSlot.transitionIn as typeof TRANSITIONS[number]) ?? "hard_cut",
         transitionOut: (selectedSlot.transitionOut as typeof TRANSITIONS[number]) ?? "hard_cut",
         targetShotType: selectedSlot.targetShotType ?? "",
@@ -254,7 +254,7 @@ function InspectorPanelInner({
               />
               <FormField
                 control={slotForm.control}
-                name="duration_s"
+                name="durationS"
                 render={({ field }) => (
                   <FormItem className="space-y-2">
                     <FormLabel className="text-xs">Duration (s)</FormLabel>
@@ -267,7 +267,7 @@ function InspectorPanelInner({
                         onChange={(e) => {
                           const v = parseFloat(e.target.value);
                           field.onChange(v);
-                          updateSlotField("duration_s", v);
+                          updateSlotField("durationS", v);
                         }}
                       />
                     </FormControl>

@@ -78,7 +78,7 @@ def run_pipeline(
         logger.info("Extracting text overlays", phase="style", step=5)
         overlays = extract_text_overlays(reference_path)
         logger.info("Text overlays extracted", overlay_count=len(overlays))
-        style_analysis["detected_overlays"] = [o.model_dump() for o in overlays]
+        style_analysis["detected_overlays"] = [o.model_dump(by_alias=True) for o in overlays]
 
     if style_tier == "full_style":
         logger.info("Analyzing camera motion", phase="style", step=6)
@@ -130,7 +130,7 @@ def run_pipeline(
     # Save cutlist
     cutlist_path = os.path.join(temp_dir, "cutlist.json")
     with open(cutlist_path, "w") as f:
-        json.dump(cutlist.model_dump(), f, indent=2)
+        json.dump(cutlist.model_dump(by_alias=True), f, indent=2)
     logger.info("Cut-list saved", path=cutlist_path)
 
     # Phase 4: Render

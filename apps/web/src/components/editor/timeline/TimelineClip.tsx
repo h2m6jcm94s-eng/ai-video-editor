@@ -27,14 +27,14 @@ export function TimelineClip({ slot, index, duration, isSelected, onSelect, onUp
   durationRef.current = duration;
 
   const left = (slot.startS / duration) * 100;
-  const width = (slot.duration_s / duration) * 100;
+  const width = (slot.durationS / duration) * 100;
 
   const handleMouseDown = useCallback((e: React.MouseEvent, mode: "move" | "resize-left" | "resize-right") => {
     e.stopPropagation();
     setIsDragging(true);
     startXRef.current = e.clientX;
     startValueRef.current =
-      mode === "move" ? slotRef.current.startS : mode === "resize-left" ? slotRef.current.startS : slotRef.current.duration_s;
+      mode === "move" ? slotRef.current.startS : mode === "resize-left" ? slotRef.current.startS : slotRef.current.durationS;
     containerWidthRef.current = (e.currentTarget.parentElement?.offsetWidth || 1);
 
     const handleMouseMove = (ev: MouseEvent) => {
@@ -48,11 +48,11 @@ export function TimelineClip({ slot, index, duration, isSelected, onSelect, onUp
         onUpdate({ startS: newStart });
       } else if (mode === "resize-left") {
         const newStart = Math.max(0, startValueRef.current + deltaSec);
-        const newDuration = slotRef.current.duration_s + (slotRef.current.startS - newStart);
-        if (newDuration > 0.1) onUpdate({ startS: newStart, duration_s: newDuration });
+        const newDuration = slotRef.current.durationS + (slotRef.current.startS - newStart);
+        if (newDuration > 0.1) onUpdate({ startS: newStart, durationS: newDuration });
       } else if (mode === "resize-right") {
         const newDuration = Math.max(0.1, startValueRef.current + deltaSec);
-        onUpdate({ duration_s: newDuration });
+        onUpdate({ durationS: newDuration });
       }
     };
 

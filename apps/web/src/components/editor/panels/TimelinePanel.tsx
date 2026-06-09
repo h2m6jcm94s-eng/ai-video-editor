@@ -65,7 +65,7 @@ export function TimelinePanel({
     const newSlot: Slot = {
       index: cutList.slots.length,
       startS: startTime,
-      duration_s: 2,
+      durationS: 2,
       beatIndex: 0,
       section: "custom",
       transitionIn: "hard_cut",
@@ -77,8 +77,9 @@ export function TimelinePanel({
       requiredTags: [],
       avoidTags: [],
       selectedClipId: assetId,
-      rankedClipIds: null,
-      confidence: null,
+      effects: [],
+      rankedClipIds: undefined,
+      confidence: undefined,
     };
     onReorderSlots([...cutList.slots, newSlot]);
   };

@@ -129,8 +129,8 @@ export function Timeline({
                   key={o.id}
                   className="absolute top-1 h-6 rounded bg-amber-900/40 border border-amber-800/50 px-2 flex items-center text-[9px] text-amber-200 truncate"
                   style={{
-                    left: `${(o.startTime / duration) * 100}%`,
-                    width: `${((o.endTime - o.startTime) / duration) * 100}%`,
+                    left: `${(o.startS / duration) * 100}%`,
+                    width: `${((o.endS - o.startS) / duration) * 100}%`,
                   }}
                 >
                   {o.text}

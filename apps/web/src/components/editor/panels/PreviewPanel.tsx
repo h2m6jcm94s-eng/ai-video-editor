@@ -43,7 +43,7 @@ export function PreviewPanel({ assets, currentTime, isPlaying, onTimeUpdate, ove
   }, [currentTime]);
 
   const activeOverlays = overlays.filter(
-    (o) => currentTime >= o.startTime && currentTime <= o.endTime
+    (o) => currentTime >= o.startS && currentTime <= o.endS
   );
 
   const activeSubtitle = showSubtitles && subtitles?.find(
