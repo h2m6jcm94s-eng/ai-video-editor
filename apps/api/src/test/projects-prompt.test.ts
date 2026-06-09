@@ -119,4 +119,5 @@ describe("Project Prompt Route", () => {
     expect(res.statusCode).toBe(500);
     expect(JSON.parse(res.body).code).toBe("INTERNAL_ERROR");
   });
+
 });
