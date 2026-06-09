@@ -1,0 +1,71 @@
+# Copyright (c) 2025 Devayan Dewri. All rights reserved.
+# Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
+# Commercial SaaS use is prohibited without written permission.
+"""Structured JSON logging setup for Python workers."""
+
+import json
+import logging
+import os
+import sys
+from datetime import datetime, timezone
+from typing import Any
+
+
+class JsonFormatter(logging.Formatter):
+    """Emit log records as single-line JSON."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        obj: dict[str, Any] = {
+            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if hasattr(record, "extra") and isinstance(record.extra, dict):
+            obj.update(record.extra)
+        if record.exc_info:
+            obj["error"] = self.formatException(record.exc_info)
+        return json.dumps(obj, default=str)
+
+
+def configure_logging(level: str | None = None) -> None:
+    """Configure root logger for structured JSON output."""
+    log_level = (level or os.environ.get("LOG_LEVEL", "INFO")).upper()
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(JsonFormatter())
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.addHandler(handler)
+    root.setLevel(getattr(logging, log_level, logging.INFO))
+
+
+def get_logger(name: str) -> logging.Logger:
+    """Return a logger that supports structured `extra` kwargs."""
+    return logging.getLogger(name)
+
+
+class StructuredLogger:
+    """Thin wrapper so callers can do logger.info("msg", key=value)."""
+
+    def __init__(self, name: str) -> None:
+        self._logger = logging.getLogger(name)
+
+    def _log(self, method: str, msg: str, **kwargs: Any) -> None:
+        extra = {"extra": kwargs} if kwargs else {}
+        getattr(self._logger, method)(msg, extra=extra)
+
+    def debug(self, msg: str, **kwargs: Any) -> None:
+        self._log("debug", msg, **kwargs)
+
+    def info(self, msg: str, **kwargs: Any) -> None:
+        self._log("info", msg, **kwargs)
+
+    def warning(self, msg: str, **kwargs: Any) -> None:
+        self._log("warning", msg, **kwargs)
+
+    def error(self, msg: str, **kwargs: Any) -> None:
+        self._log("error", msg, **kwargs)
+
+    def exception(self, msg: str, **kwargs: Any) -> None:
+        extra = {"extra": kwargs} if kwargs else {}
+        self._logger.exception(msg, extra=extra)
