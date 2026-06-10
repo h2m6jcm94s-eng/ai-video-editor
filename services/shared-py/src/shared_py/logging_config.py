@@ -33,7 +33,7 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(obj, default=str)
 
 
-def configure_logging(level: str | None = None) -> None:
+def configure_logging(level: str | None = None, service_name: str | None = None) -> None:
     """Configure root logger for structured JSON output."""
     log_level = (level or os.environ.get("LOG_LEVEL", "INFO")).upper()
     handler = logging.StreamHandler(sys.stdout)
@@ -42,6 +42,8 @@ def configure_logging(level: str | None = None) -> None:
     root.handlers.clear()
     root.addHandler(handler)
     root.setLevel(getattr(logging, log_level, logging.INFO))
+    if service_name:
+        root.name = service_name
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -83,3 +85,14 @@ class StructuredLogger:
     def bind(self, correlation_id: str | None = None) -> "StructuredLogger":
         """Return a new logger bound to a correlation ID."""
         return StructuredLogger(self._logger.name, correlation_id)
+
+
+def bind_correlation_id_from_temporal() -> str | None:
+    """Extract correlation ID from Temporal activity headers if available."""
+    try:
+        from temporalio import activity
+
+        headers = activity.info().header
+        return headers.get("correlationId") if headers else None
+    except Exception:
+        return None

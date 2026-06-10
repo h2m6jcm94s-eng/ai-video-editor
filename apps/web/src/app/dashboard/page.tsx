@@ -3,12 +3,12 @@
 export const dynamic = "force-dynamic";
 
 import { auth } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
-import Link from "next/link";
 import { Settings } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { ProjectList } from "@/components/dashboard/ProjectList";
+import Link from "next/link";
+import { redirect } from "next/navigation";
 import { CreateProjectDialog } from "@/components/dashboard/CreateProjectDialog";
+import { ProjectList } from "@/components/dashboard/ProjectList";
+import { Button } from "@/components/ui/button";
 import { apiServer } from "@/lib/api/server";
 
 export default async function DashboardPage() {
@@ -19,8 +19,8 @@ export default async function DashboardPage() {
   try {
     const res = await apiServer.projects.list();
     projects = res.projects;
-  } catch {
-    // Silent fail — empty state handles it
+  } catch (err) {
+    console.error("Failed to load projects:", err);
   }
 
   return (

@@ -281,11 +281,11 @@ def compile_timeline(
     for f in temp_files:
         try:
             os.remove(f)
-        except:
+        except OSError:
             pass
     try:
         os.rmdir(temp_dir)
-    except:
+    except OSError:
         pass
 
     return output_path

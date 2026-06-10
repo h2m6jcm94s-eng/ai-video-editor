@@ -43,10 +43,12 @@ class TestProbeVideo:
         try:
             create_test_video(path, duration=5.0, fps=30, resolution=(640, 480))
             info = probe_video(path)
-            assert info.duration_s > 4.0
-            assert info.width == 640
-            assert info.height == 480
-            assert info.fps > 0
+            assert info["duration_sec"] > 4.0
+            video_stream = next((s for s in info["streams"] if s["type"] == "video"), None)
+            assert video_stream is not None
+            assert video_stream["width"] == 640
+            assert video_stream["height"] == 480
+            assert video_stream["fps"] > 0
         finally:
             os.unlink(path)
 
@@ -56,8 +58,10 @@ class TestProbeVideo:
         try:
             create_test_video(path, duration=3.0, with_audio=True)
             info = probe_video(path)
-            assert info.sample_rate is not None
-            assert info.channels is not None
+            audio_stream = next((s for s in info["streams"] if s["type"] == "audio"), None)
+            assert audio_stream is not None
+            assert audio_stream["sample_rate"] is not None
+            assert audio_stream["channels"] is not None
         finally:
             os.unlink(path)
 
@@ -113,6 +117,8 @@ class TestProbeMocked:
         mock_container.duration = 5000000
         mock_container.format = MagicMock()
         mock_container.format.name = "mp4"
+        mock_container.__enter__.return_value = mock_container
+        mock_container.__exit__.return_value = False
         mock_av_open.return_value = mock_container
 
         info = probe_video("fake.mp4")

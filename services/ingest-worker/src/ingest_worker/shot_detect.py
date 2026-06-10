@@ -77,20 +77,18 @@ def detect_shot_boundaries_transnet(
     # Read video frames at TransNet's native resolution (48x27)
     if av is None:
         raise ImportError("av not installed")
-    container = av.open(video_path)
-    stream = container.streams.video[0]
+    with av.open(video_path) as container:
+        stream = container.streams.video[0]
 
-    frames = []
-    for packet in container.demux(stream):
-        for frame in packet.decode():
-            # Resize to 48x27
-            img = frame.to_ndarray(format="rgb24")
-            if cv2 is None:
-                raise ImportError("cv2 not installed")
-            img = cv2.resize(img, (48, 27), interpolation=cv2.INTER_LINEAR)
-            frames.append(img)
-
-    container.close()
+        frames = []
+        for packet in container.demux(stream):
+            for frame in packet.decode():
+                # Resize to 48x27
+                img = frame.to_ndarray(format="rgb24")
+                if cv2 is None:
+                    raise ImportError("cv2 not installed")
+                img = cv2.resize(img, (48, 27), interpolation=cv2.INTER_LINEAR)
+                frames.append(img)
 
     if not frames:
         return []

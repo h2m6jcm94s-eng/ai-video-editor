@@ -12,15 +12,32 @@
  */
 
 import type { FastifyRequest, RawRequestDefaultExpression } from "fastify";
+import type { TransportMultiOptions } from "pino";
 import pino from "pino";
 
 /**
  * Module-level logger for service files that don't have request context.
  */
+function getProductionTransport(): TransportMultiOptions | undefined {
+  const lokiUrl = process.env.LOKI_URL ?? "http://loki:3100";
+  const targets: TransportMultiOptions["targets"] = [
+    {
+      target: "pino-loki",
+      options: {
+        host: lokiUrl,
+        batching: true,
+        interval: 5,
+        labels: { service_name: "api" },
+      },
+    },
+  ];
+  return { targets };
+}
+
 export const logger = pino({
   level: process.env.LOG_LEVEL || "info",
   ...(process.env.NODE_ENV === "production"
-    ? {}
+    ? { transport: getProductionTransport() }
     : {
         transport: {
           target: "pino-pretty",
@@ -59,7 +76,7 @@ export function getLoggerConfig() {
       censor: "[REDACTED]",
     },
     ...(isProduction
-      ? {}
+      ? { transport: getProductionTransport() }
       : {
           transport: {
             target: "pino-pretty",

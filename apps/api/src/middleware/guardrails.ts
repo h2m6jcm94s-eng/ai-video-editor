@@ -8,8 +8,9 @@
  * sending them to AI providers. Fails open if the service is unavailable.
  */
 
-import type { FastifyRequest, FastifyReply } from "fastify";
+import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from "fastify";
 import { sendError } from "../lib/errors";
+import { logger as defaultLogger } from "../lib/logger";
 import { guardrailsBlocksTotal } from "../lib/metrics";
 
 function getGuardrailsConfig() {
@@ -34,7 +35,8 @@ interface GuardrailsResponse {
  */
 export async function evaluateGuardrails(
   text: string,
-  context?: string
+  context?: string,
+  log: FastifyBaseLogger = defaultLogger,
 ): Promise<GuardrailsResponse> {
   const config = getGuardrailsConfig();
   if (!config.enabled) {
@@ -56,7 +58,7 @@ export async function evaluateGuardrails(
 
     if (!res.ok) {
       // Fail-open: log warning but don't block
-      console.warn(`Guardrails service returned ${res.status}, failing open`);
+      log.warn({ status: res.status }, "Guardrails service returned error, failing open");
       return { allowed: true };
     }
 
@@ -65,9 +67,11 @@ export async function evaluateGuardrails(
   } catch (err) {
     // Fail-open on network errors, timeouts, etc.
     const isTimeout = err instanceof Error && err.name === "AbortError";
-    console.warn(
-      isTimeout ? "Guardrails evaluation timed out, failing open" : "Guardrails service unreachable, failing open",
-      err
+    log.warn(
+      { err, isTimeout },
+      isTimeout
+        ? "Guardrails evaluation timed out, failing open"
+        : "Guardrails service unreachable, failing open",
     );
     return { allowed: true };
   }
@@ -77,10 +81,7 @@ export async function evaluateGuardrails(
  * Fastify preHandler to validate request body for prompt injection.
  * Apply to AI endpoints.
  */
-export async function validatePromptGuardrails(
-  request: FastifyRequest,
-  reply: FastifyReply
-): Promise<void> {
+export async function validatePromptGuardrails(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   // Extract prompt text from common request shapes
   const body = request.body as Record<string, unknown> | undefined;
   const prompt = extractPromptText(body);
@@ -90,7 +91,7 @@ export async function validatePromptGuardrails(
     return;
   }
 
-  const result = await evaluateGuardrails(prompt, request.url);
+  const result = await evaluateGuardrails(prompt, request.url, request.log);
 
   if (!result.allowed) {
     const route = request.routeOptions?.url || request.url;
@@ -98,10 +99,7 @@ export async function validatePromptGuardrails(
     for (const category of categories) {
       guardrailsBlocksTotal.inc({ category, route });
     }
-    request.log.warn(
-      { flagged: result.flagged_categories, route },
-      "Guardrails blocked prompt"
-    );
+    request.log.warn({ flagged: result.flagged_categories, route }, "Guardrails blocked prompt");
     return sendError(reply, 400, result.reason || "Prompt violates safety policy", "GUARDRAILS_VIOLATION", {
       flagged_categories: result.flagged_categories,
     });
@@ -128,7 +126,7 @@ function extractPromptText(body: Record<string, unknown> | undefined): string | 
   if (Array.isArray(body.messages)) {
     const lastUser = [...body.messages]
       .reverse()
-      .find((m: any) => m?.role === "user");
+      .find((m: { role?: string; content?: string }) => m?.role === "user");
     if (lastUser && typeof lastUser.content === "string") {
       return lastUser.content;
     }
