@@ -3,7 +3,6 @@
 import { useState, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { KeyRound, Trash2, TestTube, Plus, Loader2, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,21 +22,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { providerKeySchema } from "@ai-video-editor/shared-types";
+import type { z } from "zod";
 import { useApi } from "@/lib/api/client";
 import { toast } from "sonner";
 import { APIError } from "@/lib/api/error";
+import { mapApiValidationErrors } from "@/lib/api/formErrors";
 
 const PROVIDERS = [
   { value: "anthropic", label: "Anthropic (Claude)" },
   { value: "openai", label: "OpenAI (GPT-4o)" },
 ];
 
-const formSchema = z.object({
-  provider: z.string().min(1, "Select a provider"),
-  key: z.string().min(1, "API key is required").max(2048, "Key too long"),
-});
-
-type FormValues = z.infer<typeof formSchema>;
+type FormValues = z.infer<typeof providerKeySchema>;
 
 type KeyInfo = {
   provider: string;
@@ -51,17 +48,15 @@ export function ProviderKeyManager({ initialKeys }: { initialKeys: KeyInfo[] }) 
   const [testing, setTesting] = useState<Record<string, boolean>>({});
   const [deleting, setDeleting] = useState<Record<string, boolean>>({});
   const [showForm, setShowForm] = useState(false);
-  const [saving, setSaving] = useState(false);
 
   const form = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
+    resolver: zodResolver(providerKeySchema),
     defaultValues: { provider: "", key: "" },
     mode: "onChange",
   });
 
   const onSubmit = useCallback(
     async (values: FormValues) => {
-      setSaving(true);
       try {
         await api.settings.providerKeys.save(values);
         toast.success(`${PROVIDERS.find((p) => p.value === values.provider)?.label} key saved`);
@@ -71,6 +66,9 @@ export function ProviderKeyManager({ initialKeys }: { initialKeys: KeyInfo[] }) 
         setShowForm(false);
         form.reset();
       } catch (err) {
+        if (err instanceof APIError && mapApiValidationErrors(err, form.setError)) {
+          return;
+        }
         if (err instanceof APIError) {
           toast.error(err.userMessage);
         } else if (err instanceof Error) {
@@ -78,8 +76,6 @@ export function ProviderKeyManager({ initialKeys }: { initialKeys: KeyInfo[] }) 
         } else {
           toast.error("Failed to save key");
         }
-      } finally {
-        setSaving(false);
       }
     },
     [api, form]
@@ -205,9 +201,9 @@ export function ProviderKeyManager({ initialKeys }: { initialKeys: KeyInfo[] }) 
                   </Button>
                   <Button
                     type="submit"
-                    disabled={!form.formState.isValid || saving}
+                    disabled={!form.formState.isValid || form.formState.isSubmitting}
                   >
-                    {saving && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+                    {form.formState.isSubmitting && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
                     Save Key
                   </Button>
                 </div>

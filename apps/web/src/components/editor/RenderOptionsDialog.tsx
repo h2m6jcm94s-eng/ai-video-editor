@@ -2,10 +2,8 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { Film, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,8 +27,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { renderOptionsSchema } from "@ai-video-editor/shared-types";
+import type { z } from "zod";
 import { useApi } from "@/lib/api/client";
 import { APIError } from "@/lib/api/error";
+import { mapApiValidationErrors } from "@/lib/api/formErrors";
 import { toast } from "sonner";
 
 const EXPORT_PRESETS = [
@@ -40,11 +41,7 @@ const EXPORT_PRESETS = [
   { value: "square_1_1", label: "Square 1:1" },
 ];
 
-const renderFormSchema = z.object({
-  exportPreset: z.enum(["youtube_16_9", "reels_9_16", "tiktok_9_16", "square_1_1"]).optional(),
-});
-
-type RenderForm = z.infer<typeof renderFormSchema>;
+type RenderForm = z.infer<typeof renderOptionsSchema>;
 
 interface RenderOptionsDialogProps {
   open: boolean;
@@ -55,24 +52,24 @@ interface RenderOptionsDialogProps {
 
 export function RenderOptionsDialog({ open, onOpenChange, projectId, onJobStart }: RenderOptionsDialogProps) {
   const api = useApi();
-  const [submitting, setSubmitting] = useState(false);
 
   const form = useForm<RenderForm>({
-    resolver: zodResolver(renderFormSchema),
+    resolver: zodResolver(renderOptionsSchema),
     defaultValues: { exportPreset: "reels_9_16" },
+    mode: "onChange",
   });
 
   const onSubmit = async (values: RenderForm) => {
-    setSubmitting(true);
     try {
       const res = await api.renders.start(projectId, { exportPreset: values.exportPreset });
       toast.success("Render started", { description: `Job ID: ${res.job.id}` });
       onJobStart?.(res.job.id);
       onOpenChange(false);
     } catch (err) {
+      if (err instanceof APIError && mapApiValidationErrors(err, form.setError)) {
+        return;
+      }
       toast.error(err instanceof APIError ? err.userMessage : "Render failed");
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -114,8 +111,8 @@ export function RenderOptionsDialog({ open, onOpenChange, projectId, onJobStart 
               <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
-              <Button type="submit" size="sm" disabled={submitting} className="gap-2 bg-indigo-600 hover:bg-indigo-700">
-                {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Film className="h-3.5 w-3.5" />}
+              <Button type="submit" size="sm" disabled={!form.formState.isValid || form.formState.isSubmitting} className="gap-2 bg-indigo-600 hover:bg-indigo-700">
+                {form.formState.isSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Film className="h-3.5 w-3.5" />}
                 Start Render
               </Button>
             </div>

@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/select";
 import { useApi } from "@/lib/api/client";
 import { APIError } from "@/lib/api/error";
+import { mapApiValidationErrors } from "@/lib/api/formErrors";
 import { toast } from "sonner";
 
 type FormData = z.infer<typeof createProjectSchema>;
@@ -47,7 +48,8 @@ export default function NewProjectPage() {
     handleSubmit,
     setValue,
     watch,
-    formState: { errors, isSubmitting },
+    setError,
+    formState: { errors, isSubmitting, isValid },
   } = useForm<FormData>({
     resolver: zodResolver(createProjectSchema),
     defaultValues: {
@@ -72,6 +74,9 @@ export default function NewProjectPage() {
       const res = await api.projects.create(data);
       router.push(`/editor/${res.project.id}`);
     } catch (err: unknown) {
+      if (err instanceof APIError && mapApiValidationErrors(err, setError)) {
+        return;
+      }
       const message = err instanceof APIError ? err.userMessage : "Failed to create project";
       toast.error(message);
     }
@@ -147,7 +152,7 @@ export default function NewProjectPage() {
             <Button type="button" variant="outline" className="flex-1" onClick={() => router.push("/dashboard")}>
               Cancel
             </Button>
-            <Button type="submit" className="flex-1" disabled={isSubmitting}>
+            <Button type="submit" className="flex-1" disabled={!isValid || isSubmitting}>
               {isSubmitting ? "Creating..." : "Create Project"}
             </Button>
           </div>
