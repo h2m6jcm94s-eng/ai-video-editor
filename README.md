@@ -149,6 +149,7 @@ Open `http://localhost:3000`, sign in with Clerk, and add your AI provider keys 
 | AI | Claude 3.5 Sonnet, GPT-4o, Whisper, Gemini, Groq |
 | Render | FFmpeg, PyAV |
 | Workers | Python 3.11, librosa, PySceneDetect, TransNet V2 |
+| Observability | Grafana, Loki, Tempo, Prometheus, OTel Collector, GlitchTip |
 | Language | TypeScript 5.4, Python 3.11 |
 | Package Manager | pnpm 9.15 (JS), uv (Python) |
 | Testing | Vitest (JS), pytest (Python) |
@@ -177,6 +178,7 @@ ai_video_editor/
 │   └── orchestrator.py   # Standalone pipeline CLI
 ├── infra/
 │   ├── docker/           # Docker Compose and Dockerfiles
+│   ├── observability/    # LGTM stack: Grafana + Loki + Tempo + Prometheus
 │   ├── temporal/         # Temporal workflows and activities
 │   ├── modal/            # Modal.com deployment scripts
 │   └── terraform/        # Infrastructure as code
@@ -199,6 +201,7 @@ ai_video_editor/
 ```bash
 pnpm dev           # Start web + api + shared-types watch
 pnpm typecheck     # Type-check all packages
+pnpm obs:up        # Start observability stack (Grafana, Loki, Tempo, etc.)
 ```
 
 ### Running Tests
@@ -265,7 +268,9 @@ The API is a RESTful HTTP API built on Fastify 4. All endpoints (except health c
 | `POST` | `/api/uploads/presigned` | Generate upload URL |
 | `POST` | `/api/renders` | Start render |
 | `GET` | `/api/progress/:jobId/events` | SSE progress stream |
+| `POST` | `/api/log` | Frontend log ingestion |
 
+**OpenAPI 3.0.3 spec:** [`apps/api/openapi.yaml`](./apps/api/openapi.yaml)  
 **Complete reference:** See [`docs/API.md`](./docs/API.md)
 
 ---
@@ -275,7 +280,11 @@ The API is a RESTful HTTP API built on Fastify 4. All endpoints (except health c
 ### Docker Compose (Recommended for Self-Hosted)
 
 ```bash
+# Core infrastructure (Postgres, Redis, Temporal)
 docker compose -f infra/docker/docker-compose.yml up -d
+
+# Observability stack (Grafana, Loki, Tempo, Prometheus, OTel Collector, Promtail)
+pnpm obs:up
 ```
 
 ### Modal.com (Serverless Workers)

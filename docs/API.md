@@ -1,10 +1,12 @@
 # API Reference
 
 > Complete reference for all HTTP endpoints in the AI Video Editor API.
+>
+> **For the authoritative machine-readable spec, see [`apps/api/openapi.yaml`](../apps/api/openapi.yaml)** — import into Postman, Insomnia, or view with Swagger UI / Redoc.
 
 **Base URL**: `https://api.example.com/api` (production) / `http://localhost:4000/api` (local)
 
-**Authentication**: All endpoints require a Clerk JWT in the `Authorization` header except health checks.
+**Authentication**: All endpoints require a Clerk JWT in the `Authorization` header or Clerk session cookie except health checks and metrics.
 
 **Content-Type**: `application/json` unless otherwise specified.
 
@@ -22,6 +24,7 @@
 ## Table of Contents
 
 - [Health](#health)
+- [Metrics](#metrics)
 - [Projects](#projects)
 - [Uploads](#uploads)
 - [Renders](#renders)
@@ -29,12 +32,13 @@
 - [Settings](#settings)
 - [Presence](#presence)
 - [Progress](#progress)
+- [Log Ingestion](#log-ingestion)
 
 ---
 
 ## Health
 
-### `GET /health`
+### `GET /api/health`
 
 Basic service health check.
 
@@ -54,7 +58,7 @@ Basic service health check.
 
 ---
 
-### `GET /health/db`
+### `GET /api/health/db`
 
 Database connectivity check.
 
@@ -76,6 +80,20 @@ Database connectivity check.
 ---
 
 ## Projects
+
+### `GET /api/metrics`
+
+Prometheus metrics exposition. Returns metrics in Prometheus text format.
+
+**Auth**: Optional `Bearer <METRICS_AUTH_TOKEN>` when `METRICS_AUTH_TOKEN` is configured. Bypassed in test mode.
+
+**Response**: `text/plain` with Prometheus exposition format.
+
+**Status Codes**:
+- `200` — Metrics returned
+- `401` — Invalid or missing token
+
+---
 
 ### `GET /projects`
 
@@ -1135,7 +1153,7 @@ Test a provider API key.
 
 ## Presence
 
-### `POST /presence/:id`
+### `POST /presence/:id/presence`
 
 Report cursor presence for a project.
 
@@ -1176,7 +1194,7 @@ Report cursor presence for a project.
 
 ---
 
-### `GET /presence/:id`
+### `GET /presence/:id/presence`
 
 Get active cursors for a project.
 
@@ -1265,6 +1283,54 @@ data: {"stage":"failed","error":"Encoder error"}
 | `PROVIDER_RATE_LIMITED` | AI provider rate limit hit | 500 |
 | `TEMPORAL_ERROR` | Temporal workflow failed to start | 500 |
 | `INTERNAL_ERROR` | Unhandled server error | 500 |
+
+---
+
+## Log Ingestion
+
+### `POST /api/log`
+
+Ingests batched frontend log events. Used by the web client's structured logger.
+
+**Auth**: Required
+
+**Request Body**:
+```json
+{
+  "events": [
+    {
+      "level": "error",
+      "message": "Failed to load project",
+      "context": { "projectId": "abc-123" },
+      "ts": 1717689600000,
+      "url": "/editor/abc-123"
+    }
+  ]
+}
+```
+
+**Validation Rules**:
+- `level`: Required, enum `["debug", "info", "warn", "error"]`
+- `message`: Required, string, max 2000 chars
+- `context`: Optional, record of unknown values
+- `ts`: Required, number (Unix timestamp ms)
+- `url`: Required, string, max 500 chars
+
+**Response**:
+```json
+{
+  "ok": true
+}
+```
+
+**Status Codes**:
+- `200` — Events ingested
+- `400` — Invalid batch format
+- `401` — Unauthorized
+
+**Notes**:
+- Client sends batches automatically every 5 seconds or when buffer reaches 10 events
+- Uses `keepalive: true` to survive page navigation
 
 ---
 

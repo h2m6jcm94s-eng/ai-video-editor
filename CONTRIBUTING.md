@@ -101,13 +101,13 @@ pnpm -r build
 ### TypeScript
 
 - **Formatter**: Prettier (configured in root)
-- **Linter**: ESLint with shared config
+- **Linter**: Biome (replaces ESLint + Prettier for staged files)
 - **Types**: Strict mode enabled
 
 Run before committing:
 ```bash
-pnpm lint
-pnpm format
+pnpm format          # Prettier across all files
+pnpm lint            # Turbo lint (Biome via lint-staged on commit)
 ```
 
 ### Python
@@ -413,9 +413,8 @@ def apply_my_effect(stream, params):
 
 This project uses Husky v9 with lint-staged. On every commit:
 
-1. `pnpm typecheck` runs on staged TypeScript files
-2. Prettier formats staged files
-3. ESLint checks staged files
+1. `biome check --write` runs on staged files
+2. `pnpm typecheck` runs on staged TypeScript files
 
 Skip hooks only in emergencies:
 ```bash
