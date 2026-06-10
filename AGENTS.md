@@ -223,8 +223,14 @@ Current coverage: **86.79% statements, 76.67% branches**
 | Domain glossary | `CONTEXT.md` |
 | Cache helpers | `apps/api/src/lib/cache.ts` |
 | Shared Redis client | `apps/api/src/lib/redis.ts` |
+| Structured logger (API) | `apps/api/src/lib/logger.ts` |
+| Frontend logger | `apps/web/src/lib/logger.ts` |
 | Structured logger (Python) | `services/shared-py/src/shared_py/logging_config.py` |
+| Python tracing | `services/shared-py/src/shared_py/tracing.py` |
 | Pydantic models (Python) | `services/shared-py/src/shared_py/models.py` |
+| Observability stack | `infra/observability/docker-compose.yml` |
+| Observability docs | `infra/observability/README.md` |
+| OpenAPI spec | `apps/api/openapi.yaml` |
 | AI providers (Python) | `services/shared-py/src/shared_py/ai_providers/` |
 | Temporal workflows | `infra/temporal/workflows.py` |
 | Temporal activities | `infra/temporal/activities.py` |
@@ -507,6 +513,10 @@ Closes #202
 | 2025-01 | camelCase in JSONB | Consistency across frontend/backend/Python serialization |
 | 2025-01 | Issue-first workflow | Forces documentation, enables tracking, improves review quality |
 | 2025-01 | Vitest over Jest | Faster, better ESM support, native Vite integration |
+| 2025-06 | OpenTelemetry tracing | Distributed tracing across API and Python workers via OTLP |
+| 2025-06 | Self-hosted LGTM stack | Grafana + Loki + Tempo + Prometheus for logs, traces, metrics |
+| 2025-06 | Frontend structured logger | Batched logger with `/api/log` ingestion and GlitchTip error tracking |
+| 2025-06 | Worker logging unification | `configure_logging(service_name=...)` with Temporal correlation ID binding |
 
 ---
 

@@ -91,14 +91,25 @@ python -m pip install -e services/shared-py -e services/ingest-worker -e service
 ### 4. Start Infrastructure Services
 
 ```bash
+# Core infrastructure (Postgres, Redis, Temporal)
 docker compose -f infra/docker/docker-compose.yml up -d
+
+# Observability stack (Grafana, Loki, Tempo, Prometheus, OTel Collector, Promtail)
+pnpm obs:up
 ```
 
-This starts:
+Core services:
 - PostgreSQL 16 (port 5432)
 - Redis 7 (port 6379)
 - Temporal Server (port 7233)
 - Temporal UI (port 8088)
+
+Observability services:
+- Grafana (port 3001) — dashboards and exploration
+- Prometheus (port 9090) — metrics storage
+- Loki (port 3100) — log aggregation
+- Tempo (port 3200) — distributed tracing
+- OTel Collector (ports 4317/4318) — OTLP ingestion
 
 ### 5. Set Up Environment Variables
 
@@ -168,6 +179,9 @@ This starts:
 | `AI_PROVIDER` | No | `claude` | Primary AI provider |
 | `PROVIDER_ENCRYPTION_SECRET` | No | `dev-secret` | Key encryption secret |
 | `LOG_LEVEL` | No | `info` | Pino log level |
+| `LOKI_URL` | No | `http://loki:3100` | Loki endpoint for pino-loki transport |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | No | `http://localhost:4318` | OpenTelemetry OTLP HTTP endpoint |
+| `METRICS_AUTH_TOKEN` | No | — | Bearer token for `/api/metrics` access |
 | `NODE_ENV` | No | `development` | Environment mode |
 
 ### Web Environment (`apps/web/.env.local`)
