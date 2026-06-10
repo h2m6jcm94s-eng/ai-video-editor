@@ -80,6 +80,11 @@ vi.mock("../services/storage", () => ({
   downloadAsset: vi.fn(async () => "/tmp/test.mp3"),
   deleteProjectAssets: vi.fn(async () => {}),
   probeS3Connection: vi.fn(async () => {}),
+  createMultipartUpload: vi.fn(async () => "upload-id-123"),
+  presignUploadPart: vi.fn(async () => "https://r2.example.com/part"),
+  completeMultipartUpload: vi.fn(async () => ({ ETag: '"multi-etag"' })),
+  abortMultipartUpload: vi.fn(async () => {}),
+  headObject: vi.fn(async () => ({ ETag: '"abc123"', ContentLength: 1024, PartsCount: 1 })),
   s3: {
     send: vi.fn(async (command: any) => {
       if (command.constructor.name === "HeadObjectCommand") {
