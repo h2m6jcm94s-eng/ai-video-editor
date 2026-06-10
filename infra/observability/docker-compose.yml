@@ -1,0 +1,36 @@
+# GlitchTip — Sentry-API-compatible OSS error tracking
+# Run: docker compose -f infra/observability/docker-compose.yml up -d
+version: "3.8"
+
+services:
+  glitchtip-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: glitchtip
+      POSTGRES_USER: glitchtip
+      POSTGRES_PASSWORD: glitchtip
+    volumes:
+      - glitchtip-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U glitchtip -d glitchtip"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  glitchtip:
+    image: glitchtip/glitchtip:v4.0.0
+    depends_on:
+      glitchtip-postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://glitchtip:glitchtip@glitchtip-postgres:5432/glitchtip
+      SECRET_KEY: ${GLITCHTIP_SECRET_KEY:-change-me-in-production}
+      PORT: 8000
+    ports:
+      - "127.0.0.1:8200:8000"
+    volumes:
+      - glitchtip-uploads:/uploads
+
+volumes:
+  glitchtip-pg:
+  glitchtip-uploads:

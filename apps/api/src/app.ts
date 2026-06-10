@@ -2,24 +2,30 @@
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
 import "./env";
-import Fastify from "fastify";
+import { API_ERROR_CODES } from "@ai-video-editor/shared-types";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";
-import { projectRoutes } from "./routes/projects";
-import { uploadRoutes } from "./routes/uploads";
-import { renderRoutes } from "./routes/renders";
-import { progressRoutes } from "./routes/progress";
-import { templateRoutes } from "./routes/templates";
-import { presenceRoutes } from "./routes/presence";
-import { settingsRoutes } from "./routes/settings";
-import { healthRoutes } from "./routes/health";
-import { metricsRoutes } from "./routes/metrics";
-import { requireAuth } from "./middleware/auth";
+import Fastify from "fastify";
 import { sendError } from "./lib/errors";
-import { API_ERROR_CODES } from "@ai-video-editor/shared-types";
-import { getLoggerConfig, generateRequestId, buildRequestContext } from "./lib/logger";
-import { httpRequestsTotal, httpRequestDurationSeconds, rateLimitHitsTotal, normalizeRoutePath } from "./lib/metrics";
+import { buildRequestContext, generateRequestId, getLoggerConfig } from "./lib/logger";
+import {
+  httpRequestDurationSeconds,
+  httpRequestsTotal,
+  normalizeRoutePath,
+  rateLimitHitsTotal,
+} from "./lib/metrics";
+import { requireAuth } from "./middleware/auth";
+import { healthRoutes } from "./routes/health";
+import { logRoutes } from "./routes/log";
+import { metricsRoutes } from "./routes/metrics";
+import { presenceRoutes } from "./routes/presence";
+import { progressRoutes } from "./routes/progress";
+import { projectRoutes } from "./routes/projects";
+import { renderRoutes } from "./routes/renders";
+import { settingsRoutes } from "./routes/settings";
+import { templateRoutes } from "./routes/templates";
+import { uploadRoutes } from "./routes/uploads";
 
 export async function buildApp() {
   const app = Fastify({
@@ -29,10 +35,7 @@ export async function buildApp() {
   });
 
   app.setErrorHandler((error, request, reply) => {
-    request.log.error(
-      { err: error, statusCode: error.statusCode || 500 },
-      "Request error"
-    );
+    request.log.error({ err: error, statusCode: error.statusCode || 500 }, "Request error");
 
     if (error.validation) {
       return sendError(reply, 422, "Validation failed", "VALIDATION_ERROR", error.validation);
@@ -47,7 +50,7 @@ export async function buildApp() {
       reply,
       error.statusCode || 500,
       isClientError ? error.message : "Internal server error",
-      errorCode
+      errorCode,
     );
   });
 
@@ -123,6 +126,7 @@ export async function buildApp() {
 
   await app.register(healthRoutes, { prefix: "/api/health" });
   await app.register(metricsRoutes, { prefix: "/api/metrics" });
+  await app.register(logRoutes);
 
   app.addHook("onRequest", async (request, reply) => {
     if (request.url === "/api/health" || request.url.startsWith("/api/health/")) {
