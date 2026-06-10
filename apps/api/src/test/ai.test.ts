@@ -268,7 +268,7 @@ describe("AI Service", () => {
       ).rejects.toThrow("AI prompt edit failed");
     });
 
-    it("throws AI_INVALID_JSON on non-JSON response", async () => {
+    it("returns safe fallback on non-JSON response after retry", async () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
       vi.stubEnv("OPENAI_API_KEY", "sk-openai-test");
       vi.stubEnv("AI_PROVIDER", "claude");
@@ -284,9 +284,11 @@ describe("AI Service", () => {
           status: 200,
         } as any);
 
-      await expect(
-        applyPromptEdit({ userId: "user-1", prompt: "test", cutList: mockCutList })
-      ).rejects.toThrow("AI prompt edit failed");
+      const result = await applyPromptEdit({ userId: "user-1", prompt: "test", cutList: mockCutList });
+      expect(result.fallback).toBeDefined();
+      expect(result.fallback?.reason).toBe("invalid_json");
+      expect(result.explanation).toBe("AI returned an unexpected response. No changes applied.");
+      expect(result.newCutList).toEqual(mockCutList);
     });
 
     it("strips markdown fences from response", async () => {
@@ -387,48 +389,46 @@ describe("AI Service", () => {
       });
     });
 
-    it("throws AI_REFUSED when Claude returns stop_reason refusal", async () => {
+    it("returns safe fallback when Claude returns stop_reason refusal", async () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
       vi.stubEnv("OPENAI_API_KEY", "sk-openai-test");
       vi.stubEnv("AI_PROVIDER", "claude");
-      vi.mocked(fetch)
-        .mockResolvedValueOnce({
-          json: async () => ({
-            content: [{ type: "text", text: "I cannot help with that." }],
-            stop_reason: "refusal",
-          }),
-          ok: true,
-          status: 200,
-        } as any)
-        .mockResolvedValueOnce(
-          makeOpenAIResponse([{ op: "replace", path: "/slots/0/transitionIn", value: "fade" }], "Fallback") as any
-        );
+      vi.mocked(fetch).mockResolvedValueOnce({
+        json: async () => ({
+          content: [{ type: "text", text: "I cannot help with that." }],
+          stop_reason: "refusal",
+        }),
+        ok: true,
+        status: 200,
+      } as any);
 
       const result = await applyPromptEdit({ userId: "user-1", prompt: "test", cutList: mockCutList });
-      expect(result.explanation).toBe("Fallback");
+      expect(result.fallback).toBeDefined();
+      expect(result.fallback?.reason).toBe("blocked");
+      expect(result.explanation).toBe("AI declined to respond due to safety policies. No changes applied.");
+      expect(result.newCutList).toEqual(mockCutList);
     });
 
-    it("throws AI_REFUSED when OpenAI returns finish_reason content_filter", async () => {
+    it("returns safe fallback when OpenAI returns finish_reason content_filter", async () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
       vi.stubEnv("OPENAI_API_KEY", "sk-openai-test");
       vi.stubEnv("AI_PROVIDER", "openai");
-      vi.mocked(fetch)
-        .mockResolvedValueOnce({
-          json: async () => ({
-            choices: [{ message: { content: "" }, finish_reason: "content_filter" }],
-          }),
-          ok: true,
-          status: 200,
-        } as any)
-        .mockResolvedValueOnce(
-          makeClaudeResponse([{ op: "replace", path: "/slots/0/transitionIn", value: "fade" }], "Fallback") as any
-        );
+      vi.mocked(fetch).mockResolvedValueOnce({
+        json: async () => ({
+          choices: [{ message: { content: "" }, finish_reason: "content_filter" }],
+        }),
+        ok: true,
+        status: 200,
+      } as any);
 
       const result = await applyPromptEdit({ userId: "user-1", prompt: "test", cutList: mockCutList });
-      expect(result.explanation).toBe("Fallback");
+      expect(result.fallback).toBeDefined();
+      expect(result.fallback?.reason).toBe("content_filter");
+      expect(result.explanation).toBe("AI response was blocked by content filters. No changes applied.");
+      expect(result.newCutList).toEqual(mockCutList);
     });
 
-    it("throws AI_REFUSED when both providers refuse", async () => {
+    it("returns safe fallback when both providers refuse", async () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
       vi.stubEnv("OPENAI_API_KEY", "sk-openai-test");
       vi.stubEnv("AI_PROVIDER", "claude");
@@ -449,9 +449,10 @@ describe("AI Service", () => {
           status: 200,
         } as any);
 
-      await expect(
-        applyPromptEdit({ userId: "user-1", prompt: "test", cutList: mockCutList })
-      ).rejects.toThrow("AI prompt edit failed");
+      const result = await applyPromptEdit({ userId: "user-1", prompt: "test", cutList: mockCutList });
+      expect(result.fallback).toBeDefined();
+      expect(result.fallback?.reason).toBe("blocked");
+      expect(result.newCutList).toEqual(mockCutList);
     });
 
     it("throws CUTLIST_SCHEMA_DRIFT when patched cut list is invalid", async () => {
