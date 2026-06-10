@@ -84,7 +84,7 @@ vi.mock("../services/storage", () => ({
   presignUploadPart: vi.fn(async () => "https://r2.example.com/part"),
   completeMultipartUpload: vi.fn(async () => ({ ETag: '"multi-etag"' })),
   abortMultipartUpload: vi.fn(async () => {}),
-  headObject: vi.fn(async () => ({ ETag: '"abc123"', ContentLength: 1024, PartsCount: 1 })),
+  headObject: vi.fn(async () => ({ ETag: '"abc123"', ContentLength: 1024, PartsCount: undefined })),
   s3: {
     send: vi.fn(async (command: any) => {
       if (command.constructor.name === "HeadObjectCommand") {
@@ -148,5 +148,6 @@ vi.mock("../services/queue", () => ({
 // Mock Temporal
 vi.mock("../services/temporal", () => ({
   startRenderWorkflow: vi.fn(async () => "wf-test-123"),
+  startProbeWorkflow: vi.fn(async () => "probe-wf-123"),
   sendCutlistApprovedSignal: vi.fn(async () => {}),
 }));

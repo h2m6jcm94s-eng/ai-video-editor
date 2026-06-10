@@ -26,7 +26,7 @@ export async function startRenderWorkflow(
   mode: string,
   userId: string,
   renderId?: string,
-  assetKeyMap?: Record<string, string>
+  assetKeyMap?: Record<string, string>,
 ) {
   const client = await getTemporalClient();
   const handle = await client.workflow.start("VideoRenderWorkflow", {
@@ -43,16 +43,23 @@ export async function startRenderWorkflow(
         asset_key_map: assetKeyMap || {},
       },
     ],
-    workflowId: `render-${projectId}-${renderId || Date.now()}`
+    workflowId: `render-${projectId}-${renderId || Date.now()}`,
   });
 
   return handle.workflowId;
 }
 
-export async function sendCutlistApprovedSignal(
-  workflowId: string,
-  cutList: any
-) {
+export async function startProbeWorkflow(assetId: string, storageKey: string) {
+  const client = await getTemporalClient();
+  const handle = await client.workflow.start("ProbeAssetWorkflow", {
+    taskQueue: "ingest",
+    args: [{ asset_id: assetId, storage_key: storageKey }],
+    workflowId: `probe-${assetId}`,
+  });
+  return handle.workflowId;
+}
+
+export async function sendCutlistApprovedSignal(workflowId: string, cutList: any) {
   const client = await getTemporalClient();
   const handle = client.workflow.getHandle(workflowId);
   await handle.signal("cutlist_approved", cutList);
