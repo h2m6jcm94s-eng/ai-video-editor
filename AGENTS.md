@@ -423,12 +423,29 @@ vi.mock("../db", () => ({
 
 ### Issue-First Development
 
-1. **Every change starts with an issue.** Open a GitHub issue describing the bug/feature/refactor before writing code.
-2. **Branch naming**: `feat/<issue-number>-short-desc`, `fix/<issue-number>-short-desc`, `chore/<issue-number>-short-desc`
-3. **One concern per PR.** A PR should be reviewable in under 15 minutes. If it's longer, split it.
-4. **PR description must reference the issue**: `Closes #<issue-number>`
-5. **No spam bots.** We intentionally do NOT use pr-agent, Danger, semantic-pr, or any workflow that posts PR comments or sends email spam. Auto-labels only (path-based + first-time contributor + keyword matching).
-6. **Merge when CI is green.** Use squash merge. Keep commit messages descriptive.
+1. **Every change starts with an issue.** Open a GitHub issue describing the bug/feature/refactor **before writing any code**.
+2. **The issue must be extensive.** Do not write one-line issues. Every issue must include:
+   - **Problem statement** — what is broken or missing, with concrete reproduction steps for bugs
+   - **Root cause analysis** — why it happens (for bugs) or why it's needed (for features)
+   - **Proposed solution** — the approach, files to touch, and any architectural decisions
+   - **Alternatives considered** — brief note on options evaluated and why the chosen one wins
+   - **Verification plan** — how to test: unit tests, integration tests, manual QA steps
+   - **Semantic classification** — label as `bug`, `feature`, `refactor`, `perf`, `security`, or `tech-debt`
+3. **Semantic test requirement.** Every issue must explicitly state whether the change is:
+   - `BREAKING` — changes public API or behavior
+   - `NON_BREAKING` — additive or internal-only
+   - `FIX` — corrects existing behavior without API change
+   - `DOCS_ONLY` — documentation only
+4. **Branch naming**: `feat/<issue-number>-short-desc`, `fix/<issue-number>-short-desc`, `chore/<issue-number>-short-desc`
+5. **One concern per PR.** A PR should be reviewable in under 15 minutes. If it's longer, split it.
+6. **PR description must reference the issue**: `Closes #<issue-number>`
+7. **PR body must explain *what* and *why*.** Every PR description must contain:
+   - **What changed** — bullet list of files and their changes
+   - **Why it changed** — the motivation and trade-offs
+   - **How to verify** — exact commands to run, expected outputs
+   - **Regression risks** — what could break and how it's guarded against
+8. **No spam bots.** We intentionally do NOT use pr-agent, Danger, semantic-pr, or any workflow that posts PR comments or sends email spam. Auto-labels only (path-based + first-time contributor + keyword matching).
+9. **Merge when CI is green.** Use squash merge. Keep commit messages descriptive.
 
 ### Commit Message Format
 
