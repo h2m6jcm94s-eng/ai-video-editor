@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     gpu_device: str = os.environ.get("GPU_DEVICE", "cpu")
     temp_dir: str = str(Path(tempfile.gettempdir()) / "ai-video-editor")
 
+    # API callback
+    api_base: str = os.environ.get("API_BASE", "http://localhost:4000/api")
+    api_token: str = os.environ.get("API_TOKEN", "")
+
     class Config:
         env_prefix = "AVE_"
         case_sensitive = False
