@@ -4,6 +4,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { logger } from "@/lib/logger";
 
 export default function GlobalError({
   error,
@@ -13,8 +14,7 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
-    // Log to monitoring service (Sentry/DataDog/etc)
-    console.error("Global error:", error);
+    logger.error("Global error", { message: error.message, stack: error.stack, digest: error.digest });
   }, [error]);
 
   return (
@@ -25,10 +25,7 @@ export default function GlobalError({
           <p className="text-gray-600 mb-6">
             A critical error occurred. Please try again or contact support.
           </p>
-          <button
-            onClick={reset}
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-          >
+          <button onClick={reset} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
             Try again
           </button>
         </div>

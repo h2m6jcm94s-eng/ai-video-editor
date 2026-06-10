@@ -24,7 +24,13 @@ export class EditorErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error("Editor crashed:", error, errorInfo);
+    import("@/lib/logger").then(({ logger }) => {
+      logger.error("Editor crashed", {
+        message: error.message,
+        stack: error.stack,
+        componentStack: errorInfo.componentStack,
+      });
+    });
   }
 
   render() {
