@@ -10,6 +10,7 @@
 
 import { FastifyInstance } from "fastify";
 import { getMetrics } from "../lib/metrics";
+import { sendError } from "../lib/errors";
 
 export async function metricsRoutes(app: FastifyInstance) {
   app.get("/", async (request, reply) => {
@@ -19,7 +20,7 @@ export async function metricsRoutes(app: FastifyInstance) {
       const authHeader = request.headers.authorization || "";
       const bearer = authHeader.replace(/^Bearer\s+/i, "");
       if (bearer !== token) {
-        return reply.status(401).send({ error: "Unauthorized", code: "UNAUTHORIZED" });
+        return sendError(reply, 401, "Unauthorized", "UNAUTHORIZED");
       }
     }
 
