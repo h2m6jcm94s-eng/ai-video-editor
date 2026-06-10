@@ -12,10 +12,11 @@ import type { CutList } from "@/types/api";
 import { toast } from "sonner";
 import { useApi } from "@/lib/api/client";
 import { APIError } from "@/lib/api/error";
+import { mapApiValidationErrors } from "@/lib/api/formErrors";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { promptEditSchema } from "@ai-video-editor/shared-types";
-import { z } from "zod";
+import type { z } from "zod";
 
 interface PromptPanelProps {
   projectId: string;
@@ -29,7 +30,6 @@ type PromptForm = z.infer<typeof promptEditSchema>;
 
 function PromptPanelInner({ projectId, cutList, onUpdateCutlist, onUndo, onClose }: PromptPanelProps) {
   const [history, setHistory] = useState<{ prompt: string; response: string; error?: boolean }[]>([]);
-  const [loading, setLoading] = useState(false);
   const api = useApi();
 
   const form = useForm<PromptForm>({
@@ -43,7 +43,6 @@ function PromptPanelInner({ projectId, cutList, onUpdateCutlist, onUndo, onClose
       toast.error("No cut list to edit");
       return;
     }
-    setLoading(true);
 
     try {
       const result = await api.projects.prompt(projectId, values.prompt.trim());
@@ -57,11 +56,12 @@ function PromptPanelInner({ projectId, cutList, onUpdateCutlist, onUndo, onClose
       toast.success("AI edit applied");
       form.reset({ prompt: "" });
     } catch (err) {
+      if (err instanceof APIError && mapApiValidationErrors(err, form.setError)) {
+        return;
+      }
       const message = err instanceof APIError ? err.userMessage : err instanceof Error ? err.message : "AI edit failed";
       setHistory((h) => [...h, { prompt: values.prompt, response: message, error: true }]);
       toast.error(message);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -111,7 +111,7 @@ function PromptPanelInner({ projectId, cutList, onUpdateCutlist, onUndo, onClose
                   <Input
                     placeholder="Ask AI to edit..."
                     className="bg-zinc-950 border-zinc-800 h-8 text-xs"
-                    disabled={loading}
+                    disabled={form.formState.isSubmitting}
                     {...field}
                   />
                 </FormControl>
@@ -119,7 +119,7 @@ function PromptPanelInner({ projectId, cutList, onUpdateCutlist, onUndo, onClose
               </FormItem>
             )}
           />
-          <Button size="sm" className="h-8 px-3" type="submit" disabled={!form.formState.isValid || loading}>
+          <Button size="sm" className="h-8 px-3" type="submit" disabled={!form.formState.isValid || form.formState.isSubmitting}>
             <Send className="w-3 h-3" />
           </Button>
         </form>

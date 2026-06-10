@@ -4,7 +4,6 @@
 
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,20 +23,15 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { projectNameSchema } from "@ai-video-editor/shared-types";
+import { templateMetaSchema } from "@ai-video-editor/shared-types";
+import type { z } from "zod";
 import { useApi } from "@/lib/api/client";
 import { APIError } from "@/lib/api/error";
+import { mapApiValidationErrors } from "@/lib/api/formErrors";
 import { toast } from "sonner";
 import type { CutList } from "@/types/api";
 
-const templateFormSchema = z.object({
-  name: projectNameSchema,
-  description: z.string().max(2000).optional(),
-  tags: z.array(z.string()).default([]),
-  isPublic: z.boolean().default(false),
-});
-
-type TemplateForm = z.infer<typeof templateFormSchema>;
+type TemplateForm = z.infer<typeof templateMetaSchema>;
 
 interface TemplateSaveDialogProps {
   open: boolean;
@@ -48,7 +42,7 @@ interface TemplateSaveDialogProps {
 export function TemplateSaveDialog({ open, onOpenChange, cutList }: TemplateSaveDialogProps) {
   const api = useApi();
   const form = useForm<TemplateForm>({
-    resolver: zodResolver(templateFormSchema),
+    resolver: zodResolver(templateMetaSchema),
     defaultValues: { name: "", description: "", tags: [], isPublic: false },
     mode: "onChange",
   });
@@ -60,6 +54,9 @@ export function TemplateSaveDialog({ open, onOpenChange, cutList }: TemplateSave
       form.reset();
       onOpenChange(false);
     } catch (err) {
+      if (err instanceof APIError && mapApiValidationErrors(err, form.setError)) {
+        return;
+      }
       if (err instanceof APIError) {
         toast.error(err.userMessage);
       } else {

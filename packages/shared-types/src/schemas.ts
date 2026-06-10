@@ -147,10 +147,18 @@ export const createRenderSchema = z
   })
   .strict();
 
+export const renderOptionsSchema = z
+  .object({
+    exportPreset: z.enum(["youtube_16_9", "reels_9_16", "tiktok_9_16", "square_1_1"]).optional(),
+  })
+  .strict();
+
+export const templateMetaSchema = createTemplateSchema.omit({ cutList: true });
+
 export const providerKeySchema = z
   .object({
-    provider: z.string().min(1),
-    key: z.string().min(1),
+    provider: z.string().min(1, "Select a provider"),
+    key: z.string().min(1, "API key is required").max(2048, "Key too long"),
   })
   .strict();
 
