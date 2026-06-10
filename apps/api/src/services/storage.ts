@@ -2,19 +2,30 @@
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
 import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
+  type _Object,
+  AbortMultipartUploadCommand,
+  type CompletedPart,
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
-  ListObjectsV2Command,
+  GetObjectCommand,
   HeadBucketCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+  S3Client,
+  UploadPartCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import fs from "fs";
 import path from "path";
 
 const endpoint = process.env.R2_ENDPOINT || "";
-const isLocal = endpoint.includes("localhost") || endpoint.includes("127.0.0.1") || endpoint.includes("minio") || endpoint.includes(":9000");
+const isLocal =
+  endpoint.includes("localhost") ||
+  endpoint.includes("127.0.0.1") ||
+  endpoint.includes("minio") ||
+  endpoint.includes(":9000");
 
 export const s3 = new S3Client({
   region: "auto",
@@ -93,7 +104,7 @@ export async function listProjectAssets(projectId: string): Promise<string[]> {
       ContinuationToken: continuationToken,
     });
     const response = await s3.send(command);
-    keys.push(...(response.Contents?.map((obj: any) => obj.Key || "") ?? []));
+    keys.push(...(response.Contents?.map((obj: _Object) => obj.Key || "") ?? []));
     continuationToken = response.NextContinuationToken;
   } while (continuationToken);
   return keys;
@@ -108,16 +119,63 @@ export async function deleteProjectAssets(projectId: string): Promise<void> {
   }
 }
 
-export async function applyLifecycleRules(projectId: string): Promise<void> {
-  const keys = await listProjectAssets(projectId);
-  const referenceKeys = keys.filter((k) => k.includes("/reference_video/"));
-
-  for (const key of referenceKeys) {
-    console.log(`Scheduled deletion for reference asset: ${key}`);
-  }
-}
-
 export async function probeS3Connection(): Promise<void> {
   const command = new HeadBucketCommand({ Bucket: BUCKET });
   await s3.send(command);
+}
+
+// ── Multipart Upload Helpers ────────────────────────────────────────────────
+
+export async function createMultipartUpload(key: string, contentType: string) {
+  const r = await s3.send(
+    new CreateMultipartUploadCommand({
+      Bucket: BUCKET,
+      Key: key,
+      ContentType: contentType,
+    }),
+  );
+  if (!r.UploadId) throw new Error("R2 did not return UploadId");
+  return r.UploadId;
+}
+
+export async function presignUploadPart(key: string, uploadId: string, partNumber: number, expiresIn = 900) {
+  const cmd = new UploadPartCommand({
+    Bucket: BUCKET,
+    Key: key,
+    UploadId: uploadId,
+    PartNumber: partNumber,
+  });
+  return getSignedUrl(s3, cmd, { expiresIn });
+}
+
+export async function completeMultipartUpload(key: string, uploadId: string, parts: CompletedPart[]) {
+  return s3.send(
+    new CompleteMultipartUploadCommand({
+      Bucket: BUCKET,
+      Key: key,
+      UploadId: uploadId,
+      MultipartUpload: {
+        Parts: parts.sort((a, b) => (a.PartNumber ?? 0) - (b.PartNumber ?? 0)),
+      },
+    }),
+  );
+}
+
+export async function abortMultipartUpload(key: string, uploadId: string) {
+  return s3.send(
+    new AbortMultipartUploadCommand({
+      Bucket: BUCKET,
+      Key: key,
+      UploadId: uploadId,
+    }),
+  );
+}
+
+export async function headObject(key: string) {
+  return s3.send(
+    new HeadObjectCommand({
+      Bucket: BUCKET,
+      Key: key,
+    }),
+  );
 }
