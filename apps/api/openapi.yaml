@@ -1,0 +1,1863 @@
+openapi: 3.0.3
+info:
+  title: AI Video Editor API
+  description: |
+    Backend API for the AI Video Editor. All authenticated endpoints require
+    a Clerk session cookie or `Authorization: Bearer <token>` header.
+  version: 0.1.0
+  contact:
+    name: Devayan Dewri
+servers:
+  - url: http://localhost:4000
+    description: Local development
+  - url: https://api.aivideoeditor.dev
+    description: Production
+
+security:
+  - bearerAuth: []
+  - cookieAuth: []
+
+tags:
+  - name: Health
+    description: Liveness and readiness probes
+  - name: Metrics
+    description: Prometheus metrics exposition
+  - name: Projects
+    description: Project CRUD, AI editing, transcription
+  - name: Uploads
+    description: Asset upload (single + multipart) and metadata
+  - name: Renders
+    description: Video render queue and lifecycle
+  - name: Progress
+    description: SSE progress streaming for render jobs
+  - name: Presence
+    description: Real-time cursor presence
+  - name: Settings
+    description: Provider keys and token usage
+  - name: Templates
+    description: Reusable cutlist templates
+
+paths:
+  /api/health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Returns OK if the API process is running.
+      security: []
+      responses:
+        "200":
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/health/db:
+    get:
+      tags: [Health]
+      summary: Database health check
+      description: Verifies PostgreSQL connectivity.
+      security: []
+      responses:
+        "200":
+          description: Database is reachable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthDbResponse"
+        "503":
+          description: Database unreachable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/metrics:
+    get:
+      tags: [Metrics]
+      summary: Prometheus metrics
+      description: |
+        Returns Prometheus exposition format metrics. Protected by
+        `METRICS_AUTH_TOKEN` when configured (bypassed in test mode).
+      security: []
+      parameters:
+        - name: Authorization
+          in: header
+          required: false
+          schema:
+            type: string
+          example: "Bearer <metrics-token>"
+      responses:
+        "200":
+          description: Metrics in Prometheus text format
+          content:
+            text/plain:
+              schema:
+                type: string
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/projects:
+    get:
+      tags: [Projects]
+      summary: List projects
+      description: Returns all projects for the authenticated user.
+      responses:
+        "200":
+          description: List of projects
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  projects:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Project"
+
+    post:
+      tags: [Projects]
+      summary: Create project
+      description: Creates a new video editing project.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateProjectRequest"
+      responses:
+        "200":
+          description: Created project
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  project:
+                    $ref: "#/components/schemas/Project"
+        "422":
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /api/projects/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      tags: [Projects]
+      summary: Get project
+      description: Retrieves a single project with its assets.
+      responses:
+        "200":
+          description: Project details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  project:
+                    $ref: "#/components/schemas/Project"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+    patch:
+      tags: [Projects]
+      summary: Update project
+      description: Partial update of project fields.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchProjectRequest"
+      responses:
+        "200":
+          description: Updated project
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  project:
+                    $ref: "#/components/schemas/Project"
+        "404":
+          description: Not found
+        "403":
+          description: Forbidden
+        "422":
+          description: Validation failed
+
+    delete:
+      tags: [Projects]
+      summary: Delete project
+      description: Deletes project and schedules asset cleanup.
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+        "404":
+          description: Not found
+        "403":
+          description: Forbidden
+
+  /api/projects/{id}/cutlist:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    patch:
+      tags: [Projects]
+      summary: Update cutlist
+      description: |
+        Updates the project's cutlist and signals the Temporal workflow
+        if a render is active.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCutlistRequest"
+      responses:
+        "200":
+          description: Updated project
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  project:
+                    $ref: "#/components/schemas/Project"
+        "404":
+          description: Not found
+        "403":
+          description: Forbidden
+        "422":
+          description: Validation failed
+
+  /api/projects/{id}/transcribe:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    post:
+      tags: [Projects]
+      summary: Transcribe audio
+      description: |
+        Downloads an audio asset and returns subtitle segments.
+        Rate limited to 5/min.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                assetId:
+                  type: string
+                  format: uuid
+              required: [assetId]
+      responses:
+        "200":
+          description: Subtitle segments
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subtitles:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SubtitleSegment"
+        "400":
+          description: Bad request
+        "404":
+          description: Not found
+        "403":
+          description: Forbidden
+        "429":
+          description: Rate limited
+
+  /api/projects/{id}/prompt:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    post:
+      tags: [Projects]
+      summary: Prompt-to-edit
+      description: |
+        Sends a natural-language prompt to the AI provider and applies
+        the resulting cutlist diff. Rate limited to 10/min.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromptEditRequest"
+      responses:
+        "200":
+          description: Edit result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromptEditResponse"
+        "400":
+          description: Bad request
+        "404":
+          description: Not found
+        "403":
+          description: Forbidden
+        "422":
+          description: Validation failed
+        "429":
+          description: Rate limited
+
+  /api/uploads/presigned:
+    post:
+      tags: [Uploads]
+      summary: Get presigned upload URL
+      description: Creates a single-PUT upload URL for an asset.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PresignedUploadRequest"
+      responses:
+        "200":
+          description: Presigned URL and asset record
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assetId:
+                    type: string
+                    format: uuid
+                  url:
+                    type: string
+                    format: uri
+                  fields:
+                    type: object
+                    additionalProperties: true
+                  asset:
+                    $ref: "#/components/schemas/Asset"
+        "404":
+          description: Project not found
+        "403":
+          description: Forbidden
+        "422":
+          description: Validation failed
+
+  /api/uploads/{assetId}/complete:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    post:
+      tags: [Uploads]
+      summary: Complete simple upload
+      description: |
+        Verifies the uploaded object in R2 and updates the asset record.
+        Triggers probe workflow for video assets.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteUploadRequest"
+      responses:
+        "200":
+          description: Updated asset
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  asset:
+                    $ref: "#/components/schemas/Asset"
+        "404":
+          description: Asset not found
+        "403":
+          description: Forbidden
+        "409":
+          description: ETag or size mismatch
+
+  /api/uploads/multipart/init:
+    post:
+      tags: [Uploads]
+      summary: Initialize multipart upload
+      description: Creates a multipart upload session in R2.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MultipartInitRequest"
+      responses:
+        "200":
+          description: Upload session initialized
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  uploadId:
+                    type: string
+                  key:
+                    type: string
+                  assetId:
+                    type: string
+                    format: uuid
+                  asset:
+                    $ref: "#/components/schemas/Asset"
+        "404":
+          description: Project not found
+        "403":
+          description: Forbidden
+        "422":
+          description: Validation failed
+
+  /api/uploads/multipart/sign-part:
+    post:
+      tags: [Uploads]
+      summary: Sign multipart part
+      description: Returns a presigned URL for a single part upload.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MultipartSignRequest"
+      responses:
+        "200":
+          description: Presigned part URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    format: uri
+        "422":
+          description: Validation failed
+
+  /api/uploads/multipart/complete:
+    post:
+      tags: [Uploads]
+      summary: Complete multipart upload
+      description: Finalizes the multipart upload in R2.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MultipartCompleteRequest"
+      responses:
+        "200":
+          description: Updated asset
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  asset:
+                    $ref: "#/components/schemas/Asset"
+        "404":
+          description: Asset not found
+        "403":
+          description: Forbidden
+        "422":
+          description: Validation failed
+
+  /api/uploads/multipart/abort:
+    delete:
+      tags: [Uploads]
+      summary: Abort multipart upload
+      description: Cancels an in-progress multipart upload.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MultipartAbortRequest"
+      responses:
+        "200":
+          description: Aborted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+        "422":
+          description: Validation failed
+
+  /api/uploads/{assetId}:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      tags: [Uploads]
+      summary: Get asset
+      description: Retrieves asset metadata.
+      responses:
+        "200":
+          description: Asset details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  asset:
+                    $ref: "#/components/schemas/Asset"
+        "404":
+          description: Asset not found
+        "403":
+          description: Forbidden
+
+  /api/uploads/{assetId}/probe:
+    parameters:
+      - name: assetId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    post:
+      tags: [Uploads]
+      summary: Update asset probe metadata
+      description: Sets ffprobe-derived metadata on an asset.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProbeAssetRequest"
+      responses:
+        "200":
+          description: Updated asset
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  asset:
+                    $ref: "#/components/schemas/Asset"
+        "404":
+          description: Asset not found
+        "403":
+          description: Forbidden
+        "422":
+          description: Validation failed
+
+  /api/renders:
+    post:
+      tags: [Renders]
+      summary: Start render
+      description: |
+        Enqueues a video render job and starts a Temporal workflow.
+        Rate limited to 3/min.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRenderRequest"
+      responses:
+        "200":
+          description: Render job created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job:
+                    $ref: "#/components/schemas/Render"
+        "404":
+          description: Project not found
+        "403":
+          description: Forbidden
+        "409":
+          description: Render already in progress
+        "422":
+          description: Missing assets
+        "429":
+          description: Rate limited
+
+  /api/renders/{jobId}:
+    parameters:
+      - name: jobId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      tags: [Renders]
+      summary: Get render job
+      description: Retrieves render job status and metadata.
+      responses:
+        "200":
+          description: Render job details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job:
+                    $ref: "#/components/schemas/Render"
+        "404":
+          description: Job not found
+        "403":
+          description: Forbidden
+
+  /api/renders/project/{projectId}:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      tags: [Renders]
+      summary: List renders for project
+      description: Returns all render jobs for a project.
+      responses:
+        "200":
+          description: List of render jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Render"
+        "403":
+          description: Forbidden
+
+  /api/renders/{jobId}/complete:
+    parameters:
+      - name: jobId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    post:
+      tags: [Renders]
+      summary: Mark render complete
+      description: Worker webhook to complete or fail a render job.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteRenderRequest"
+      responses:
+        "200":
+          description: Updated render job
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job:
+                    $ref: "#/components/schemas/Render"
+        "404":
+          description: Job not found
+
+  /api/progress/{jobId}/events:
+    parameters:
+      - name: jobId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      tags: [Progress]
+      summary: SSE progress stream
+      description: |
+        Server-Sent Events endpoint for real-time render progress.
+        Supports reconnection via `Last-Event-ID` header or `lastEventId` query param.
+      responses:
+        "200":
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: |
+                  data: {"type":"connected","jobId":"..."}
+
+                  data: {"type":"progress","stage":"encoding","percent":45}
+
+        "404":
+          description: Job not found
+        "403":
+          description: Forbidden
+
+  /api/presence/{id}/presence:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: Project ID
+
+    post:
+      tags: [Presence]
+      summary: Report presence
+      description: |
+        Reports cursor position for real-time collaboration.
+        Rate limited to 60/min.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PresenceRequest"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+        "422":
+          description: Validation failed
+        "429":
+          description: Rate limited
+
+    get:
+      tags: [Presence]
+      summary: Get presence
+      description: Returns active cursors for a project (excluding self).
+      responses:
+        "200":
+          description: Active users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PresenceUser"
+
+  /api/settings/usage:
+    get:
+      tags: [Settings]
+      summary: Get token usage
+      description: Returns AI token consumption for the authenticated user.
+      responses:
+        "200":
+          description: Token usage statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenUsage"
+
+  /api/settings/provider-keys:
+    get:
+      tags: [Settings]
+      summary: List provider keys
+      description: Returns masked provider API keys.
+      responses:
+        "200":
+          description: List of provider keys
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ProviderKeyMasked"
+
+    post:
+      tags: [Settings]
+      summary: Save provider key
+      description: Encrypts and stores a provider API key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveProviderKeyRequest"
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+        "422":
+          description: Validation failed
+
+  /api/settings/provider-keys/{provider}:
+    parameters:
+      - name: provider
+        in: path
+        required: true
+        schema:
+          type: string
+
+    delete:
+      tags: [Settings]
+      summary: Delete provider key
+      description: Removes a stored provider API key.
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  /api/settings/provider-keys/test:
+    post:
+      tags: [Settings]
+      summary: Test provider key
+      description: Performs a cheap API call to validate a stored key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TestProviderKeyRequest"
+      responses:
+        "200":
+          description: Key is valid
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+        "400":
+          description: Invalid key or unsupported provider
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "404":
+          description: Key not found
+
+  /api/templates:
+    get:
+      tags: [Templates]
+      summary: List templates
+      description: Returns user's templates plus public templates.
+      responses:
+        "200":
+          description: List of templates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  templates:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Template"
+
+    post:
+      tags: [Templates]
+      summary: Create template
+      description: Creates a reusable template from a cutlist.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTemplateRequest"
+      responses:
+        "200":
+          description: Created template
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  template:
+                    $ref: "#/components/schemas/Template"
+        "422":
+          description: Validation failed
+
+  /api/templates/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    get:
+      tags: [Templates]
+      summary: Get template
+      description: Retrieves a template. Public templates are accessible to all.
+      responses:
+        "200":
+          description: Template details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  template:
+                    $ref: "#/components/schemas/Template"
+        "404":
+          description: Not found
+        "403":
+          description: Forbidden
+
+    patch:
+      tags: [Templates]
+      summary: Update template
+      description: Partial update of a template.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Updated template
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  template:
+                    $ref: "#/components/schemas/Template"
+        "404":
+          description: Not found
+        "403":
+          description: Forbidden
+
+    delete:
+      tags: [Templates]
+      summary: Delete template
+      description: Removes a template.
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+        "404":
+          description: Not found
+        "403":
+          description: Forbidden
+
+  /api/templates/{id}/apply:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+
+    post:
+      tags: [Templates]
+      summary: Apply template
+      description: Returns the template's cutlist for application to a project.
+      responses:
+        "200":
+          description: Cutlist from template
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cutList:
+                    $ref: "#/components/schemas/CutList"
+        "404":
+          description: Not found
+        "403":
+          description: Forbidden
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Clerk JWT token
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: __session
+      description: Clerk session cookie
+
+  schemas:
+    ApiError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum:
+            - UNAUTHORIZED
+            - FORBIDDEN
+            - SIGNUP_REQUIRED
+            - VALIDATION_ERROR
+            - INVALID_ENUM
+            - PAYLOAD_TOO_LARGE
+            - NOT_FOUND
+            - PROJECT_NOT_FOUND
+            - ASSET_NOT_FOUND
+            - RENDER_NOT_FOUND
+            - TEMPLATE_NOT_FOUND
+            - CONFLICT
+            - RENDER_ALREADY_RUNNING
+            - CONCURRENT_EDIT
+            - PROJECT_LOCKED
+            - PROVIDER_KEY_MISSING
+            - PROVIDER_RATE_LIMITED
+            - PROVIDER_TIMEOUT
+            - PROVIDER_INVALID_RESPONSE
+            - PROVIDER_QUOTA_EXCEEDED
+            - AI_REFUSED
+            - AI_INVALID_JSON
+            - AI_DIFF_INVALID
+            - AI_DIFF_OUT_OF_BOUNDS
+            - CUTLIST_SCHEMA_DRIFT
+            - PROMPT_TOO_LONG
+            - BEAT_DETECT_FAILED
+            - SHOT_DETECT_FAILED
+            - RENDER_FFMPEG_FAILED
+            - UPLOAD_INCOMPLETE
+            - ETAG_MISMATCH
+            - DB_UNAVAILABLE
+            - REDIS_UNAVAILABLE
+            - TEMPORAL_UNAVAILABLE
+            - R2_UNAVAILABLE
+            - RATE_LIMITED
+            - INTERNAL_ERROR
+            - USER_RESOLUTION_ERROR
+            - GUARDRAILS_VIOLATION
+            - MISSING_ASSETS
+            - TEMPORAL_ERROR
+            - BUDGET_EXCEEDED
+            - NO_CUTLIST
+        message:
+          type: string
+        details:
+          type: object
+        requestId:
+          type: string
+
+    HealthResponse:
+      type: object
+      required: [status, timestamp]
+      properties:
+        status:
+          type: string
+          example: ok
+        timestamp:
+          type: string
+          format: date-time
+
+    HealthDbResponse:
+      type: object
+      required: [status, db]
+      properties:
+        status:
+          type: string
+          example: ok
+        db:
+          type: string
+          example: connected
+
+    Project:
+      type: object
+      required: [id, userId, name, status, styleTier, mode, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          enum: [uploading, processing, complete, failed]
+        styleTier:
+          type: string
+          enum: [cuts_only, color_grade, with_text, with_effects, full_remix]
+        mode:
+          type: string
+          enum: [auto, assisted]
+        referenceAssetId:
+          type: string
+          format: uuid
+          nullable: true
+        songAssetId:
+          type: string
+          format: uuid
+          nullable: true
+        clipAssetIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        cutList:
+          $ref: "#/components/schemas/CutList"
+        renderAssetId:
+          type: string
+          format: uuid
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        assets:
+          type: array
+          items:
+            $ref: "#/components/schemas/Asset"
+
+    CreateProjectRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        styleTier:
+          type: string
+          enum: [cuts_only, color_grade, with_text, with_effects, full_remix]
+          default: with_effects
+        mode:
+          type: string
+          enum: [auto, assisted]
+          default: auto
+
+    PatchProjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        styleTier:
+          type: string
+          enum: [cuts_only, color_grade, with_text, with_effects, full_remix]
+        mode:
+          type: string
+          enum: [auto, assisted]
+        status:
+          type: string
+        referenceAssetId:
+          type: string
+          format: uuid
+        songAssetId:
+          type: string
+          format: uuid
+        clipAssetIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        cutList:
+          $ref: "#/components/schemas/CutList"
+        renderAssetId:
+          type: string
+          format: uuid
+
+    UpdateCutlistRequest:
+      type: object
+      required: [cutList]
+      properties:
+        cutList:
+          $ref: "#/components/schemas/CutList"
+
+    Asset:
+      type: object
+      required: [id, projectId, type, filename, mimeType, sizeBytes, storageKey, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [reference_video, song, clip, render, preview, subtitle, lut, sfx]
+        filename:
+          type: string
+        mimeType:
+          type: string
+        sizeBytes:
+          type: integer
+        durationSec:
+          type: number
+          nullable: true
+        width:
+          type: integer
+          nullable: true
+        height:
+          type: integer
+          nullable: true
+        fps:
+          type: number
+          nullable: true
+        storageKey:
+          type: string
+        storageUrl:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    PresignedUploadRequest:
+      type: object
+      required: [projectId, filename, mimeType, type]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        filename:
+          type: string
+          minLength: 1
+          maxLength: 255
+        mimeType:
+          type: string
+          enum:
+            - video/mp4
+            - video/quicktime
+            - video/webm
+            - audio/mpeg
+            - audio/wav
+            - audio/aac
+            - audio/ogg
+        type:
+          type: string
+          enum: [reference_video, song, clip, render, preview, subtitle, lut, sfx]
+
+    CompleteUploadRequest:
+      type: object
+      required: [sizeBytes, etag]
+      properties:
+        sizeBytes:
+          type: integer
+          minimum: 0
+          maximum: 5368709120
+        etag:
+          type: string
+          minLength: 1
+        metadata:
+          type: object
+
+    MultipartInitRequest:
+      type: object
+      required: [projectId, filename, mimeType, type]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        filename:
+          type: string
+          minLength: 1
+          maxLength: 255
+        mimeType:
+          type: string
+        type:
+          type: string
+          enum: [reference_video, song, clip, render, subtitle, lut, sfx]
+
+    MultipartSignRequest:
+      type: object
+      required: [uploadId, key, partNumber]
+      properties:
+        uploadId:
+          type: string
+        key:
+          type: string
+        partNumber:
+          type: integer
+          minimum: 1
+          maximum: 10000
+
+    MultipartCompleteRequest:
+      type: object
+      required: [uploadId, key, parts, sizeBytes]
+      properties:
+        uploadId:
+          type: string
+        key:
+          type: string
+        parts:
+          type: array
+          items:
+            type: object
+            required: [PartNumber, ETag]
+            properties:
+              PartNumber:
+                type: integer
+              ETag:
+                type: string
+        sizeBytes:
+          type: integer
+          minimum: 0
+          maximum: 5368709120
+        metadata:
+          type: object
+
+    MultipartAbortRequest:
+      type: object
+      required: [uploadId, key]
+      properties:
+        uploadId:
+          type: string
+        key:
+          type: string
+
+    ProbeAssetRequest:
+      type: object
+      properties:
+        durationSec:
+          type: number
+          minimum: 0
+          maximum: 86400
+        width:
+          type: integer
+          minimum: 1
+          maximum: 7680
+        height:
+          type: integer
+          minimum: 1
+          maximum: 7680
+        fps:
+          type: number
+          minimum: 1
+          maximum: 120
+
+    Render:
+      type: object
+      required: [id, projectId, status, stage, progress, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, running, complete, failed]
+        stage:
+          type: string
+        progress:
+          type: number
+        workflowId:
+          type: string
+          nullable: true
+        outputAssetId:
+          type: string
+          format: uuid
+          nullable: true
+        previewAssetId:
+          type: string
+          format: uuid
+          nullable: true
+        errorMessage:
+          type: string
+          nullable: true
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateRenderRequest:
+      type: object
+      required: [projectId]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        options:
+          type: object
+          properties:
+            exportPreset:
+              type: string
+              enum: [youtube_16_9, reels_9_16, tiktok_9_16, square_1_1]
+
+    CompleteRenderRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [complete, failed]
+        outputAssetId:
+          type: string
+          format: uuid
+        previewAssetId:
+          type: string
+          format: uuid
+        errorMessage:
+          type: string
+          maxLength: 2000
+
+    SubtitleSegment:
+      type: object
+      required: [id, text, startS, endS]
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+        startS:
+          type: number
+        endS:
+          type: number
+
+    PromptEditRequest:
+      type: object
+      required: [prompt]
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        attachedAssetId:
+          type: string
+          format: uuid
+        contextSlotIndex:
+          type: integer
+          minimum: 0
+
+    PromptEditResponse:
+      type: object
+      required: [project, diff, explanation, usage]
+      properties:
+        project:
+          $ref: "#/components/schemas/Project"
+        diff:
+          type: object
+        explanation:
+          type: string
+        usage:
+          type: object
+          properties:
+            totalTokens:
+              type: integer
+            promptTokens:
+              type: integer
+            completionTokens:
+              type: integer
+
+    PresenceRequest:
+      type: object
+      required: [x, y]
+      properties:
+        x:
+          type: integer
+        y:
+          type: integer
+        name:
+          type: string
+          maxLength: 100
+
+    PresenceUser:
+      type: object
+      required: [userId, name, color, x, y]
+      properties:
+        userId:
+          type: string
+        name:
+          type: string
+        color:
+          type: string
+        x:
+          type: integer
+        y:
+          type: integer
+
+    TokenUsage:
+      type: object
+      properties:
+        totalTokens:
+          type: integer
+        monthlyTokens:
+          type: integer
+        remainingBudget:
+          type: integer
+
+    ProviderKeyMasked:
+      type: object
+      required: [provider, masked, createdAt]
+      properties:
+        provider:
+          type: string
+        masked:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    SaveProviderKeyRequest:
+      type: object
+      required: [provider, key]
+      properties:
+        provider:
+          type: string
+          minLength: 1
+        key:
+          type: string
+          minLength: 1
+          maxLength: 2048
+
+    TestProviderKeyRequest:
+      type: object
+      required: [provider]
+      properties:
+        provider:
+          type: string
+          minLength: 1
+
+    Template:
+      type: object
+      required: [id, userId, name, cutList, isPublic, usageCount, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        cutList:
+          $ref: "#/components/schemas/CutList"
+        tags:
+          type: array
+          items:
+            type: string
+        isPublic:
+          type: boolean
+        usageCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateTemplateRequest:
+      type: object
+      required: [name, cutList]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 2000
+        cutList:
+          $ref: "#/components/schemas/CutList"
+        tags:
+          type: array
+          items:
+            type: string
+        isPublic:
+          type: boolean
+          default: false
+
+    CutList:
+      type: object
+      required: [globals, slots]
+      properties:
+        globals:
+          $ref: "#/components/schemas/CutListGlobals"
+        slots:
+          type: array
+          items:
+            $ref: "#/components/schemas/Slot"
+          minItems: 1
+        overlays:
+          type: array
+          items:
+            $ref: "#/components/schemas/Overlay"
+        audioTracks:
+          type: array
+          items:
+            $ref: "#/components/schemas/AudioTrack"
+
+    CutListGlobals:
+      type: object
+      required: [totalDurationS, tempoBpm]
+      properties:
+        totalDurationS:
+          type: number
+          minimum: 0
+        tempoBpm:
+          type: number
+          minimum: 0
+        timeSignature:
+          type: string
+          default: "4/4"
+        key:
+          type: string
+        energyCurve:
+          type: array
+          items:
+            type: number
+        sectionMarkers:
+          type: array
+          items:
+            $ref: "#/components/schemas/SectionMarker"
+        colorGradeRef:
+          type: string
+        aspectRatio:
+          type: string
+          default: "9:16"
+
+    SectionMarker:
+      type: object
+      required: [name, startS, endS]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        startS:
+          type: number
+          minimum: 0
+        endS:
+          type: number
+          minimum: 0
+
+    Slot:
+      type: object
+      required: [index, startS, durationS, beatIndex, section, targetShotType, subjectHint, motionHint]
+      properties:
+        index:
+          type: integer
+          minimum: 0
+        startS:
+          type: number
+          minimum: 0
+        durationS:
+          type: number
+          minimum: 0
+        beatIndex:
+          type: integer
+          minimum: 0
+        section:
+          type: string
+          minLength: 1
+        transitionIn:
+          type: string
+          default: hard_cut
+        transitionOut:
+          type: string
+          default: hard_cut
+        targetShotType:
+          type: string
+          minLength: 1
+        subjectHint:
+          type: string
+          minLength: 1
+        motionHint:
+          type: string
+          minLength: 1
+        energyLevel:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.5
+        requiredTags:
+          type: array
+          items:
+            type: string
+        avoidTags:
+          type: array
+          items:
+            type: string
+        selectedClipId:
+          type: string
+        rankedClipIds:
+          type: array
+          items:
+            type: string
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        effects:
+          type: array
+          items:
+            $ref: "#/components/schemas/Effect"
+
+    Overlay:
+      type: object
+      required: [text, startS, endS]
+      properties:
+        text:
+          type: string
+          minLength: 1
+        startS:
+          type: number
+          minimum: 0
+        endS:
+          type: number
+          minimum: 0
+        position:
+          type: string
+          default: center
+        font:
+          type: string
+          default: Inter
+        fontSizePx:
+          type: integer
+          minimum: 1
+          default: 48
+        color:
+          type: string
+          default: "#FFFFFF"
+        stroke:
+          type: string
+        animation:
+          type: string
+          default: none
+
+    AudioTrack:
+      type: object
+      required: [assetId, gainDb, startS, endS]
+      properties:
+        assetId:
+          type: string
+          minLength: 1
+        gainDb:
+          type: number
+          minimum: -60
+          maximum: 12
+          default: 0
+        startS:
+          type: number
+          minimum: 0
+        endS:
+          type: number
+          minimum: 0
+        fadeInS:
+          type: number
+          minimum: 0
+          default: 0
+        fadeOutS:
+          type: number
+          minimum: 0
+          default: 0
+
+    Effect:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        params:
+          type: object
