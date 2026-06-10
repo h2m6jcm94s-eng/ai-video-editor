@@ -445,7 +445,7 @@ vi.mock("../db", () => ({
    - **How to verify** — exact commands to run, expected outputs
    - **Regression risks** — what could break and how it's guarded against
 8. **No spam bots.** We intentionally do NOT use pr-agent, Danger, semantic-pr, or any workflow that posts PR comments or sends email spam. Auto-labels only (path-based + first-time contributor + keyword matching).
-9. **Merge when CI is green.** Use squash merge. Keep commit messages descriptive.
+9. **Merge ONLY when ALL CI checks pass.** Zero exceptions. A "pre-existing failure" is not an excuse — fix it first, then merge. Use squash merge. Keep commit messages descriptive.
 
 ### Commit Message Format
 
