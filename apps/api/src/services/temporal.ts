@@ -1,4 +1,5 @@
 ﻿// Copyright (c) 2025 Devayan Dewri. All rights reserved.
+import type { CutList } from "@ai-video-editor/shared-types";
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
 import { Client, Connection } from "@temporalio/client";
@@ -61,7 +62,7 @@ export async function startProbeWorkflow(assetId: string, storageKey: string) {
   return handle.workflowId;
 }
 
-export async function sendCutlistApprovedSignal(workflowId: string, cutList: any) {
+export async function sendCutlistApprovedSignal(workflowId: string, cutList: CutList) {
   const client = await getTemporalClient();
   const handle = client.workflow.getHandle(workflowId);
   await handle.signal("cutlist_approved", cutList);

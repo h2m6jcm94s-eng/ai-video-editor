@@ -1,5 +1,5 @@
 ﻿// Copyright (c) 2025 Devayan Dewri. All rights reserved.
-import type { EditMode, ProjectStatus, StyleTier } from "@ai-video-editor/shared-types";
+import type { CutList, EditMode, ProjectStatus, StyleTier } from "@ai-video-editor/shared-types";
 import { API_ERROR_CODES } from "@ai-video-editor/shared-types";
 import { and, desc, eq, inArray } from "drizzle-orm";
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
@@ -122,7 +122,7 @@ export async function projectRoutes(app: FastifyInstance) {
       return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
 
-    const body = request.validatedBody as { cutList: any };
+    const body = request.validatedBody as { cutList: CutList };
     const [updated] = await db
       .update(projects)
       .set({
