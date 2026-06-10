@@ -51,40 +51,44 @@ function hashColor(str: string): string {
 
 export async function presenceRoutes(app: FastifyInstance) {
   // Report presence
-  app.post("/:id/presence", {
-    config: {
-      rateLimit: {
-        max: 30,
-        timeWindow: "1 minute",
+  app.post(
+    "/:id/presence",
+    {
+      config: {
+        rateLimit: {
+          max: 60,
+          timeWindow: "1 minute",
+        },
       },
     },
-  }, async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const userId = request.userId;
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const userId = request.userId;
 
-    const parsed = presenceSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return sendError(reply, 422, "Validation failed", "VALIDATION_ERROR", parsed.error.issues);
-    }
-    const body = parsed.data;
+      const parsed = presenceSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return sendError(reply, 422, "Validation failed", "VALIDATION_ERROR", parsed.error.issues);
+      }
+      const body = parsed.data;
 
-    let projectMap = presenceStore.get(id);
-    if (!projectMap) {
-      projectMap = new Map();
-      presenceStore.set(id, projectMap);
-    }
+      let projectMap = presenceStore.get(id);
+      if (!projectMap) {
+        projectMap = new Map();
+        presenceStore.set(id, projectMap);
+      }
 
-    projectMap.set(userId, {
-      x: body.x,
-      y: body.y,
-      userId,
-      name: body.name || "User",
-      color: hashColor(userId),
-      lastSeen: Date.now(),
-    });
+      projectMap.set(userId, {
+        x: body.x,
+        y: body.y,
+        userId,
+        name: body.name || "User",
+        color: hashColor(userId),
+        lastSeen: Date.now(),
+      });
 
-    return { success: true };
-  });
+      return { success: true };
+    },
+  );
 
   // Get presence for project
   app.get("/:id/presence", async (request, reply) => {
