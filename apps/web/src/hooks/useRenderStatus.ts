@@ -33,8 +33,8 @@ export function useRenderStatus(projectId: string): RenderStatus {
         ACTIVE_STATUSES.includes(j.status as (typeof ACTIVE_STATUSES)[number]),
       );
       setActiveRender(active || null);
-    } catch {
-      // Silently ignore polling errors — the next poll will retry
+    } catch (err) {
+      console.error("Render status poll failed:", err);
     } finally {
       setIsLoading(false);
     }
