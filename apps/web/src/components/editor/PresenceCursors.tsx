@@ -1,5 +1,6 @@
 // Copyright (c) 2025 Devayan Dewri. All rights reserved.
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
+// Commercial SaaS use is prohibited without written permission.
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -27,6 +28,7 @@ export function PresenceCursors({ projectId, userName }: PresenceCursorsProps) {
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
+      if (document.hidden) return;
       if (!containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
       const x = ((e.clientX - rect.left) / rect.width) * 100;
@@ -36,7 +38,9 @@ export function PresenceCursors({ projectId, userName }: PresenceCursorsProps) {
       const now = Date.now();
       if (now - lastReportRef.current > 500) {
         lastReportRef.current = now;
-        api.presence.report(projectId, { x: mousePosRef.current.x, y: mousePosRef.current.y, name: userName }).catch(() => {});
+        api.presence
+          .report(projectId, { x: mousePosRef.current.x, y: mousePosRef.current.y, name: userName })
+          .catch(() => {});
       }
     };
 
@@ -45,12 +49,31 @@ export function PresenceCursors({ projectId, userName }: PresenceCursorsProps) {
   }, [projectId, userName, api]);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      api.presence.get(projectId)
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const tick = () => {
+      api.presence
+        .get(projectId)
         .then((res) => setUsers(res.users))
         .catch(() => {});
-    }, 1000);
-    return () => clearInterval(interval);
+    };
+    const start = () => {
+      if (interval) return;
+      tick();
+      interval = setInterval(tick, 1000);
+    };
+    const stop = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+    const handleVis = () => (document.hidden ? stop() : start());
+    if (!document.hidden) start();
+    document.addEventListener("visibilitychange", handleVis);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVis);
+      stop();
+    };
   }, [projectId, api]);
 
   if (users.length === 0) return null;
