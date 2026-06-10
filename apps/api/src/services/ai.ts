@@ -13,6 +13,7 @@ import { aiCallsTotal, aiCallDurationSeconds } from "../lib/metrics";
 import { countTokens } from "../lib/tokens";
 import { decrypt as aesDecrypt } from "../lib/crypto";
 import { cutListSchema } from "@ai-video-editor/shared-types";
+import { safeFallbackFor, type SafeFallback } from "../lib/aiFallbacks";
 
 async function getProviderKey(userId: string, provider: "anthropic" | "openai"): Promise<string | undefined> {
   const row = await db.query.providerKeys.findFirst({
@@ -39,6 +40,8 @@ export interface PromptEditResult {
     completionTokens: number;
     totalTokens: number;
   };
+  /** Present when the AI refused or produced unparseable output */
+  fallback?: SafeFallback<unknown>;
 }
 
 const SYSTEM_PROMPT = `You are an expert video editor AI assistant. The user describes an edit they want to make in natural language. You must analyze their request and return a JSON Patch (RFC 6902) diff that transforms the current cut-list into the desired state.
@@ -95,7 +98,13 @@ async function fetchWithRetry(
   throw new Error("Fetch retry exhausted");
 }
 
-async function callClaude(context: PromptEditContext): Promise<PromptEditResult> {
+const CAMELCASE_HINT =
+  '\nCRITICAL: Your previous JSON was invalid. Return ONLY valid JSON with camelCase keys matching the schema exactly. No markdown fences.';
+
+async function callClaudeOnce(
+  context: PromptEditContext,
+  hint: string
+): Promise<{ text: string; durationMs: number }> {
   const start = performance.now();
   const anthropicKey = (await getProviderKey(context.userId, "anthropic")) || process.env.ANTHROPIC_API_KEY || "";
   if (!anthropicKey) {
@@ -115,7 +124,7 @@ async function callClaude(context: PromptEditContext): Promise<PromptEditResult>
     body: JSON.stringify({
       model: "claude-3-5-sonnet-20241022",
       max_tokens: 4096,
-      system: SYSTEM_PROMPT,
+      system: SYSTEM_PROMPT + hint,
       messages: [{ role: "user", content: buildPrompt(context) }],
     }),
     signal: AbortSignal.timeout(60_000),
@@ -140,27 +149,62 @@ async function callClaude(context: PromptEditContext): Promise<PromptEditResult>
   if (data.stop_reason === "refusal") {
     aiCallsTotal.inc({ provider: "claude", status: "refusal" });
     aiCallDurationSeconds.observe({ provider: "claude" }, (performance.now() - start) / 1000);
-    const err: Error & { code?: string } = new Error(
-      "The AI refused to process this request due to safety policies."
-    );
-    err.code = "AI_REFUSED";
-    throw err;
+    return { text: "", durationMs: performance.now() - start };
   }
 
   const text = data.content?.[0]?.text || "{}";
   aiCallsTotal.inc({ provider: "claude", status: "success" });
   aiCallDurationSeconds.observe({ provider: "claude" }, (performance.now() - start) / 1000);
-  const result = parseResponse(text);
+  return { text, durationMs: performance.now() - start };
+}
+
+async function callClaude(context: PromptEditContext): Promise<PromptEditResult> {
+  let { text } = await callClaudeOnce(context, "");
+
+  // Refusal → safe fallback
+  if (text === "") {
+    return {
+      diff: [],
+      explanation: "AI declined to respond due to safety policies. No changes applied.",
+      fallback: safeFallbackFor("prompt_edit", "blocked", { previousCutList: context.cutList }),
+    };
+  }
+
+  let parsed = parseResponse(text);
+  if (!parsed) {
+    // One retry with explicit camelCase hint
+    const retry = await callClaudeOnce(context, CAMELCASE_HINT);
+    if (retry.text === "") {
+      return {
+        diff: [],
+        explanation: "AI declined to respond due to safety policies. No changes applied.",
+        fallback: safeFallbackFor("prompt_edit", "blocked", { previousCutList: context.cutList }),
+      };
+    }
+    parsed = parseResponse(retry.text);
+    if (!parsed) {
+      return {
+        diff: [],
+        explanation: "AI returned an unexpected response. No changes applied.",
+        fallback: safeFallbackFor("prompt_edit", "invalid_json", { previousCutList: context.cutList }),
+      };
+    }
+    text = retry.text;
+  }
+
   const promptText = buildPrompt(context);
-  result.usage = {
+  parsed.usage = {
     promptTokens: await countTokens(promptText),
     completionTokens: await countTokens(text),
     totalTokens: (await countTokens(promptText)) + (await countTokens(text)),
   };
-  return result;
+  return parsed;
 }
 
-async function callOpenAI(context: PromptEditContext): Promise<PromptEditResult> {
+async function callOpenAIOnce(
+  context: PromptEditContext,
+  hint: string
+): Promise<{ text: string; durationMs: number }> {
   const start = performance.now();
   const openaiKey = (await getProviderKey(context.userId, "openai")) || process.env.OPENAI_API_KEY || "";
   if (!openaiKey) {
@@ -179,7 +223,7 @@ async function callOpenAI(context: PromptEditContext): Promise<PromptEditResult>
     body: JSON.stringify({
       model: "gpt-4o",
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: SYSTEM_PROMPT + hint },
         { role: "user", content: buildPrompt(context) },
       ],
       response_format: { type: "json_object" },
@@ -206,24 +250,56 @@ async function callOpenAI(context: PromptEditContext): Promise<PromptEditResult>
   if (data.choices?.[0]?.finish_reason === "content_filter") {
     aiCallsTotal.inc({ provider: "openai", status: "content_filter" });
     aiCallDurationSeconds.observe({ provider: "openai" }, (performance.now() - start) / 1000);
-    const err: Error & { code?: string } = new Error(
-      "The AI response was blocked by content filters."
-    );
-    err.code = "AI_REFUSED";
-    throw err;
+    return { text: "", durationMs: performance.now() - start };
   }
 
   const text = data.choices?.[0]?.message?.content || "{}";
   aiCallsTotal.inc({ provider: "openai", status: "success" });
   aiCallDurationSeconds.observe({ provider: "openai" }, (performance.now() - start) / 1000);
-  const result = parseResponse(text);
+  return { text, durationMs: performance.now() - start };
+}
+
+async function callOpenAI(context: PromptEditContext): Promise<PromptEditResult> {
+  let { text } = await callOpenAIOnce(context, "");
+
+  // Content filter → safe fallback
+  if (text === "") {
+    return {
+      diff: [],
+      explanation: "AI response was blocked by content filters. No changes applied.",
+      fallback: safeFallbackFor("prompt_edit", "content_filter", { previousCutList: context.cutList }),
+    };
+  }
+
+  let parsed = parseResponse(text);
+  if (!parsed) {
+    // One retry with explicit camelCase hint
+    const retry = await callOpenAIOnce(context, CAMELCASE_HINT);
+    if (retry.text === "") {
+      return {
+        diff: [],
+        explanation: "AI response was blocked by content filters. No changes applied.",
+        fallback: safeFallbackFor("prompt_edit", "content_filter", { previousCutList: context.cutList }),
+      };
+    }
+    parsed = parseResponse(retry.text);
+    if (!parsed) {
+      return {
+        diff: [],
+        explanation: "AI returned an unexpected response. No changes applied.",
+        fallback: safeFallbackFor("prompt_edit", "invalid_json", { previousCutList: context.cutList }),
+      };
+    }
+    text = retry.text;
+  }
+
   const promptText = buildPrompt(context);
-  result.usage = {
+  parsed.usage = {
     promptTokens: await countTokens(promptText),
     completionTokens: await countTokens(text),
     totalTokens: (await countTokens(promptText)) + (await countTokens(text)),
   };
-  return result;
+  return parsed;
 }
 
 function buildPrompt(context: PromptEditContext): string {
@@ -240,7 +316,7 @@ function buildPrompt(context: PromptEditContext): string {
     .join("\n");
 }
 
-function parseResponse(text: string): PromptEditResult {
+function parseResponse(text: string): PromptEditResult | null {
   const cleaned = text
     .trim()
     .replace(/^```json\s*/, "")
@@ -251,18 +327,12 @@ function parseResponse(text: string): PromptEditResult {
   try {
     parsed = JSON.parse(cleaned);
   } catch {
-    const err: Error & { code?: string } = new Error("AI response is not valid JSON");
-    err.code = "AI_INVALID_JSON";
-    throw err;
+    return null;
   }
 
   const validated = promptEditResponseSchema.safeParse(parsed);
   if (!validated.success) {
-    const err: Error & { code?: string } = new Error(
-      `AI response schema invalid: ${validated.error.issues.map((i) => i.message).join(", ")}`
-    );
-    err.code = "AI_INVALID_JSON";
-    throw err;
+    return null;
   }
 
   return {
@@ -438,6 +508,23 @@ export async function applyPromptEdit(
     );
     if (code) apiErr.code = code;
     throw apiErr;
+  }
+
+  // If the AI returned a fallback (refusal / invalid JSON after retry), preserve the original cut list
+  if (result.fallback) {
+    const promptText = buildPrompt(context);
+    const usage = result.usage || {
+      promptTokens: await countTokens(promptText),
+      completionTokens: 0,
+      totalTokens: await countTokens(promptText),
+    };
+    return {
+      diff: result.diff,
+      explanation: result.explanation,
+      newCutList: context.cutList,
+      usage,
+      fallback: result.fallback,
+    };
   }
 
   const newCutList = applyJsonPatch(context.cutList, result.diff);

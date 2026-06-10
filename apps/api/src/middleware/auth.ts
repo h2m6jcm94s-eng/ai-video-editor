@@ -4,6 +4,7 @@
 import { createClerkClient, clerkClient } from "@clerk/fastify";
 import type { FastifyRequest, FastifyReply } from "fastify";
 import { getUserByClerkId, upsertUser } from "../services/users";
+import { sendError } from "../lib/errors";
 
 const clerk = createClerkClient({
   secretKey: process.env.CLERK_SECRET_KEY!,
@@ -33,7 +34,7 @@ export async function requireAuth(
     secretKey: process.env.CLERK_SECRET_KEY,
   });
   if (!state.isSignedIn) {
-    return reply.status(401).send({ error: "Unauthorized", code: "UNAUTHORIZED" });
+    return sendError(reply, 401, "Unauthorized", "UNAUTHORIZED");
   }
   const auth = state.toAuth();
   request.auth = auth;
@@ -56,6 +57,6 @@ export async function requireAuth(
     request.userId = localUser.id;
   } catch (err) {
     request.log.error({ err }, "User resolution failed");
-    return reply.status(500).send({ error: "Failed to resolve user", code: "USER_RESOLUTION_ERROR" });
+    return sendError(reply, 500, "Failed to resolve user", "USER_RESOLUTION_ERROR");
   }
 }
