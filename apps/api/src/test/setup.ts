@@ -147,7 +147,9 @@ vi.mock("../services/queue", () => ({
 
 // Mock Temporal
 vi.mock("../services/temporal", () => ({
-  startRenderWorkflow: vi.fn(async () => "wf-test-123"),
+  startRenderWorkflow: vi.fn(
+    async (_options: import("../services/temporal").StartRenderOptions) => "wf-test-123",
+  ),
   startProbeWorkflow: vi.fn(async () => "probe-wf-123"),
   sendCutlistApprovedSignal: vi.fn(async () => {}),
 }));

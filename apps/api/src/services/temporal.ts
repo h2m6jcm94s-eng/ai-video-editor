@@ -17,33 +17,35 @@ export async function getTemporalClient(): Promise<Client> {
   return temporalClient!;
 }
 
-export async function startRenderWorkflow(
-  projectId: string,
-  referenceAssetId: string,
-  songAssetId: string,
-  clipAssetIds: string[],
-  styleTier: string,
-  mode: string,
-  userId: string,
-  renderId?: string,
-  assetKeyMap?: Record<string, string>,
-) {
+export interface StartRenderOptions {
+  projectId: string;
+  referenceAssetId: string;
+  songAssetId: string;
+  clipAssetIds: string[];
+  styleTier: string;
+  mode: string;
+  userId: string;
+  renderId?: string;
+  assetKeyMap?: Record<string, string>;
+}
+
+export async function startRenderWorkflow(options: StartRenderOptions) {
   const client = await getTemporalClient();
   const handle = await client.workflow.start("VideoRenderWorkflow", {
     taskQueue: "video-render-queue",
     args: [
       {
-        project_id: projectId,
-        reference_asset_id: referenceAssetId,
-        song_asset_id: songAssetId,
-        clip_asset_ids: clipAssetIds,
-        style_tier: styleTier,
-        mode,
-        user_id: userId,
-        asset_key_map: assetKeyMap || {},
+        project_id: options.projectId,
+        reference_asset_id: options.referenceAssetId,
+        song_asset_id: options.songAssetId,
+        clip_asset_ids: options.clipAssetIds,
+        style_tier: options.styleTier,
+        mode: options.mode,
+        user_id: options.userId,
+        asset_key_map: options.assetKeyMap || {},
       },
     ],
-    workflowId: `render-${projectId}-${renderId || Date.now()}`,
+    workflowId: `render-${options.projectId}-${options.renderId || Date.now()}`,
   });
 
   return handle.workflowId;
