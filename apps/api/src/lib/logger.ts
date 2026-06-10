@@ -12,6 +12,26 @@
  */
 
 import type { FastifyRequest, RawRequestDefaultExpression } from "fastify";
+import pino from "pino";
+
+/**
+ * Module-level logger for service files that don't have request context.
+ */
+export const logger = pino({
+  level: process.env.LOG_LEVEL || "info",
+  ...(process.env.NODE_ENV === "production"
+    ? {}
+    : {
+        transport: {
+          target: "pino-pretty",
+          options: {
+            colorize: true,
+            translateTime: "HH:MM:ss.l",
+            ignore: "pid,hostname",
+          },
+        },
+      }),
+});
 
 const REDACTED_FIELDS = [
   "encryptedKey",
