@@ -19,6 +19,7 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import fs from "fs";
 import path from "path";
+import { logger } from "../lib/logger";
 
 const endpoint = process.env.R2_ENDPOINT || "";
 const isLocal =
@@ -115,7 +116,10 @@ export async function deleteProjectAssets(projectId: string): Promise<void> {
   const results = await Promise.allSettled(keys.map((k) => deleteAsset(k)));
   const failures = results.filter((r) => r.status === "rejected");
   if (failures.length) {
-    console.warn("Some assets failed to delete:", failures);
+    logger.warn(
+      { failures: failures.map((f) => (f as PromiseRejectedResult).reason) },
+      "Some assets failed to delete",
+    );
   }
 }
 
