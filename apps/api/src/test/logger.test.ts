@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { getLoggerConfig, generateRequestId, buildRequestContext } from "../lib/logger";
 import type { FastifyRequest } from "fastify";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { buildRequestContext, generateRequestId, getLoggerConfig } from "../lib/logger";
 
 describe("Logger", () => {
   beforeEach(() => {
@@ -9,12 +9,15 @@ describe("Logger", () => {
   });
 
   describe("getLoggerConfig", () => {
-    it("returns JSON config in production", () => {
+    it("returns JSON config with Loki transport in production", () => {
       vi.stubEnv("NODE_ENV", "production");
       vi.stubEnv("LOG_LEVEL", "warn");
       const config = getLoggerConfig();
       expect(config.level).toBe("warn");
-      expect(config.transport).toBeUndefined();
+      expect(config.transport).toBeDefined();
+      expect(config.transport).toHaveProperty("targets");
+      const targets = (config.transport as { targets: unknown[] }).targets;
+      expect(targets.some((t: unknown) => (t as { target: string }).target === "pino-loki")).toBe(true);
       expect(config.redact).toBeDefined();
       expect(config.redact!.paths).toContain("req.headers.encryptedKey");
     });

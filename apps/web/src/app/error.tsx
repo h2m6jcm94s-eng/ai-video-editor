@@ -4,16 +4,11 @@
 "use client";
 
 import { useEffect } from "react";
+import { logger } from "@/lib/logger";
 
-export default function Error({
-  error,
-  reset,
-}: {
-  error: Error & { digest?: string };
-  reset: () => void;
-}) {
+export default function Error({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
-    console.error("Route error:", error);
+    logger.error("Route error", { message: error.message, stack: error.stack, digest: error.digest });
   }, [error]);
 
   return (
@@ -22,10 +17,7 @@ export default function Error({
       <p className="text-gray-600 mb-4 text-center max-w-md">
         {error.message || "An unexpected error occurred while loading this page."}
       </p>
-      <button
-        onClick={reset}
-        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-      >
+      <button onClick={reset} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
         Try again
       </button>
     </div>
