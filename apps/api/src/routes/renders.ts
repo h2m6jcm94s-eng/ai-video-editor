@@ -33,7 +33,7 @@ export async function renderRoutes(app: FastifyInstance) {
       },
     },
     async (request, reply) => {
-      const body = request.validatedBody as { projectId: string; options?: Record<string, unknown> };
+      const body = request.validatedBody as z.infer<typeof createRenderSchema>;
       const userId = request.userId;
 
       // Validate project exists and user owns it
@@ -97,17 +97,17 @@ export async function renderRoutes(app: FastifyInstance) {
       // Start Temporal workflow
       let workflowId: string;
       try {
-        workflowId = await startRenderWorkflow(
-          project.id,
-          project.referenceAssetId,
-          project.songAssetId,
-          (project.clipAssetIds as string[]) || [],
-          project.styleTier,
-          project.mode,
+        workflowId = await startRenderWorkflow({
+          projectId: project.id,
+          referenceAssetId: project.referenceAssetId,
+          songAssetId: project.songAssetId,
+          clipAssetIds: (project.clipAssetIds as string[]) || [],
+          styleTier: project.styleTier,
+          mode: project.mode,
           userId,
-          job.id,
+          renderId: job.id,
           assetKeyMap,
-        );
+        });
       } catch (e) {
         // Mark render as failed and return 500 without crashing
         await db
