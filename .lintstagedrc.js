@@ -1,6 +1,4 @@
 module.exports = {
-  "packages/shared-types/**/*.{ts,tsx}":
-    "pnpm --filter @ai-video-editor/shared-types build",
-  "apps/api/**/*.{ts,tsx}": ["eslint --fix", () => "pnpm typecheck"],
-  "*.{ts,tsx}": () => "pnpm typecheck",
+  "*.{ts,tsx,js,jsx,json,md}": ["biome check --write --no-errors-on-unmatched"],
+  "*.{ts,tsx}": [() => "pnpm typecheck"],
 };
