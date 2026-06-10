@@ -2,34 +2,35 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import { useState, memo } from "react";
-import { Send, X, Wand2, Undo2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
-import type { CutList } from "@/types/api";
+import { promptEditSchema } from "@ai-video-editor/shared-types";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { Send, Wand2, X } from "lucide-react";
+import { memo, useState } from "react";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import type { z } from "zod";
+import { Button } from "@/components/ui/button";
+import { Form, FormControl, FormField, FormItem, FormMessage } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
 import { useApi } from "@/lib/api/client";
 import { APIError } from "@/lib/api/error";
 import { mapApiValidationErrors } from "@/lib/api/formErrors";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { promptEditSchema } from "@ai-video-editor/shared-types";
-import type { z } from "zod";
+import { diffCutLists, summarizeOps } from "@/lib/cutlistDiff";
+import type { CutList } from "@/types/api";
+import { PromptHistory, type PromptHistoryEntry } from "./PromptHistory";
 
 interface PromptPanelProps {
   projectId: string;
   cutList: CutList | null;
-  onUpdateCutlist: (cutList: CutList) => void;
-  onUndo?: () => void;
+  onPromptApply: (cutList: CutList) => void;
+  onUndo: () => void;
   onClose: () => void;
 }
 
 type PromptForm = z.infer<typeof promptEditSchema>;
 
-function PromptPanelInner({ projectId, cutList, onUpdateCutlist, onUndo, onClose }: PromptPanelProps) {
-  const [history, setHistory] = useState<{ prompt: string; response: string; error?: boolean }[]>([]);
+function PromptPanelInner({ projectId, cutList, onPromptApply, onUndo, onClose }: PromptPanelProps) {
+  const [entries, setEntries] = useState<PromptHistoryEntry[]>([]);
   const api = useApi();
 
   const form = useForm<PromptForm>({
@@ -47,20 +48,38 @@ function PromptPanelInner({ projectId, cutList, onUpdateCutlist, onUndo, onClose
     try {
       const result = await api.projects.prompt(projectId, values.prompt.trim());
       if (result.project.cutList) {
-        onUpdateCutlist(result.project.cutList as CutList);
+        const newCutList = result.project.cutList as CutList;
+        const ops = diffCutLists(cutList, newCutList);
+        onPromptApply(newCutList);
+        const entry: PromptHistoryEntry = {
+          id: crypto.randomUUID(),
+          prompt: values.prompt,
+          summary: summarizeOps(ops),
+          ops,
+          timestamp: new Date(),
+        };
+        setEntries((prev) => [...prev, entry]);
+        toast.success(`Applied ${entry.summary}`, {
+          action: { label: "Undo", onClick: onUndo },
+          duration: 8000,
+        });
       }
-      setHistory((h) => [
-        ...h,
-        { prompt: values.prompt, response: result.explanation || "Changes applied successfully." },
-      ]);
-      toast.success("AI edit applied");
       form.reset({ prompt: "" });
     } catch (err) {
       if (err instanceof APIError && mapApiValidationErrors(err, form.setError)) {
         return;
       }
-      const message = err instanceof APIError ? err.userMessage : err instanceof Error ? err.message : "AI edit failed";
-      setHistory((h) => [...h, { prompt: values.prompt, response: message, error: true }]);
+      const message =
+        err instanceof APIError ? err.userMessage : err instanceof Error ? err.message : "AI edit failed";
+      const entry: PromptHistoryEntry = {
+        id: crypto.randomUUID(),
+        prompt: values.prompt,
+        summary: message,
+        ops: [],
+        timestamp: new Date(),
+        error: true,
+      };
+      setEntries((prev) => [...prev, entry]);
       toast.error(message);
     }
   };
@@ -73,32 +92,13 @@ function PromptPanelInner({ projectId, cutList, onUpdateCutlist, onUndo, onClose
           AI Prompt
         </div>
         <div className="flex items-center gap-1">
-          {onUndo && (
-            <button onClick={onUndo} className="p-1 hover:bg-zinc-800 rounded" aria-label="Undo last edit" title="Undo">
-              <Undo2 className="w-3 h-3" />
-            </button>
-          )}
           <button onClick={onClose} className="p-1 hover:bg-zinc-800 rounded" aria-label="Close">
             <X className="w-3 h-3" />
           </button>
         </div>
       </div>
 
-      <ScrollArea className="flex-1 p-3">
-        {history.length === 0 && (
-          <div className="text-xs text-zinc-500 text-center py-8">
-            Try: &quot;cut on every beat&quot;, &quot;fade in&quot;, &quot;apply cinematic LUT&quot;
-          </div>
-        )}
-        <div className="space-y-3">
-          {history.map((h, i) => (
-            <div key={i} className="space-y-1">
-              <div className="bg-zinc-800 rounded-lg px-3 py-2 text-xs">{h.prompt}</div>
-              <div className={`text-[11px] px-1 ${h.error ? "text-red-400" : "text-zinc-400"}`}>{h.response}</div>
-            </div>
-          ))}
-        </div>
-      </ScrollArea>
+      <PromptHistory entries={entries} onUndo={onUndo} />
 
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="p-3 border-t border-zinc-800 flex gap-2">
@@ -119,7 +119,12 @@ function PromptPanelInner({ projectId, cutList, onUpdateCutlist, onUndo, onClose
               </FormItem>
             )}
           />
-          <Button size="sm" className="h-8 px-3" type="submit" disabled={!form.formState.isValid || form.formState.isSubmitting}>
+          <Button
+            size="sm"
+            className="h-8 px-3"
+            type="submit"
+            disabled={!form.formState.isValid || form.formState.isSubmitting}
+          >
             <Send className="w-3 h-3" />
           </Button>
         </form>

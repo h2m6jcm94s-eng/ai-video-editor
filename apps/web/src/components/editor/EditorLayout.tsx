@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PresenceCursors } from "./PresenceCursors";
 import { ProgressBar } from "./ProgressBar";
 import { InspectorPanel } from "./panels/InspectorPanel";
@@ -82,9 +82,6 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
       globals: { ...state.cutList.globals, aspectRatio: ratio },
     });
   };
-  const undoStackRef = useRef<CutList[]>([]);
-  const redoStackRef = useRef<CutList[]>([]);
-
   useEffect(() => {
     actions.setAssets(assets);
   }, [assets, actions]);
@@ -103,46 +100,6 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
     onRollback: handleRollback,
     debounceMs: 1500,
   });
-
-  // Push to undo stack on meaningful changes
-  useEffect(() => {
-    if (!state.cutList) return;
-    const json = JSON.stringify(state.cutList);
-    const last = undoStackRef.current[undoStackRef.current.length - 1];
-    if (!last || JSON.stringify(last) !== json) {
-      undoStackRef.current.push(state.cutList);
-      if (undoStackRef.current.length > 50) undoStackRef.current.shift();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.cutList?.globals, state.cutList?.slots.length, state.cutList?.overlays.length]);
-
-  const pushUndo = useCallback((cutList: CutList) => {
-    const json = JSON.stringify(cutList);
-    const last = undoStackRef.current[undoStackRef.current.length - 1];
-    if (!last || JSON.stringify(last) !== json) {
-      undoStackRef.current.push(cutList);
-      if (undoStackRef.current.length > 50) undoStackRef.current.shift();
-    }
-  }, []);
-
-  const handleUndo = useCallback(() => {
-    if (undoStackRef.current.length > 1) {
-      const current = undoStackRef.current.pop();
-      const prev = undoStackRef.current[undoStackRef.current.length - 1];
-      if (current && prev) {
-        redoStackRef.current.push(current);
-        actions.setCutList(prev);
-      }
-    }
-  }, [actions]);
-
-  const handlePromptUpdate = useCallback(
-    (cutList: CutList) => {
-      pushUndo(cutList);
-      actions.setCutList(cutList);
-    },
-    [actions, pushUndo],
-  );
 
   const commandActions = useMemo<CommandAction[]>(
     () => [
@@ -242,14 +199,9 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
       if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault();
         if (e.shiftKey) {
-          // Ctrl+Shift+Z = Redo
-          const next = redoStackRef.current.pop();
-          if (next) {
-            undoStackRef.current.push(next);
-            actions.setCutList(next);
-          }
+          actions.redo();
         } else {
-          handleUndo();
+          actions.undo();
         }
         return;
       }
@@ -273,7 +225,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
           break;
       }
     },
-    [timeline, actions, state.selectedSlotIndex, handleUndo],
+    [timeline, actions, state.selectedSlotIndex],
   );
 
   useEffect(() => {
@@ -466,8 +418,8 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
           <PromptPanel
             projectId={project.id}
             cutList={state.cutList}
-            onUpdateCutlist={handlePromptUpdate}
-            onUndo={handleUndo}
+            onPromptApply={actions.promptApply}
+            onUndo={actions.undo}
             onClose={() => setPromptOpen(false)}
           />
         </div>
