@@ -21,7 +21,7 @@ from temporalio.worker import Worker
 
 from shared_py.models import CutList, BeatGrid, ShotBoundary
 from shared_py.storage import download_asset, upload_file
-from workflows import VideoRenderWorkflow
+from workflows import VideoRenderWorkflow, ProbeAssetWorkflow
 
 
 def _get_asset_path(asset_id: str, asset_key_map: dict) -> str:
@@ -267,6 +267,13 @@ async def notify_user(user_id: str, project_id: str) -> None:
     pass
 
 
+@activity.defn
+async def probe_asset(asset_id: str, storage_key: str) -> dict:
+    """Probe a single asset and report metadata back to API."""
+    from ingest_worker.probe import probe_asset_remote
+    return probe_asset_remote(asset_id, storage_key)
+
+
 # ------------------------------------------------------------------
 # Worker setup
 # ------------------------------------------------------------------
@@ -274,7 +281,16 @@ async def notify_user(user_id: str, project_id: str) -> None:
 async def main():
     client = await Client.connect(os.environ.get("TEMPORAL_HOST", "localhost:7233"))
 
-    worker = Worker(
+    # Start probe worker on "ingest" queue
+    probe_worker = Worker(
+        client,
+        task_queue="ingest",
+        workflows=[ProbeAssetWorkflow],
+        activities=[probe_asset],
+    )
+
+    # Start render worker on "video-render-queue"
+    render_worker = Worker(
         client,
         task_queue="video-render-queue",
         workflows=[VideoRenderWorkflow],
@@ -291,6 +307,9 @@ async def main():
             notify_user,
         ],
     )
+
+    print("Temporal workers started, polling task queues: ingest, video-render-queue...")
+    await asyncio.gather(probe_worker.run(), render_worker.run())
 
     print("Temporal worker started, polling task queue...")
     await worker.run()

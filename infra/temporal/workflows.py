@@ -50,6 +50,27 @@ class AnalysisResult:
     lut_path: str = ""
 
 
+@dataclass
+class ProbeAssetInput:
+    asset_id: str
+    storage_key: str
+
+
+@workflow.defn
+class ProbeAssetWorkflow:
+    """One-shot workflow to probe a single asset after upload."""
+
+    @workflow.run
+    async def run(self, input: ProbeAssetInput) -> dict:
+        result = await workflow.execute_activity(
+            "probe_asset",
+            args=(input.asset_id, input.storage_key),
+            start_to_close_timeout=120,
+            retry_policy=RetryPolicy(maximum_attempts=3),
+        )
+        return result
+
+
 @workflow.defn
 class VideoRenderWorkflow:
     """Main workflow for rendering a video with reference style matching."""

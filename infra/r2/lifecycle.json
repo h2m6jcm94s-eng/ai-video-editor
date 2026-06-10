@@ -1,0 +1,9 @@
+{
+  "Rules": [
+    {
+      "ID": "abort-stale-multipart",
+      "Status": "Enabled",
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
+    }
+  ]
+}

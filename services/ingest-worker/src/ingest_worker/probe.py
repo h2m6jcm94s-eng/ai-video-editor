@@ -6,7 +6,11 @@ try:
 except ImportError:
     av = None  # type: ignore[assignment]
 
+import os
+import tempfile
 from shared_py.logging_config import StructuredLogger
+from shared_py.storage import download_asset
+from shared_py.config import settings
 from typing import Dict, Any
 
 logger = StructuredLogger("ingest_worker.probe")
@@ -21,6 +25,10 @@ def probe_video(video_path: str) -> Dict[str, Any]:
         container = av.open(video_path)
     except Exception as e:
         raise RuntimeError(f"Cannot open video '{video_path}': {e}") from e
+
+    if not container.duration:
+        raise RuntimeError(f"Video has no duration metadata: {video_path}")
+
     info = {
         "duration_sec": float(container.duration) / av.time_base if container.duration else 0.0,
         "format": container.format.name if container.format else None,
@@ -51,3 +59,45 @@ def probe_video(video_path: str) -> Dict[str, Any]:
 
     container.close()
     return info
+
+
+def probe_asset_remote(asset_id: str, storage_key: str) -> Dict[str, Any]:
+    """Download from R2, probe, and PATCH metadata back to API."""
+    import httpx
+
+    local_path = download_asset(storage_key)
+    try:
+        info = probe_video(local_path)
+    except RuntimeError as e:
+        logger.error(f"Probe failed for {asset_id}: {e}")
+        raise
+    finally:
+        try:
+            os.remove(local_path)
+        except OSError:
+            pass
+
+    video_stream = next((s for s in info["streams"] if s.get("type") == "video"), None)
+    payload = {
+        "durationSec": info["duration_sec"],
+        "width": video_stream["width"] if video_stream else None,
+        "height": video_stream["height"] if video_stream else None,
+        "fps": video_stream["fps"] if video_stream else None,
+    }
+
+    # Filter out None values
+    payload = {k: v for k, v in payload.items() if v is not None}
+
+    try:
+        resp = httpx.post(
+            f"{settings.api_base}/uploads/{asset_id}/probe",
+            json=payload,
+            headers={"Authorization": f"Bearer {settings.api_token}"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+    except httpx.HTTPError as e:
+        logger.error(f"Failed to report probe for {asset_id}: {e}")
+        raise
+
+    return payload
