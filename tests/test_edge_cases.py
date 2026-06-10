@@ -263,7 +263,7 @@ class TestCutlistEdgeCases:
 
     def test_all_transitions_in_schema(self):
         from reason_worker.cutlist_gen import CUTLIST_SCHEMA
-        transitions = CUTLIST_SCHEMA.get("properties", {}).get("slots", {}).get("items", {}).get("properties", {}).get("transition_in", {}).get("enum", [])
+        transitions = CUTLIST_SCHEMA.get("properties", {}).get("slots", {}).get("items", {}).get("properties", {}).get("transitionIn", {}).get("enum", [])
         expected = [
             "hard_cut", "fade", "dissolve", "wipe_left", "wipe_right",
             "wipe_up", "wipe_down", "circle_open", "slide_up", "slide_down",
@@ -275,7 +275,7 @@ class TestCutlistEdgeCases:
 
     def test_all_shot_types_in_schema(self):
         from reason_worker.cutlist_gen import CUTLIST_SCHEMA
-        shot_types = CUTLIST_SCHEMA.get("properties", {}).get("slots", {}).get("items", {}).get("properties", {}).get("target_shot_type", {}).get("enum", [])
+        shot_types = CUTLIST_SCHEMA.get("properties", {}).get("slots", {}).get("items", {}).get("properties", {}).get("targetShotType", {}).get("enum", [])
         expected = [
             "extreme_wide", "wide", "medium_wide", "medium",
             "medium_close_up", "close_up", "extreme_close_up",
