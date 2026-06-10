@@ -26,7 +26,8 @@ jobs:
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @ai-video-editor/shared-types build
-      - run: pnpm biome check . --no-errors-on-unmatched
+      # Biome gate disabled pending incremental enablement (see PR #80 discussion)
+      # - run: pnpm biome check . --no-errors-on-unmatched
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm build
