@@ -40,7 +40,9 @@ export function PresenceCursors({ projectId, userName }: PresenceCursorsProps) {
         lastReportRef.current = now;
         api.presence
           .report(projectId, { x: mousePosRef.current.x, y: mousePosRef.current.y, name: userName })
-          .catch(() => {});
+          .catch((err) => {
+            console.error("Presence report failed:", err);
+          });
       }
     };
 
@@ -54,7 +56,9 @@ export function PresenceCursors({ projectId, userName }: PresenceCursorsProps) {
       api.presence
         .get(projectId)
         .then((res) => setUsers(res.users))
-        .catch(() => {});
+        .catch((err) => {
+          console.error("Presence fetch failed:", err);
+        });
     };
     const start = () => {
       if (interval) return;
