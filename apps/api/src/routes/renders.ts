@@ -1,16 +1,16 @@
 ﻿// Copyright (c) 2025 Devayan Dewri. All rights reserved.
+import { and, desc, eq, inArray } from "drizzle-orm";
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
 import { FastifyInstance } from "fastify";
-import { eq, desc, and, inArray } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "../db";
-import { renders, projects, assets } from "../db/schema";
-import { enqueueJob } from "../services/queue";
-import { startRenderWorkflow } from "../services/temporal";
-import { validateBody, createRenderSchema } from "../middleware/validate";
+import { assets, projects, renders } from "../db/schema";
 import { sendError } from "../lib/errors";
 import { rendersActive, rendersTotal } from "../lib/metrics";
-import { z } from "zod";
+import { createRenderSchema, validateBody } from "../middleware/validate";
+import { enqueueJob } from "../services/queue";
+import { startRenderWorkflow } from "../services/temporal";
 
 const completeRenderSchema = z.object({
   status: z.enum(["complete", "failed"]),
@@ -21,123 +21,126 @@ const completeRenderSchema = z.object({
 
 export async function renderRoutes(app: FastifyInstance) {
   // Start render
-  app.post("/", {
-    preHandler: validateBody(createRenderSchema),
-    config: {
-      rateLimit: {
-        max: 3,
-        timeWindow: "1 minute",
+  app.post(
+    "/",
+    {
+      preHandler: validateBody(createRenderSchema),
+      config: {
+        rateLimit: {
+          max: 3,
+          timeWindow: "1 minute",
+        },
       },
     },
-  }, async (request, reply) => {
-    const body = request.validatedBody as { projectId: string; options?: Record<string, unknown> };
-    const userId = request.userId;
+    async (request, reply) => {
+      const body = request.validatedBody as { projectId: string; options?: Record<string, unknown> };
+      const userId = request.userId;
 
-    // Validate project exists and user owns it
-    const project = await db.query.projects.findFirst({
-      where: eq(projects.id, body.projectId),
-    });
-    if (!project) {
-      return sendError(reply, 404, "Project not found", "NOT_FOUND");
-    }
-    if (project.userId !== userId) {
-      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
-    }
-
-    // Validate project has required assets
-    if (!project.referenceAssetId || !project.songAssetId) {
-      return sendError(reply, 422, "Project missing reference asset or song", "MISSING_ASSETS");
-    }
-
-    // Idempotency: prevent duplicate in-progress renders
-    const existing = await db.query.renders.findFirst({
-      where: and(
-        eq(renders.projectId, body.projectId),
-        inArray(renders.status, ["queued", "running"])
-      ),
-    });
-    if (existing) {
-      return sendError(reply, 409, "Render already in progress", "CONFLICT", { jobId: existing.id });
-    }
-
-    const [job] = await db
-      .insert(renders)
-      .values({
-        projectId: body.projectId,
-        status: "queued",
-        stage: "queued",
-        progress: 0,
-        startedAt: new Date(),
-      })
-      .returning();
-
-    // Fetch storage keys for all assets used in the render
-    const assetIds = [
-      project.referenceAssetId,
-      project.songAssetId,
-      ...((project.clipAssetIds as string[]) || []),
-    ].filter(Boolean) as string[];
-
-    const assetRows = assetIds.length
-      ? await db.query.assets.findMany({
-          where: (table, { inArray }) => inArray(table.id, assetIds),
-          columns: { id: true, storageKey: true },
-        })
-      : [];
-
-    const assetKeyMap: Record<string, string> = {};
-    for (const row of assetRows ?? []) {
-      if (row?.id && row?.storageKey) {
-        assetKeyMap[row.id] = row.storageKey;
+      // Validate project exists and user owns it
+      const project = await db.query.projects.findFirst({
+        where: eq(projects.id, body.projectId),
+      });
+      if (!project) {
+        return sendError(reply, 404, "Project not found", "NOT_FOUND");
       }
-    }
+      if (project.userId !== userId) {
+        return sendError(reply, 403, "Forbidden", "FORBIDDEN");
+      }
 
-    // Start Temporal workflow
-    let workflowId: string;
-    try {
-      workflowId = await startRenderWorkflow(
-        project.id,
+      // Validate project has required assets
+      if (!project.referenceAssetId || !project.songAssetId) {
+        return sendError(reply, 422, "Project missing reference asset or song", "MISSING_ASSETS");
+      }
+
+      // Idempotency: prevent duplicate in-progress renders
+      const existing = await db.query.renders.findFirst({
+        where: and(eq(renders.projectId, body.projectId), inArray(renders.status, ["queued", "running"])),
+      });
+      if (existing) {
+        return sendError(reply, 409, "Render already in progress", "RENDER_ALREADY_RUNNING", {
+          jobId: existing.id,
+        });
+      }
+
+      const [job] = await db
+        .insert(renders)
+        .values({
+          projectId: body.projectId,
+          status: "queued",
+          stage: "queued",
+          progress: 0,
+          startedAt: new Date(),
+        })
+        .returning();
+
+      // Fetch storage keys for all assets used in the render
+      const assetIds = [
         project.referenceAssetId,
         project.songAssetId,
-        (project.clipAssetIds as string[]) || [],
-        project.styleTier,
-        project.mode,
-        userId,
-        job.id,
-        assetKeyMap
-      );
-    } catch (e) {
-      // Mark render as failed and return 500 without crashing
-      await db.update(renders).set({ status: "failed", errorMessage: "Temporal workflow failed" }).where(eq(renders.id, job.id));
-      return sendError(reply, 500, "Render engine unavailable", "TEMPORAL_ERROR");
-    }
+        ...((project.clipAssetIds as string[]) || []),
+      ].filter(Boolean) as string[];
 
-    await db
-      .update(renders)
-      .set({ workflowId })
-      .where(eq(renders.id, job.id));
+      const assetRows = assetIds.length
+        ? await db.query.assets.findMany({
+            where: (table, { inArray }) => inArray(table.id, assetIds),
+            columns: { id: true, storageKey: true },
+          })
+        : [];
 
-    // Enqueue to Redis/Temporal
-    await enqueueJob({
-      jobId: job.id,
-      projectId: body.projectId,
-      type: "video_render",
-      payload: body.options || {},
-      priority: 1,
-      createdAt: new Date().toISOString(),
-    });
+      const assetKeyMap: Record<string, string> = {};
+      for (const row of assetRows ?? []) {
+        if (row?.id && row?.storageKey) {
+          assetKeyMap[row.id] = row.storageKey;
+        }
+      }
 
-    rendersActive.inc();
-    rendersTotal.inc({ status: "started" });
+      // Start Temporal workflow
+      let workflowId: string;
+      try {
+        workflowId = await startRenderWorkflow(
+          project.id,
+          project.referenceAssetId,
+          project.songAssetId,
+          (project.clipAssetIds as string[]) || [],
+          project.styleTier,
+          project.mode,
+          userId,
+          job.id,
+          assetKeyMap,
+        );
+      } catch (e) {
+        // Mark render as failed and return 500 without crashing
+        await db
+          .update(renders)
+          .set({ status: "failed", errorMessage: "Temporal workflow failed" })
+          .where(eq(renders.id, job.id));
+        return sendError(reply, 500, "Render engine unavailable", "TEMPORAL_ERROR");
+      }
 
-    // Update project status
-    await db
-      .update(projects)
-      .set({ status: "rendering", updatedAt: new Date() })
-      .where(eq(projects.id, body.projectId));
+      await db.update(renders).set({ workflowId }).where(eq(renders.id, job.id));
 
-    return { job: { ...job, workflowId } };
-  });
+      // Enqueue to Redis/Temporal
+      await enqueueJob({
+        jobId: job.id,
+        projectId: body.projectId,
+        type: "video_render",
+        payload: body.options || {},
+        priority: 1,
+        createdAt: new Date().toISOString(),
+      });
+
+      rendersActive.inc();
+      rendersTotal.inc({ status: "started" });
+
+      // Update project status
+      await db
+        .update(projects)
+        .set({ status: "rendering", updatedAt: new Date() })
+        .where(eq(projects.id, body.projectId));
+
+      return { job: { ...job, workflowId } };
+    },
+  );
 
   // Get render job
   app.get("/:jobId", async (request, reply) => {
