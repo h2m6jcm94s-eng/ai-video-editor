@@ -39,6 +39,7 @@ pythonpath = [
     "services/style-worker/src",
     "services/render-worker/src",
     "services/upscale-worker/src",
+    "services/guardrails/src",
 ]
 addopts = [
     "-v",

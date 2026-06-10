@@ -14,7 +14,7 @@
  * - Rate limit hit counter
  */
 
-import { Counter, Histogram, Gauge, register } from "prom-client";
+import { Counter, Gauge, Histogram, register } from "prom-client";
 
 function getOrCreateCounter<T extends string>(opts: { name: string; help: string; labelNames?: T[] }) {
   const existing = register.getSingleMetric(opts.name) as Counter<T> | undefined;
@@ -134,6 +134,12 @@ export const guardrailsBlocksTotal = getOrCreateCounter({
   name: "ave_guardrails_blocks_total",
   help: "Total guardrails blocks by category and route",
   labelNames: ["category", "route"],
+});
+
+export const guardrailsOutputBlocksTotal = getOrCreateCounter({
+  name: "ave_guardrails_output_blocks_total",
+  help: "Output blocked by guardrails",
+  labelNames: ["category", "provider"],
 });
 
 // ─── Token Budget Metrics ───────────────────────────────────────────────────

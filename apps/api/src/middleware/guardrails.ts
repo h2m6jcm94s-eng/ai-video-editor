@@ -11,7 +11,7 @@
 import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from "fastify";
 import { sendError } from "../lib/errors";
 import { logger as defaultLogger } from "../lib/logger";
-import { guardrailsBlocksTotal } from "../lib/metrics";
+import { guardrailsBlocksTotal, guardrailsOutputBlocksTotal } from "../lib/metrics";
 
 function getGuardrailsConfig() {
   return {
@@ -72,6 +72,55 @@ export async function evaluateGuardrails(
       isTimeout
         ? "Guardrails evaluation timed out, failing open"
         : "Guardrails service unreachable, failing open",
+    );
+    return { allowed: true };
+  }
+}
+
+/**
+ * Evaluate AI response text against output guardrails.
+ * Returns {allowed: true} if safe or if service is down (fail-open).
+ * Returns {allowed: false, reason} if blocked.
+ */
+export async function validateAIResponse(
+  text: string,
+  context?: string,
+  log: FastifyBaseLogger = defaultLogger,
+): Promise<GuardrailsResponse> {
+  const config = getGuardrailsConfig();
+  if (!config.enabled) {
+    return { allowed: true };
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), config.timeout);
+
+    const res = await fetch(`${config.url}/evaluate/output`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      // Fail-open: log warning but don't block
+      log.warn({ status: res.status }, "Guardrails output service returned error, failing open");
+      return { allowed: true };
+    }
+
+    const data = (await res.json()) as GuardrailsResponse;
+    return data;
+  } catch (err) {
+    // Fail-open on network errors, timeouts, etc.
+    const isTimeout = err instanceof Error && err.name === "AbortError";
+    log.warn(
+      { err, isTimeout },
+      isTimeout
+        ? "Guardrails output evaluation timed out, failing open"
+        : "Guardrails output service unreachable, failing open",
     );
     return { allowed: true };
   }

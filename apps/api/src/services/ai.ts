@@ -5,15 +5,16 @@
  * Mirrors the Python provider system but runs in Node.js for low-latency API calls.
  */
 
+import { cutListSchema } from "@ai-video-editor/shared-types";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { eq, and } from "drizzle-orm";
 import { db } from "../db";
 import { providerKeys } from "../db/schema";
-import { aiCallsTotal, aiCallDurationSeconds } from "../lib/metrics";
-import { countTokens } from "../lib/tokens";
+import { type SafeFallback, safeFallbackFor } from "../lib/aiFallbacks";
 import { decrypt as aesDecrypt } from "../lib/crypto";
-import { cutListSchema } from "@ai-video-editor/shared-types";
-import { safeFallbackFor, type SafeFallback } from "../lib/aiFallbacks";
+import { aiCallDurationSeconds, aiCallsTotal, guardrailsOutputBlocksTotal } from "../lib/metrics";
+import { countTokens } from "../lib/tokens";
+import { validateAIResponse } from "../middleware/guardrails";
 
 async function getProviderKey(userId: string, provider: "anthropic" | "openai"): Promise<string | undefined> {
   const row = await db.query.providerKeys.findFirst({
@@ -69,10 +70,7 @@ const promptEditResponseSchema = z
   })
   .strict();
 
-async function fetchWithRetry(
-  url: string,
-  init: RequestInit & { maxRetries?: number }
-): Promise<Response> {
+async function fetchWithRetry(url: string, init: RequestInit & { maxRetries?: number }): Promise<Response> {
   const maxRetries = init.maxRetries ?? 3;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -99,14 +97,15 @@ async function fetchWithRetry(
 }
 
 const CAMELCASE_HINT =
-  '\nCRITICAL: Your previous JSON was invalid. Return ONLY valid JSON with camelCase keys matching the schema exactly. No markdown fences.';
+  "\nCRITICAL: Your previous JSON was invalid. Return ONLY valid JSON with camelCase keys matching the schema exactly. No markdown fences.";
 
 async function callClaudeOnce(
   context: PromptEditContext,
-  hint: string
+  hint: string,
 ): Promise<{ text: string; durationMs: number }> {
   const start = performance.now();
-  const anthropicKey = (await getProviderKey(context.userId, "anthropic")) || process.env.ANTHROPIC_API_KEY || "";
+  const anthropicKey =
+    (await getProviderKey(context.userId, "anthropic")) || process.env.ANTHROPIC_API_KEY || "";
   if (!anthropicKey) {
     aiCallsTotal.inc({ provider: "claude", status: "missing_key" });
     const err: Error & { code?: string } = new Error("ANTHROPIC_API_KEY not configured");
@@ -170,6 +169,21 @@ async function callClaude(context: PromptEditContext): Promise<PromptEditResult>
     };
   }
 
+  // Output guardrails check
+  const guardrailsCheck = await validateAIResponse(text, "claude");
+  if (!guardrailsCheck.allowed) {
+    const categories = guardrailsCheck.flagged_categories || ["unknown"];
+    for (const category of categories) {
+      guardrailsOutputBlocksTotal.inc({ category, provider: "claude" });
+    }
+    return {
+      diff: [],
+      explanation:
+        guardrailsCheck.reason || "AI response was blocked by content filters. No changes applied.",
+      fallback: safeFallbackFor("prompt_edit", "content_filter", { previousCutList: context.cutList }),
+    };
+  }
+
   let parsed = parseResponse(text);
   if (!parsed) {
     // One retry with explicit camelCase hint
@@ -181,6 +195,22 @@ async function callClaude(context: PromptEditContext): Promise<PromptEditResult>
         fallback: safeFallbackFor("prompt_edit", "blocked", { previousCutList: context.cutList }),
       };
     }
+
+    // Output guardrails check on retry
+    const retryGuardrailsCheck = await validateAIResponse(retry.text, "claude");
+    if (!retryGuardrailsCheck.allowed) {
+      const categories = retryGuardrailsCheck.flagged_categories || ["unknown"];
+      for (const category of categories) {
+        guardrailsOutputBlocksTotal.inc({ category, provider: "claude" });
+      }
+      return {
+        diff: [],
+        explanation:
+          retryGuardrailsCheck.reason || "AI response was blocked by content filters. No changes applied.",
+        fallback: safeFallbackFor("prompt_edit", "content_filter", { previousCutList: context.cutList }),
+      };
+    }
+
     parsed = parseResponse(retry.text);
     if (!parsed) {
       return {
@@ -203,7 +233,7 @@ async function callClaude(context: PromptEditContext): Promise<PromptEditResult>
 
 async function callOpenAIOnce(
   context: PromptEditContext,
-  hint: string
+  hint: string,
 ): Promise<{ text: string; durationMs: number }> {
   const start = performance.now();
   const openaiKey = (await getProviderKey(context.userId, "openai")) || process.env.OPENAI_API_KEY || "";
@@ -271,6 +301,21 @@ async function callOpenAI(context: PromptEditContext): Promise<PromptEditResult>
     };
   }
 
+  // Output guardrails check
+  const guardrailsCheck = await validateAIResponse(text, "openai");
+  if (!guardrailsCheck.allowed) {
+    const categories = guardrailsCheck.flagged_categories || ["unknown"];
+    for (const category of categories) {
+      guardrailsOutputBlocksTotal.inc({ category, provider: "openai" });
+    }
+    return {
+      diff: [],
+      explanation:
+        guardrailsCheck.reason || "AI response was blocked by content filters. No changes applied.",
+      fallback: safeFallbackFor("prompt_edit", "content_filter", { previousCutList: context.cutList }),
+    };
+  }
+
   let parsed = parseResponse(text);
   if (!parsed) {
     // One retry with explicit camelCase hint
@@ -282,6 +327,22 @@ async function callOpenAI(context: PromptEditContext): Promise<PromptEditResult>
         fallback: safeFallbackFor("prompt_edit", "content_filter", { previousCutList: context.cutList }),
       };
     }
+
+    // Output guardrails check on retry
+    const retryGuardrailsCheck = await validateAIResponse(retry.text, "openai");
+    if (!retryGuardrailsCheck.allowed) {
+      const categories = retryGuardrailsCheck.flagged_categories || ["unknown"];
+      for (const category of categories) {
+        guardrailsOutputBlocksTotal.inc({ category, provider: "openai" });
+      }
+      return {
+        diff: [],
+        explanation:
+          retryGuardrailsCheck.reason || "AI response was blocked by content filters. No changes applied.",
+        fallback: safeFallbackFor("prompt_edit", "content_filter", { previousCutList: context.cutList }),
+      };
+    }
+
     parsed = parseResponse(retry.text);
     if (!parsed) {
       return {
@@ -308,7 +369,9 @@ function buildPrompt(context: PromptEditContext): string {
     ``,
     `# Current CutList\n${JSON.stringify(context.cutList, null, 2)}`,
     context.beatGrid ? `# Beat Grid\n${JSON.stringify(context.beatGrid, null, 2)}` : "",
-    context.assets && context.assets.length > 0 ? `# Available Assets\n${JSON.stringify(context.assets, null, 2)}` : "",
+    context.assets && context.assets.length > 0
+      ? `# Available Assets\n${JSON.stringify(context.assets, null, 2)}`
+      : "",
     ``,
     `Return the JSON Patch diff and explanation.`,
   ]
@@ -428,7 +491,7 @@ function removeValue(obj: unknown, keys: string[]): void {
 export async function transcribeAudio(
   userId: string,
   audioBuffer: Buffer,
-  filename: string
+  filename: string,
 ): Promise<Array<{ text: string; start: number; end: number }>> {
   const start = performance.now();
   const openaiKey = (await getProviderKey(userId, "openai")) || process.env.OPENAI_API_KEY || "";
@@ -463,7 +526,10 @@ export async function transcribeAudio(
     throw error;
   }
 
-  const data = (await res.json()) as { segments?: Array<{ text: string; start: number; end: number }>; text?: string };
+  const data = (await res.json()) as {
+    segments?: Array<{ text: string; start: number; end: number }>;
+    text?: string;
+  };
 
   aiCallsTotal.inc({ provider: "openai", status: "success" });
   aiCallDurationSeconds.observe({ provider: "openai" }, (performance.now() - start) / 1000);
@@ -473,15 +539,23 @@ export async function transcribeAudio(
   return [{ text: (data.text || "").trim(), start: 0, end: 0 }];
 }
 
-export async function applyPromptEdit(
-  context: PromptEditContext
-): Promise<PromptEditResult & { newCutList: unknown; usage: { promptTokens: number; completionTokens: number; totalTokens: number } }> {
+export async function applyPromptEdit(context: PromptEditContext): Promise<
+  PromptEditResult & {
+    newCutList: unknown;
+    usage: { promptTokens: number; completionTokens: number; totalTokens: number };
+  }
+> {
   const provider = process.env.AI_PROVIDER?.split(",")[0]?.trim() || "claude";
 
   let result: PromptEditResult;
 
   function isMissingKey(err: unknown): boolean {
-    return err !== null && typeof err === "object" && "code" in err && (err as { code?: string }).code === "PROVIDER_KEY_MISSING";
+    return (
+      err !== null &&
+      typeof err === "object" &&
+      "code" in err &&
+      (err as { code?: string }).code === "PROVIDER_KEY_MISSING"
+    );
   }
 
   async function withFallback<T>(primary: () => Promise<T>, fallback: () => Promise<T>): Promise<T> {
@@ -495,16 +569,26 @@ export async function applyPromptEdit(
 
   try {
     if (provider === "claude") {
-      result = await withFallback(() => callClaude(context), () => callOpenAI(context));
+      result = await withFallback(
+        () => callClaude(context),
+        () => callOpenAI(context),
+      );
     } else if (provider === "openai") {
-      result = await withFallback(() => callOpenAI(context), () => callClaude(context));
+      result = await withFallback(
+        () => callOpenAI(context),
+        () => callClaude(context),
+      );
     } else {
-      result = await withFallback(() => callClaude(context), () => callOpenAI(context));
+      result = await withFallback(
+        () => callClaude(context),
+        () => callOpenAI(context),
+      );
     }
   } catch (err) {
-    const code = err && typeof err === "object" && "code" in err ? (err as { code?: string }).code : undefined;
+    const code =
+      err && typeof err === "object" && "code" in err ? (err as { code?: string }).code : undefined;
     const apiErr: Error & { code?: string } = new Error(
-      `AI prompt edit failed: ${err instanceof Error ? err.message : "unknown"}`
+      `AI prompt edit failed: ${err instanceof Error ? err.message : "unknown"}`,
     );
     if (code) apiErr.code = code;
     throw apiErr;
@@ -532,7 +616,7 @@ export async function applyPromptEdit(
   const parseResult = cutListSchema.safeParse(newCutList);
   if (!parseResult.success) {
     const err: Error & { code?: string; details?: unknown } = new Error(
-      `Generated cut list does not match schema: ${parseResult.error.issues.map((i) => i.message).join(", ")}`
+      `Generated cut list does not match schema: ${parseResult.error.issues.map((i) => i.message).join(", ")}`,
     );
     err.code = "CUTLIST_SCHEMA_DRIFT";
     err.details = parseResult.error.issues;
@@ -542,7 +626,8 @@ export async function applyPromptEdit(
   const promptText = buildPrompt(context);
   const usage = result.usage || {
     promptTokens: await countTokens(promptText),
-    completionTokens: await countTokens(result.explanation) + await countTokens(JSON.stringify(result.diff)),
+    completionTokens:
+      (await countTokens(result.explanation)) + (await countTokens(JSON.stringify(result.diff))),
     totalTokens: 0,
   };
   if (!result.usage) {

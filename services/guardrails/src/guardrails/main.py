@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from guardrails.config import settings
 from guardrails.engine import get_engine, GuardrailResult
+from guardrails.output import evaluate_output, OutputCheckResult
 from shared_py.logging_config import configure_logging, get_logger
 
 configure_logging(level=settings.log_level)
@@ -25,6 +26,17 @@ class EvaluateRequest(BaseModel):
 
 
 class EvaluateResponse(BaseModel):
+    allowed: bool
+    reason: str | None = None
+    flagged_categories: list[str] = Field(default_factory=list)
+    confidence: float = 1.0
+
+
+class EvaluateOutputRequest(BaseModel):
+    text: str = Field(..., min_length=0, max_length=50000, description="AI response text to evaluate")
+
+
+class EvaluateOutputResponse(BaseModel):
     allowed: bool
     reason: str | None = None
     flagged_categories: list[str] = Field(default_factory=list)
@@ -111,3 +123,24 @@ async def evaluate_batch(reqs: list[EvaluateRequest]) -> list[EvaluateResponse]:
             )
         )
     return results
+
+
+@app.post("/evaluate/output", response_model=EvaluateOutputResponse)
+async def evaluate_output_endpoint(req: EvaluateOutputRequest) -> EvaluateOutputResponse:
+    if not settings.guardrails_enabled:
+        return EvaluateOutputResponse(allowed=True)
+
+    result = evaluate_output(req.text)
+
+    if not result.allowed:
+        logger.warning(
+            "Guardrails blocked output: categories=%s",
+            result.flagged_categories,
+        )
+
+    return EvaluateOutputResponse(
+        allowed=result.allowed,
+        reason=result.reason,
+        flagged_categories=result.flagged_categories,
+        confidence=result.confidence,
+    )
