@@ -10,12 +10,10 @@ from pydantic import BaseModel, Field
 
 from guardrails.config import settings
 from guardrails.engine import get_engine, GuardrailResult
+from shared_py.logging_config import configure_logging, get_logger
 
-logging.basicConfig(
-    level=getattr(logging, settings.log_level.upper(), logging.INFO),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger(__name__)
+configure_logging(level=settings.log_level)
+logger = get_logger("guardrails")
 
 
 # ─── Pydantic Models ────────────────────────────────────────────────────────
