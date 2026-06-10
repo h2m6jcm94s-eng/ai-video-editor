@@ -117,6 +117,8 @@ class TestProbeMocked:
         mock_container.duration = 5000000
         mock_container.format = MagicMock()
         mock_container.format.name = "mp4"
+        mock_container.__enter__.return_value = mock_container
+        mock_container.__exit__.return_value = False
         mock_av_open.return_value = mock_container
 
         info = probe_video("fake.mp4")

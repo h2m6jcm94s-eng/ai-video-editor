@@ -53,7 +53,7 @@ class TestFullPipeline:
         try:
             create_test_video(path, duration=5.0)
             info = probe_video(path)
-            assert info.duration_s > 4.0
+            assert info["duration_sec"] > 4.0
             assert info.width == 640
             assert info.height == 480
             assert info.fps > 0

@@ -42,7 +42,7 @@ class TestIntegration:
         try:
             create_test_video(path, duration=5.0)
             info = probe_video(path)
-            assert info.duration_s > 4.0
+            assert info["duration_sec"] > 4.0
 
             subprocess.run(
                 ["ffmpeg", "-y", "-i", path, "-vn", "-acodec", "pcm_s16le",
