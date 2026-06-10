@@ -2,37 +2,19 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import { useForm } from "react-hook-form";
+import { renderOptionsSchema } from "@ai-video-editor/shared-types";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Film, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-} from "@/components/ui/form";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { renderOptionsSchema } from "@ai-video-editor/shared-types";
+import { useForm } from "react-hook-form";
+import { toast } from "sonner";
 import type { z } from "zod";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useApi } from "@/lib/api/client";
 import { APIError } from "@/lib/api/error";
 import { mapApiValidationErrors } from "@/lib/api/formErrors";
-import { toast } from "sonner";
 
 const EXPORT_PRESETS = [
   { value: "youtube_16_9", label: "YouTube 16:9" },
@@ -66,6 +48,22 @@ export function RenderOptionsDialog({ open, onOpenChange, projectId, onJobStart 
       onJobStart?.(res.job.id);
       onOpenChange(false);
     } catch (err) {
+      if (err instanceof APIError && err.code === "RENDER_ALREADY_RUNNING") {
+        const details = err.details as { jobId?: string } | undefined;
+        toast.info("Render already in progress", {
+          description: "Wait for the current render to finish",
+          action: details?.jobId
+            ? {
+                label: "View",
+                onClick: () => {
+                  if (details.jobId) onJobStart?.(details.jobId);
+                },
+              }
+            : undefined,
+        });
+        onOpenChange(false);
+        return;
+      }
       if (err instanceof APIError && mapApiValidationErrors(err, form.setError)) {
         return;
       }
@@ -111,8 +109,17 @@ export function RenderOptionsDialog({ open, onOpenChange, projectId, onJobStart 
               <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
-              <Button type="submit" size="sm" disabled={!form.formState.isValid || form.formState.isSubmitting} className="gap-2 bg-indigo-600 hover:bg-indigo-700">
-                {form.formState.isSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Film className="h-3.5 w-3.5" />}
+              <Button
+                type="submit"
+                size="sm"
+                disabled={!form.formState.isValid || form.formState.isSubmitting}
+                className="gap-2 bg-indigo-600 hover:bg-indigo-700"
+              >
+                {form.formState.isSubmitting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Film className="h-3.5 w-3.5" />
+                )}
                 Start Render
               </Button>
             </div>

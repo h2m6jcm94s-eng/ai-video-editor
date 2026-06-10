@@ -57,7 +57,9 @@ export async function renderRoutes(app: FastifyInstance) {
         where: and(eq(renders.projectId, body.projectId), inArray(renders.status, ["queued", "running"])),
       });
       if (existing) {
-        return sendError(reply, 409, "Render already in progress", "CONFLICT", { jobId: existing.id });
+        return sendError(reply, 409, "Render already in progress", "RENDER_ALREADY_RUNNING", {
+          jobId: existing.id,
+        });
       }
 
       const [job] = await db
