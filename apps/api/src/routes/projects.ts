@@ -307,10 +307,10 @@ export async function projectRoutes(app: FastifyInstance) {
       where: eq(projects.id, id),
     });
     if (!project) {
-      return reply.status(404).send({ error: "Not found", code: "NOT_FOUND" });
+      return sendError(reply, 404, "Not found", "NOT_FOUND");
     }
     if (project.userId !== userId) {
-      return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
 
     // Clean up assets from R2 asynchronously (don't block response)
