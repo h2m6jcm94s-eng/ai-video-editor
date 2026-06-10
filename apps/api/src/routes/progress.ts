@@ -1,9 +1,9 @@
 ﻿// Copyright (c) 2025 Devayan Dewri. All rights reserved.
+import { eq } from "drizzle-orm";
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
 import { FastifyInstance } from "fastify";
 import Redis from "ioredis";
-import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { renders } from "../db/schema";
 import { sendError } from "../lib/errors";
@@ -37,9 +37,10 @@ export async function progressRoutes(app: FastifyInstance) {
       Connection: "keep-alive",
     });
 
-    // Replay missed events if client reconnects with Last-Event-ID
+    // Replay missed events if client reconnects with Last-Event-ID header or query param
     const lastEventIdHeader = (request.headers["last-event-id"] as string) || "";
-    const lastEventId = parseInt(lastEventIdHeader, 10);
+    const lastEventIdQuery = (request.query as Record<string, string>).lastEventId || "";
+    const lastEventId = parseInt(lastEventIdHeader || lastEventIdQuery, 10);
     if (!isNaN(lastEventId) && lastEventId > 0) {
       const missed = await getBufferedEvents(jobId, lastEventId);
       for (const event of missed) {
