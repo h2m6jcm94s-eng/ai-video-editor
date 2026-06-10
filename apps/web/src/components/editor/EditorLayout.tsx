@@ -2,18 +2,35 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import { useEffect, useCallback, useState, useRef, useMemo } from "react";
-import { useRouter } from "next/navigation";
-import dynamic from "next/dynamic";
 import { useUser } from "@clerk/nextjs";
-import { ChevronLeft, Play, Pause, RotateCcw, Subtitles, Smartphone, Save, FolderOpen, CheckCircle2, AlertCircle, Loader2, Command as CommandIcon, Wand2, Film, Type, Music, Settings } from "lucide-react";
+import {
+  ChevronLeft,
+  Command as CommandIcon,
+  Film,
+  FolderOpen,
+  Loader2,
+  Music,
+  Pause,
+  Play,
+  RotateCcw,
+  Save,
+  Settings,
+  Smartphone,
+  Subtitles,
+  Type,
+  Wand2,
+} from "lucide-react";
+import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PresenceCursors } from "./PresenceCursors";
+import { ProgressBar } from "./ProgressBar";
+import { InspectorPanel } from "./panels/InspectorPanel";
 import { MediaPanel } from "./panels/MediaPanel";
 import { PreviewPanel } from "./panels/PreviewPanel";
-import { InspectorPanel } from "./panels/InspectorPanel";
 import { TimelinePanel } from "./panels/TimelinePanel";
 import { RenderButton } from "./RenderButton";
-import { ProgressBar } from "./ProgressBar";
-import { PresenceCursors } from "./PresenceCursors";
+
 const PromptPanel = dynamic(() => import("./panels/PromptPanel").then((m) => m.PromptPanel), {
   loading: () => (
     <div className="bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl flex flex-col h-[400px] items-center justify-center">
@@ -21,15 +38,18 @@ const PromptPanel = dynamic(() => import("./panels/PromptPanel").then((m) => m.P
     </div>
   ),
 });
-import { TemplateSaveDialog } from "./TemplateSaveDialog";
-import { TemplateLoadDialog } from "./TemplateLoadDialog";
-import { CommandPalette, useCommandPalette, type CommandAction } from "@/components/cmdk/CommandPalette";
+
+import { toast } from "sonner";
+import { type CommandAction, CommandPalette, useCommandPalette } from "@/components/cmdk/CommandPalette";
 import { useEditor } from "@/hooks/useEditor";
 import { useTimeline } from "@/hooks/useTimeline";
 import { useApi } from "@/lib/api/client";
 import { APIError } from "@/lib/api/error";
-import { toast } from "sonner";
-import type { Project, Asset, CutList } from "@/types/api";
+import { useAutosave } from "@/lib/hooks/useAutosave";
+import type { Asset, CutList, Project } from "@/types/api";
+import { SaveStatusBadge } from "./SaveStatusBadge";
+import { TemplateLoadDialog } from "./TemplateLoadDialog";
+import { TemplateSaveDialog } from "./TemplateSaveDialog";
 
 interface EditorLayoutProps {
   project: Project;
@@ -51,7 +71,6 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
   const [transcribing, setTranscribing] = useState(false);
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [loadTemplateOpen, setLoadTemplateOpen] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "failed">("saved");
   const [cmdkOpen, setCmdkOpen] = useState(false);
   const api = useApi();
 
@@ -63,7 +82,6 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
       globals: { ...state.cutList.globals, aspectRatio: ratio },
     });
   };
-  const lastSavedRef = useRef<string>("");
   const undoStackRef = useRef<CutList[]>([]);
   const redoStackRef = useRef<CutList[]>([]);
 
@@ -71,42 +89,20 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
     actions.setAssets(assets);
   }, [assets, actions]);
 
-  // Autosave cutlist with debounce
-  useEffect(() => {
-    if (!state.cutList) return;
-    const json = JSON.stringify(state.cutList);
-    if (json === lastSavedRef.current) return;
+  const handleRollback = useCallback(
+    (cl: CutList) => {
+      actions.setCutList(cl);
+      toast.error("Autosave failed — rolled back to last saved state. Click retry to try again.");
+    },
+    [actions],
+  );
 
-    const timer = setTimeout(() => {
-      setSaveStatus("saving");
-      api.projects
-        .updateCutlist(project.id, state.cutList as CutList)
-        .then(() => {
-          lastSavedRef.current = json;
-          setSaveStatus("saved");
-        })
-        .catch((err) => {
-          setSaveStatus("failed");
-          toast.error(err instanceof APIError ? err.userMessage : "Autosave failed", {
-            action: {
-              label: "Retry",
-              onClick: () => {
-                setSaveStatus("saving");
-                api.projects
-                  .updateCutlist(project.id, state.cutList as CutList)
-                  .then(() => {
-                    lastSavedRef.current = json;
-                    setSaveStatus("saved");
-                  })
-                  .catch(() => setSaveStatus("failed"));
-              },
-            },
-          });
-        });
-    }, 1500);
-
-    return () => clearTimeout(timer);
-  }, [state.cutList, project.id, api]);
+  const { state: saveState, retry: retrySave } = useAutosave({
+    projectId: project.id,
+    cutList: state.cutList,
+    onRollback: handleRollback,
+    debounceMs: 1500,
+  });
 
   // Push to undo stack on meaningful changes
   useEffect(() => {
@@ -140,24 +136,86 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
     }
   }, [actions]);
 
-  const handlePromptUpdate = useCallback((cutList: CutList) => {
-    pushUndo(cutList);
-    actions.setCutList(cutList);
-  }, [actions, pushUndo]);
+  const handlePromptUpdate = useCallback(
+    (cutList: CutList) => {
+      pushUndo(cutList);
+      actions.setCutList(cutList);
+    },
+    [actions, pushUndo],
+  );
 
   const commandActions = useMemo<CommandAction[]>(
     () => [
-      { id: "play-pause", title: "Play / Pause", shortcut: "Space", icon: <Play className="h-4 w-4" />, section: "Playback", perform: () => timeline.togglePlay() },
-      { id: "seek-start", title: "Seek to start", shortcut: "Home", icon: <RotateCcw className="h-4 w-4" />, section: "Playback", perform: () => timeline.seek(0) },
-      { id: "ai-prompt", title: "Open AI Prompt", shortcut: "P", icon: <Wand2 className="h-4 w-4" />, section: "AI", perform: () => setPromptOpen(true) },
-      { id: "render", title: "Render video", icon: <Film className="h-4 w-4" />, section: "Export", perform: () => { /* render button handles its own state */ } },
-      { id: "add-text", title: "Add text overlay", icon: <Type className="h-4 w-4" />, section: "Overlays", perform: () => toast.info("Select a slot and use the Inspector to add overlays.") },
-      { id: "add-audio", title: "Add audio track", icon: <Music className="h-4 w-4" />, section: "Audio", perform: () => toast.info("Drag a song asset onto the timeline.") },
-      { id: "save-template", title: "Save as template", icon: <Save className="h-4 w-4" />, section: "Templates", perform: () => state.cutList && setSaveTemplateOpen(true) },
-      { id: "load-template", title: "Load template", icon: <FolderOpen className="h-4 w-4" />, section: "Templates", perform: () => setLoadTemplateOpen(true) },
-      { id: "open-settings", title: "Open Settings — API Keys", icon: <Settings className="h-4 w-4" />, section: "Settings", perform: () => router.push("/settings/keys") },
+      {
+        id: "play-pause",
+        title: "Play / Pause",
+        shortcut: "Space",
+        icon: <Play className="h-4 w-4" />,
+        section: "Playback",
+        perform: () => timeline.togglePlay(),
+      },
+      {
+        id: "seek-start",
+        title: "Seek to start",
+        shortcut: "Home",
+        icon: <RotateCcw className="h-4 w-4" />,
+        section: "Playback",
+        perform: () => timeline.seek(0),
+      },
+      {
+        id: "ai-prompt",
+        title: "Open AI Prompt",
+        shortcut: "P",
+        icon: <Wand2 className="h-4 w-4" />,
+        section: "AI",
+        perform: () => setPromptOpen(true),
+      },
+      {
+        id: "render",
+        title: "Render video",
+        icon: <Film className="h-4 w-4" />,
+        section: "Export",
+        perform: () => {
+          /* render button handles its own state */
+        },
+      },
+      {
+        id: "add-text",
+        title: "Add text overlay",
+        icon: <Type className="h-4 w-4" />,
+        section: "Overlays",
+        perform: () => toast.info("Select a slot and use the Inspector to add overlays."),
+      },
+      {
+        id: "add-audio",
+        title: "Add audio track",
+        icon: <Music className="h-4 w-4" />,
+        section: "Audio",
+        perform: () => toast.info("Drag a song asset onto the timeline."),
+      },
+      {
+        id: "save-template",
+        title: "Save as template",
+        icon: <Save className="h-4 w-4" />,
+        section: "Templates",
+        perform: () => state.cutList && setSaveTemplateOpen(true),
+      },
+      {
+        id: "load-template",
+        title: "Load template",
+        icon: <FolderOpen className="h-4 w-4" />,
+        section: "Templates",
+        perform: () => setLoadTemplateOpen(true),
+      },
+      {
+        id: "open-settings",
+        title: "Open Settings — API Keys",
+        icon: <Settings className="h-4 w-4" />,
+        section: "Settings",
+        perform: () => router.push("/settings/keys"),
+      },
     ],
-    [timeline, state.cutList, router]
+    [timeline, state.cutList, router],
   );
 
   useEffect(() => {
@@ -215,7 +273,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
           break;
       }
     },
-    [timeline, actions, state.selectedSlotIndex, handleUndo]
+    [timeline, actions, state.selectedSlotIndex, handleUndo],
   );
 
   useEffect(() => {
@@ -224,9 +282,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
   }, [handleKeyDown]);
 
   const selectedSlot =
-    state.selectedSlotIndex !== null && state.cutList
-      ? state.cutList.slots[state.selectedSlotIndex]
-      : null;
+    state.selectedSlotIndex !== null && state.cutList ? state.cutList.slots[state.selectedSlotIndex] : null;
 
   return (
     <div className="h-screen bg-zinc-950 text-zinc-100 flex flex-col overflow-hidden relative">
@@ -247,21 +303,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
             <span>·</span>
             <span className="capitalize">{project.mode}</span>
             <span>·</span>
-            {saveStatus === "saving" && (
-              <span className="flex items-center gap-1 text-zinc-400">
-                <Loader2 className="w-3 h-3 animate-spin" /> Saving…
-              </span>
-            )}
-            {saveStatus === "saved" && (
-              <span className="flex items-center gap-1 text-green-500">
-                <CheckCircle2 className="w-3 h-3" /> Saved
-              </span>
-            )}
-            {saveStatus === "failed" && (
-              <span className="flex items-center gap-1 text-amber-500">
-                <AlertCircle className="w-3 h-3" /> Save failed
-              </span>
-            )}
+            <SaveStatusBadge state={saveState} onRetry={retrySave} />
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -366,11 +408,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
 
       {/* Main Workspace */}
       <div className="flex-1 flex overflow-hidden">
-        <MediaPanel
-          projectId={project.id}
-          assets={state.assets}
-          onAssetsChange={actions.setAssets}
-        />
+        <MediaPanel projectId={project.id} assets={state.assets} onAssetsChange={actions.setAssets} />
 
         <div className="flex-1 flex flex-col min-w-0">
           <PreviewPanel
