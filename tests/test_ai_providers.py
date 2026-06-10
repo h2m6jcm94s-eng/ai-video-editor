@@ -27,10 +27,8 @@ class TestProviderFactory:
         for name in valid_names:
             try:
                 provider = get_ai_provider(name)
-            except ImportError:
-                continue  # Skip providers with missing optional deps
-            except ValueError:
-                continue  # Skip providers whose API key is not set in this environment
+            except (ImportError, ValueError):
+                continue  # Skip providers with missing optional deps or missing API key
             assert provider is not None
             assert hasattr(provider, "generate_cutlist")
             assert hasattr(provider, "classify_shot")
@@ -50,10 +48,8 @@ class TestProviderFactory:
             provider_lower = get_ai_provider("groq")
             provider_upper = get_ai_provider("GROQ")
             assert type(provider_lower) == type(provider_upper)
-        except ImportError:
-            pytest.skip("openai package not installed")
-        except ValueError:
-            pytest.skip("GROQ_API_KEY not set")
+        except (ImportError, ValueError):
+            pytest.skip("openai package not installed or GROQ_API_KEY not set")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -189,7 +185,7 @@ class TestGroqProvider:
         try:
             get_ai_provider("groq")
             self.available = True
-        except ImportError:
+        except (ImportError, ValueError):
             self.available = False
 
     @patch.dict(os.environ, {"GROQ_API_KEY": "test_key"})
@@ -243,7 +239,7 @@ class TestGroqProvider:
             transition_types=[], camera_motions=[],
             mood="energetic", pacing="fast",
         )
-        result = provider.generate_cutlist(beat_grid, shots, style, [0.5], ["wide"])
+        result = provider.generate_cutlist("test context", {"type": "object"})
         assert result is not None
         assert len(result.slots) == 1
 
@@ -269,14 +265,7 @@ class TestGroqProvider:
         MockClient.return_value.post.side_effect = [mock_429, mock_ok]
 
         from shared_py.models import BeatGrid, BeatSegment, ShotBoundary, StyleAnalysis
-        result = provider.generate_cutlist(
-            BeatGrid(bpm=120, time_signature="4/4", beats=[], beat_positions=[], segments=[], downbeats=[]),
-            [],
-            StyleAnalysis(lut_extracted=False, color_palette=[], text_overlays=[], transition_types=[],
-                          camera_motions=[], mood="neutral", pacing="medium"),
-            [],
-            ["wide"],
-        )
+        result = provider.generate_cutlist("test context", {"type": "object"})
         assert result is not None
 
 
@@ -289,7 +278,7 @@ class TestClaudeProvider:
         try:
             get_ai_provider("claude")
             self.available = True
-        except ImportError:
+        except (ImportError, ValueError):
             self.available = False
 
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test_key"})
@@ -314,12 +303,16 @@ class TestClaudeProvider:
     @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test_key"})
     @patch("shared_py.ai_providers.claude_provider.anthropic.Anthropic")
     def test_generate_cutlist_mocked(self, MockAnthropic):
-        provider = get_ai_provider("claude")
         mock_client = MagicMock()
         mock_message = MagicMock()
-        mock_message.content = [MagicMock(text='''{"globals": {"total_duration_s": 30, "tempo_bpm": 120, "time_signature": "4/4", "energy_curve": [0.5], "section_markers": [], "aspect_ratio": "16:9"}, "slots": [{"index": 0, "start_s": 0, "duration_s": 2, "beat_index": 0, "section": "intro", "transition_in": "hard_cut", "transition_out": "hard_cut", "target_shot_type": "wide", "subject_hint": "test", "motion_hint": "static", "energy_level": 0.5, "required_tags": [], "avoid_tags": [], "selected_clip_id": null, "ranked_clip_ids": null, "confidence": null}], "overlays": []}''')]
+        mock_block = MagicMock()
+        mock_block.type = "tool_use"
+        mock_block.name = "emit_cutlist"
+        mock_block.input = {"globals": {"total_duration_s": 30, "tempo_bpm": 120, "time_signature": "4/4", "energy_curve": [0.5], "section_markers": [], "aspect_ratio": "16:9"}, "slots": [{"index": 0, "start_s": 0, "duration_s": 2, "beat_index": 0, "section": "intro", "transition_in": "hard_cut", "transition_out": "hard_cut", "target_shot_type": "wide", "subject_hint": "test", "motion_hint": "static", "energy_level": 0.5, "required_tags": [], "avoid_tags": [], "selected_clip_id": None, "ranked_clip_ids": None, "confidence": None}], "overlays": []}
+        mock_message.content = [mock_block]
         mock_client.messages.create.return_value = mock_message
         MockAnthropic.return_value = mock_client
+        provider = get_ai_provider("claude")
 
         from shared_py.models import BeatGrid, BeatSegment, ShotBoundary, StyleAnalysis
         beat_grid = BeatGrid(
@@ -335,7 +328,7 @@ class TestClaudeProvider:
             transition_types=[], camera_motions=[],
             mood="energetic", pacing="fast",
         )
-        result = provider.generate_cutlist(beat_grid, shots, style, [0.5], ["wide"])
+        result = provider.generate_cutlist("test context", {"type": "object"})
         assert result is not None
         assert len(result.slots) == 1
 
@@ -349,7 +342,7 @@ class TestGeminiProvider:
         try:
             get_ai_provider("gemini")
             self.available = True
-        except ImportError:
+        except (ImportError, ValueError):
             self.available = False
 
     @patch.dict(os.environ, {"GOOGLE_API_KEY": "test_key"})
@@ -368,7 +361,7 @@ class TestGeminiProvider:
             get_ai_provider("gemini")
 
     @pytest.mark.skipif(
-        __import__("importlib").util.find_spec("google") is None,
+        __import__("importlib").util.find_spec("google.generativeai") is None,
         reason="google-generativeai package not installed",
     )
     @patch.dict(os.environ, {"GOOGLE_API_KEY": "test_key"})
@@ -382,14 +375,7 @@ class TestGeminiProvider:
         MockModel.return_value = mock_model
 
         from shared_py.models import BeatGrid, BeatSegment, ShotBoundary, StyleAnalysis
-        result = provider.generate_cutlist(
-            BeatGrid(bpm=120, time_signature="4/4", beats=[], beat_positions=[], segments=[], downbeats=[0]),
-            [ShotBoundary(start_s=0.0, end_s=3.0, start_frame=0, end_frame=90)],
-            StyleAnalysis(lut_extracted=False, color_palette=[], text_overlays=[], transition_types=[],
-                          camera_motions=[], mood="neutral", pacing="medium"),
-            [0.5],
-            ["wide"],
-        )
+        result = provider.generate_cutlist("test context", {"type": "object"})
         assert result is not None
         assert len(result.slots) == 1
 
@@ -403,7 +389,7 @@ class TestOpenAIProvider:
         try:
             get_ai_provider("openai")
             self.available = True
-        except ImportError:
+        except (ImportError, ValueError):
             self.available = False
 
     @patch.dict(os.environ, {"OPENAI_API_KEY": "test_key"})
@@ -438,14 +424,7 @@ class TestOpenAIProvider:
         MockOpenAI.return_value = mock_client
 
         from shared_py.models import BeatGrid, BeatSegment, ShotBoundary, StyleAnalysis
-        result = provider.generate_cutlist(
-            BeatGrid(bpm=120, time_signature="4/4", beats=[], beat_positions=[], segments=[], downbeats=[0]),
-            [ShotBoundary(start_s=0.0, end_s=3.0, start_frame=0, end_frame=90)],
-            StyleAnalysis(lut_extracted=False, color_palette=[], text_overlays=[], transition_types=[],
-                          camera_motions=[], mood="neutral", pacing="medium"),
-            [0.5],
-            ["wide"],
-        )
+        result = provider.generate_cutlist("test context", {"type": "object"})
         assert result is not None
         assert len(result.slots) == 1
 
@@ -459,7 +438,7 @@ class TestQwenProvider:
         try:
             get_ai_provider("qwen")
             self.available = True
-        except ImportError:
+        except (ImportError, ValueError):
             self.available = False
 
     @patch.dict(os.environ, {"QWEN_API_KEY": "test_key"})
@@ -494,14 +473,7 @@ class TestQwenProvider:
         MockOpenAI.return_value = mock_client
 
         from shared_py.models import BeatGrid, BeatSegment, ShotBoundary, StyleAnalysis
-        result = provider.generate_cutlist(
-            BeatGrid(bpm=120, time_signature="4/4", beats=[], beat_positions=[], segments=[], downbeats=[0]),
-            [ShotBoundary(start_s=0.0, end_s=3.0, start_frame=0, end_frame=90)],
-            StyleAnalysis(lut_extracted=False, color_palette=[], text_overlays=[], transition_types=[],
-                          camera_motions=[], mood="neutral", pacing="medium"),
-            [0.5],
-            ["wide"],
-        )
+        result = provider.generate_cutlist("test context", {"type": "object"})
         assert result is not None
         assert len(result.slots) == 1
 
@@ -522,14 +494,7 @@ class TestQwenProvider:
         MockOpenAI.return_value = mock_client
 
         from shared_py.models import BeatGrid, BeatSegment, ShotBoundary, StyleAnalysis
-        result = provider.generate_cutlist(
-            BeatGrid(bpm=120, time_signature="4/4", beats=[], beat_positions=[], segments=[], downbeats=[0]),
-            [ShotBoundary(start_s=0.0, end_s=3.0, start_frame=0, end_frame=90)],
-            StyleAnalysis(lut_extracted=False, color_palette=[], text_overlays=[], transition_types=[],
-                          camera_motions=[], mood="neutral", pacing="medium"),
-            [0.5],
-            ["wide"],
-        )
+        result = provider.generate_cutlist("test context", {"type": "object"})
         assert result is not None
         assert len(result.slots) == 1
 
@@ -582,7 +547,7 @@ class TestProviderEdgeCases:
         try:
             get_ai_provider("groq")
             self.available = True
-        except ImportError:
+        except (ImportError, ValueError):
             self.available = False
 
     @patch.dict(os.environ, {"GROQ_API_KEY": "test_key"})
@@ -601,14 +566,7 @@ class TestProviderEdgeCases:
         MockClient.return_value.post.return_value = mock_response
 
         from shared_py.models import BeatGrid, BeatSegment, ShotBoundary, StyleAnalysis
-        result = provider.generate_cutlist(
-            BeatGrid(bpm=120, time_signature="4/4", beats=[], beat_positions=[], segments=[], downbeats=[]),
-            [],
-            StyleAnalysis(lut_extracted=False, color_palette=[], text_overlays=[], transition_types=[],
-                          camera_motions=[], mood="neutral", pacing="medium"),
-            [],
-            ["wide"],
-        )
+        result = provider.generate_cutlist("test context", {"type": "object"})
         # Should fall back to programmatic
         assert result is not None
 
@@ -628,14 +586,7 @@ class TestProviderEdgeCases:
         MockClient.return_value.post.return_value = mock_response
 
         from shared_py.models import BeatGrid, BeatSegment, ShotBoundary, StyleAnalysis
-        result = provider.generate_cutlist(
-            BeatGrid(bpm=120, time_signature="4/4", beats=[], beat_positions=[], segments=[], downbeats=[]),
-            [],
-            StyleAnalysis(lut_extracted=False, color_palette=[], text_overlays=[], transition_types=[],
-                          camera_motions=[], mood="neutral", pacing="medium"),
-            [],
-            ["wide"],
-        )
+        result = provider.generate_cutlist("test context", {"type": "object"})
         # Should fall back to programmatic since empty slots are invalid
         assert result is not None
         assert len(result.slots) > 0
@@ -656,14 +607,7 @@ class TestProviderEdgeCases:
         MockClient.return_value.post.return_value = mock_response
 
         from shared_py.models import BeatGrid, BeatSegment, ShotBoundary, StyleAnalysis
-        result = provider.generate_cutlist(
-            BeatGrid(bpm=120, time_signature="4/4", beats=[], beat_positions=[], segments=[], downbeats=[]),
-            [],
-            StyleAnalysis(lut_extracted=False, color_palette=[], text_overlays=[], transition_types=[],
-                          camera_motions=[], mood="neutral", pacing="medium"),
-            [],
-            ["wide"],
-        )
+        result = provider.generate_cutlist("test context", {"type": "object"})
         assert result is not None
         assert len(result.slots) == 1
 
@@ -673,7 +617,7 @@ class TestProviderEdgeCases:
         for n in names:
             try:
                 providers.append(get_ai_provider(n))
-            except ImportError:
+            except (ImportError, ValueError):
                 pass  # Skip providers with missing deps
         assert len(providers) >= 1  # At least programmatic works
         assert all(isinstance(p, AIProvider) for p in providers)
