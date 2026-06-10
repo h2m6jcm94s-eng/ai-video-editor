@@ -257,21 +257,21 @@ class TestCutlistSchema:
         required_slot = CUTLIST_SCHEMA["properties"]["slots"]["items"]["required"]
 
         assert "index" in required_slot
-        assert "start_s" in required_slot
-        assert "duration_s" in required_slot
-        assert "beat_index" in required_slot
-        assert "target_shot_type" in required_slot
-        assert "energy_level" in required_slot
+        assert "startS" in required_slot
+        assert "durationS" in required_slot
+        assert "beatIndex" in required_slot
+        assert "targetShotType" in required_slot
+        assert "energyLevel" in required_slot
 
     def test_schema_energy_level_constraint(self):
         slot_schema = CUTLIST_SCHEMA["properties"]["slots"]["items"]["properties"]
-        energy = slot_schema["energy_level"]
+        energy = slot_schema["energyLevel"]
         assert energy["minimum"] == 0
         assert energy["maximum"] == 1
 
     def test_schema_transition_enum(self):
         slot_schema = CUTLIST_SCHEMA["properties"]["slots"]["items"]["properties"]
-        transitions = slot_schema["transition_in"]["enum"]
+        transitions = slot_schema["transitionIn"]["enum"]
         assert "hard_cut" in transitions
         assert "whip" in transitions
         assert "flash" in transitions
@@ -279,7 +279,7 @@ class TestCutlistSchema:
 
     def test_schema_shot_type_enum(self):
         slot_schema = CUTLIST_SCHEMA["properties"]["slots"]["items"]["properties"]
-        shot_types = slot_schema["target_shot_type"]["enum"]
+        shot_types = slot_schema["targetShotType"]["enum"]
         assert "wide" in shot_types
         assert "close_up" in shot_types
         assert "insert" in shot_types
