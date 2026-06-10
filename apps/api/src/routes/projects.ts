@@ -196,7 +196,12 @@ export async function projectRoutes(app: FastifyInstance) {
       const code = rawCode && API_ERROR_CODES.includes(rawCode as any)
         ? (rawCode as (typeof API_ERROR_CODES)[number])
         : "INTERNAL_ERROR";
-      const status = code === "PROVIDER_KEY_MISSING" ? 400 : 500;
+      const status =
+        code === "PROVIDER_KEY_MISSING" || code === "AI_REFUSED"
+          ? 400
+          : code === "CUTLIST_SCHEMA_DRIFT" || code === "AI_INVALID_JSON"
+            ? 422
+            : 500;
       if (err instanceof Error) {
         const message = err.message || "Transcription failed";
         return sendError(reply, status, message, code);

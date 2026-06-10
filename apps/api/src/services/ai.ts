@@ -5,12 +5,14 @@
  * Mirrors the Python provider system but runs in Node.js for low-latency API calls.
  */
 
+import { z } from "zod";
 import { eq, and } from "drizzle-orm";
 import { db } from "../db";
 import { providerKeys } from "../db/schema";
 import { aiCallsTotal, aiCallDurationSeconds } from "../lib/metrics";
 import { countTokens } from "../lib/tokens";
 import { decrypt as aesDecrypt } from "../lib/crypto";
+import { cutListSchema } from "@ai-video-editor/shared-types";
 
 async function getProviderKey(userId: string, provider: "anthropic" | "openai"): Promise<string | undefined> {
   const row = await db.query.providerKeys.findFirst({
@@ -57,6 +59,42 @@ Return ONLY this JSON structure:
   "explanation": "string"
 }`;
 
+const promptEditResponseSchema = z
+  .object({
+    diff: z.array(z.record(z.unknown())),
+    explanation: z.string().min(1),
+  })
+  .strict();
+
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit & { maxRetries?: number }
+): Promise<Response> {
+  const maxRetries = init.maxRetries ?? 3;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, init);
+      if (res.ok) return res;
+
+      const retryable = [429, 502, 503, 504];
+      if (!retryable.includes(res.status) || attempt === maxRetries) {
+        return res;
+      }
+    } catch (err) {
+      if (!(err instanceof TypeError) || attempt === maxRetries) {
+        throw err;
+      }
+    }
+
+    const baseDelay = Math.min(1000 * 2 ** attempt, 8000);
+    const jitter = Math.random() * baseDelay;
+    await new Promise((r) => setTimeout(r, baseDelay + jitter));
+  }
+
+  throw new Error("Fetch retry exhausted");
+}
+
 async function callClaude(context: PromptEditContext): Promise<PromptEditResult> {
   const start = performance.now();
   const anthropicKey = (await getProviderKey(context.userId, "anthropic")) || process.env.ANTHROPIC_API_KEY || "";
@@ -67,7 +105,7 @@ async function callClaude(context: PromptEditContext): Promise<PromptEditResult>
     throw err;
   }
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetchWithRetry("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "x-api-key": anthropicKey,
@@ -94,7 +132,21 @@ async function callClaude(context: PromptEditContext): Promise<PromptEditResult>
     throw error;
   }
 
-  const data = (await res.json()) as { content: Array<{ type: string; text: string }> };
+  const data = (await res.json()) as {
+    content: Array<{ type: string; text: string }>;
+    stop_reason?: string;
+  };
+
+  if (data.stop_reason === "refusal") {
+    aiCallsTotal.inc({ provider: "claude", status: "refusal" });
+    aiCallDurationSeconds.observe({ provider: "claude" }, (performance.now() - start) / 1000);
+    const err: Error & { code?: string } = new Error(
+      "The AI refused to process this request due to safety policies."
+    );
+    err.code = "AI_REFUSED";
+    throw err;
+  }
+
   const text = data.content?.[0]?.text || "{}";
   aiCallsTotal.inc({ provider: "claude", status: "success" });
   aiCallDurationSeconds.observe({ provider: "claude" }, (performance.now() - start) / 1000);
@@ -103,7 +155,7 @@ async function callClaude(context: PromptEditContext): Promise<PromptEditResult>
   result.usage = {
     promptTokens: await countTokens(promptText),
     completionTokens: await countTokens(text),
-    totalTokens: await countTokens(promptText) + await countTokens(text),
+    totalTokens: (await countTokens(promptText)) + (await countTokens(text)),
   };
   return result;
 }
@@ -118,7 +170,7 @@ async function callOpenAI(context: PromptEditContext): Promise<PromptEditResult>
     throw err;
   }
 
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+  const res = await fetchWithRetry("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       authorization: `Bearer ${openaiKey}`,
@@ -147,7 +199,20 @@ async function callOpenAI(context: PromptEditContext): Promise<PromptEditResult>
     throw error;
   }
 
-  const data = (await res.json()) as { choices: Array<{ message: { content: string } }> };
+  const data = (await res.json()) as {
+    choices: Array<{ message: { content: string }; finish_reason?: string }>;
+  };
+
+  if (data.choices?.[0]?.finish_reason === "content_filter") {
+    aiCallsTotal.inc({ provider: "openai", status: "content_filter" });
+    aiCallDurationSeconds.observe({ provider: "openai" }, (performance.now() - start) / 1000);
+    const err: Error & { code?: string } = new Error(
+      "The AI response was blocked by content filters."
+    );
+    err.code = "AI_REFUSED";
+    throw err;
+  }
+
   const text = data.choices?.[0]?.message?.content || "{}";
   aiCallsTotal.inc({ provider: "openai", status: "success" });
   aiCallDurationSeconds.observe({ provider: "openai" }, (performance.now() - start) / 1000);
@@ -156,7 +221,7 @@ async function callOpenAI(context: PromptEditContext): Promise<PromptEditResult>
   result.usage = {
     promptTokens: await countTokens(promptText),
     completionTokens: await countTokens(text),
-    totalTokens: await countTokens(promptText) + await countTokens(text),
+    totalTokens: (await countTokens(promptText)) + (await countTokens(text)),
   };
   return result;
 }
@@ -182,15 +247,28 @@ function parseResponse(text: string): PromptEditResult {
     .replace(/^```\s*/, "")
     .replace(/\s*```$/, "");
 
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(cleaned) as Partial<PromptEditResult>;
-    return {
-      diff: Array.isArray(parsed.diff) ? parsed.diff : [],
-      explanation: typeof parsed.explanation === "string" ? parsed.explanation : "No explanation provided",
-    };
+    parsed = JSON.parse(cleaned);
   } catch {
-    return { diff: [], explanation: text.slice(0, 500) };
+    const err: Error & { code?: string } = new Error("AI response is not valid JSON");
+    err.code = "AI_INVALID_JSON";
+    throw err;
   }
+
+  const validated = promptEditResponseSchema.safeParse(parsed);
+  if (!validated.success) {
+    const err: Error & { code?: string } = new Error(
+      `AI response schema invalid: ${validated.error.issues.map((i) => i.message).join(", ")}`
+    );
+    err.code = "AI_INVALID_JSON";
+    throw err;
+  }
+
+  return {
+    diff: validated.data.diff,
+    explanation: validated.data.explanation,
+  };
 }
 
 function applyJsonPatch(target: unknown, patch: unknown[]): unknown {
@@ -363,6 +441,17 @@ export async function applyPromptEdit(
   }
 
   const newCutList = applyJsonPatch(context.cutList, result.diff);
+
+  const parseResult = cutListSchema.safeParse(newCutList);
+  if (!parseResult.success) {
+    const err: Error & { code?: string; details?: unknown } = new Error(
+      `Generated cut list does not match schema: ${parseResult.error.issues.map((i) => i.message).join(", ")}`
+    );
+    err.code = "CUTLIST_SCHEMA_DRIFT";
+    err.details = parseResult.error.issues;
+    throw err;
+  }
+
   const promptText = buildPrompt(context);
   const usage = result.usage || {
     promptTokens: await countTokens(promptText),

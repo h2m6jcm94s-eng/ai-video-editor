@@ -18,8 +18,10 @@ describe("Project Prompt Route", () => {
     songAssetId: null,
     clipAssetIds: [],
     cutList: {
-      globals: { total_duration_s: 30 },
-      slots: [{ index: 0, start_s: 0, duration_s: 5 }],
+      globals: { totalDurationS: 30, tempoBpm: 120, timeSignature: "4/4", energyCurve: [], sectionMarkers: [], aspectRatio: "9:16" },
+      slots: [{ index: 0, startS: 0, durationS: 5, beatIndex: 0, section: "intro", transitionIn: "hard_cut", transitionOut: "hard_cut", targetShotType: "wide", subjectHint: "establishing", motionHint: "static", energyLevel: 0.5, requiredTags: [], avoidTags: [], effects: [] }],
+      overlays: [],
+      audioTracks: [],
     },
     renderAssetId: null,
     createdAt: new Date(),
@@ -38,7 +40,7 @@ describe("Project Prompt Route", () => {
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
       json: async () => ({
-        content: [{ type: "text", text: JSON.stringify({ diff: [{ op: "replace", path: "/slots/0/duration_s", value: 10 }], explanation: "Extended" }) }],
+        content: [{ type: "text", text: JSON.stringify({ diff: [{ op: "replace", path: "/slots/0/durationS", value: 10 }], explanation: "Extended" }) }],
       }),
       ok: true,
       status: 200,
