@@ -452,6 +452,7 @@ vi.mock("../db", () => ({
    - **Regression risks** — what could break and how it's guarded against
 8. **No spam bots.** We intentionally do NOT use pr-agent, Danger, semantic-pr, or any workflow that posts PR comments or sends email spam. Auto-labels only (path-based + first-time contributor + keyword matching).
 9. **Merge ONLY when ALL CI checks pass.** Zero exceptions. A "pre-existing failure" is not an excuse — fix it first, then merge. Use squash merge. Keep commit messages descriptive.
+10. **Delete branches after merge.** The repo has `delete_branch_on_merge` enabled, so GitHub auto-deletes head branches on PR merge. Locally, run `pnpm branch:clean` weekly to prune merged tracking refs and identify stale branches (>30 days old).
 
 ### Commit Message Format
 

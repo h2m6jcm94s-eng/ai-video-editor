@@ -322,6 +322,7 @@ Maintainers review for:
 - All CI checks must pass
 - At least one maintainer approval required
 - PR description becomes the squash commit message
+- **Head branches are auto-deleted on merge** (repo setting enabled). Run `pnpm branch:clean` locally every week to prune stale tracking refs and identify branches older than 30 days.
 
 ---
 

@@ -11,6 +11,7 @@
     "obs:up": "docker compose -f infra/observability/docker-compose.yml up -d",
     "obs:down": "docker compose -f infra/observability/docker-compose.yml down",
     "obs:logs": "docker compose -f infra/observability/docker-compose.yml logs -f",
+    "branch:clean": "bash scripts/clean-branches.sh",
     "prepare": "husky"
   },
   "devDependencies": {
