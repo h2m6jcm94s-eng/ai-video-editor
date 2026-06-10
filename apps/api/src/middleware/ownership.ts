@@ -5,6 +5,7 @@ import type { FastifyRequest, FastifyReply } from "fastify";
 import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { projects } from "../db/schema";
+import { sendError } from "../lib/errors";
 
 export async function requireProjectOwnership(
   request: FastifyRequest,
@@ -15,10 +16,10 @@ export async function requireProjectOwnership(
     where: eq(projects.id, id),
   });
   if (!project) {
-    return reply.status(404).send({ error: "Not found", code: "NOT_FOUND" });
+    return sendError(reply, 404, "Not found", "NOT_FOUND");
   }
   if (project.userId !== request.userId) {
-    return reply.status(403).send({ error: "Forbidden", code: "FORBIDDEN" });
+    return sendError(reply, 403, "Forbidden", "FORBIDDEN");
   }
   request.project = project;
 }
