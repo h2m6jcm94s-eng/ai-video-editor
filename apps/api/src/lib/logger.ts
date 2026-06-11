@@ -96,7 +96,7 @@ export function getLoggerConfig() {
  */
 export function generateRequestId(request?: FastifyRequest | RawRequestDefaultExpression): string {
   if (request) {
-    const headers = (request as any).headers || {};
+    const headers = request.headers || {};
     const clientId = headers["x-request-id"] || headers["x-correlation-id"];
     if (typeof clientId === "string" && clientId.length > 0) {
       return clientId;
