@@ -22,51 +22,55 @@ const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
 
 export async function notificationRoutes(app: FastifyInstance) {
   // SSE endpoint for live notification updates
-  app.get("/events", async (request, reply) => {
-    const userId = request.userId;
-    if (!userId) {
-      return sendError(reply, 401, "Sign in required", "UNAUTHORIZED");
-    }
-
-    reply.raw.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    });
-
-    reply.raw.write(`data: ${JSON.stringify({ type: "connected" })}
-
-`);
-
-    const channel = `user:${userId}:events`;
-    const subscriber = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
-    await subscriber.subscribe(channel);
-
-    const messageHandler = (ch: string, message: string) => {
-      if (ch === channel) {
-        reply.raw.write(`data: ${message}
-
-`);
+  app.get(
+    "/events",
+    { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } },
+    async (request, reply) => {
+      const userId = request.userId;
+      if (!userId) {
+        return sendError(reply, 401, "Sign in required", "UNAUTHORIZED");
       }
-    };
-    subscriber.on("message", messageHandler);
 
-    const heartbeat = setInterval(() => {
-      reply.raw.write(`:heartbeat
+      reply.raw.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+
+      reply.raw.write(`data: ${JSON.stringify({ type: "connected" })}
 
 `);
-    }, 15000);
 
-    const cleanup = () => {
-      clearInterval(heartbeat);
-      subscriber.unsubscribe(channel);
-      subscriber.quit();
-    };
+      const channel = `user:${userId}:events`;
+      const subscriber = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
+      await subscriber.subscribe(channel);
 
-    request.raw.on("close", cleanup);
-    request.raw.on("error", cleanup);
-    reply.raw.on("error", cleanup);
-  });
+      const messageHandler = (ch: string, message: string) => {
+        if (ch === channel) {
+          reply.raw.write(`data: ${message}
+
+`);
+        }
+      };
+      subscriber.on("message", messageHandler);
+
+      const heartbeat = setInterval(() => {
+        reply.raw.write(`:heartbeat
+
+`);
+      }, 15000);
+
+      const cleanup = () => {
+        clearInterval(heartbeat);
+        subscriber.unsubscribe(channel);
+        subscriber.quit();
+      };
+
+      request.raw.on("close", cleanup);
+      request.raw.on("error", cleanup);
+      reply.raw.on("error", cleanup);
+    },
+  );
 
   // List notifications (paginated, cursor-based)
   app.get("/", async (request, reply) => {
