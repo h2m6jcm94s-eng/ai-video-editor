@@ -52,6 +52,12 @@ describe("Logger", () => {
       expect(paths).toContain("req.headers.password");
       expect(paths).toContain("req.headers.token");
       expect(paths).toContain("req.headers.secret");
+      expect(paths).toContain('req.headers["x-internal-token"]');
+      expect(paths).toContain("req.query.apiKey");
+      expect(paths).toContain("req.query.key");
+      expect(paths).toContain("req.body.encryptedKey");
+      expect(paths).toContain("req.body.password");
+      expect(paths).toContain('res.headers["set-cookie"]');
     });
   });
 

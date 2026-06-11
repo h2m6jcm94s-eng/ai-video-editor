@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { register } from "prom-client";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
 
 const originalFetch = global.fetch;
@@ -58,7 +59,7 @@ describe("Guardrails evaluateGuardrails (with enabled env)", () => {
             reason: "Blocked: prompt_injection",
             flagged_categories: ["prompt_injection"],
           }),
-      } as Response)
+      } as Response),
     );
 
     const { evaluateGuardrails } = await import("../middleware/guardrails");
@@ -66,5 +67,48 @@ describe("Guardrails evaluateGuardrails (with enabled env)", () => {
     expect(result.allowed).toBe(false);
     expect(result.reason).toContain("prompt_injection");
     expect(result.flagged_categories).toContain("prompt_injection");
+  });
+
+  it("increments guardrailsBlocksTotal with stage=input and reason=<category> on block", async () => {
+    vi.stubEnv("GUARDRAILS_ENABLED", "true");
+    vi.stubEnv("GUARDRAILS_URL", "http://localhost:8000");
+
+    global.fetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            allowed: false,
+            reason: "Blocked",
+            flagged_categories: ["toxicity"],
+          }),
+      } as Response),
+    );
+
+    const { validatePromptGuardrails } = await import("../middleware/guardrails");
+    const app = await buildApp();
+    const reply = app.inject({
+      method: "POST",
+      url: "/api/projects/proj-1/prompt",
+      payload: { prompt: "bad" },
+    });
+
+    // We can't easily test through the full route because guardrails is a preHandler.
+    // Instead, test the middleware directly.
+    const sendMock = vi.fn();
+    const replyMock = {
+      status: vi.fn(() => ({ send: sendMock })),
+    } as any;
+    await validatePromptGuardrails(
+      { body: { prompt: "bad" }, routeOptions: { url: "/api/projects/:id/prompt" }, log: app.log } as any,
+      replyMock,
+    );
+
+    const metric = register.getSingleMetric("ave_guardrails_blocks_total") as any;
+    const values = metric?.hashMap || {};
+    const inputBlock = Object.keys(values).find(
+      (k: string) => k.includes("stage:input") && k.includes("reason:toxicity"),
+    );
+    expect(inputBlock).toBeDefined();
   });
 });

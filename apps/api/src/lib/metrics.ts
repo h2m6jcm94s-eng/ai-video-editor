@@ -132,14 +132,14 @@ export const rateLimitHitsTotal = getOrCreateCounter({
 
 export const guardrailsBlocksTotal = getOrCreateCounter({
   name: "ave_guardrails_blocks_total",
-  help: "Total guardrails blocks by category and route",
-  labelNames: ["category", "route"],
+  help: "Total guardrails blocks by stage and reason",
+  labelNames: ["stage", "reason"],
 });
 
 export const guardrailsOutputBlocksTotal = getOrCreateCounter({
   name: "ave_guardrails_output_blocks_total",
   help: "Output blocked by guardrails",
-  labelNames: ["category", "provider"],
+  labelNames: ["stage", "reason"],
 });
 
 // ─── Token Budget Metrics ───────────────────────────────────────────────────

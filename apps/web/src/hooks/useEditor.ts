@@ -7,7 +7,7 @@ import type { Asset, AudioTrack, CutList, Effect, Overlay, Slot } from "@/types/
 
 const MAX_UNDO_DEPTH = 50;
 
-interface EditorState {
+export interface EditorState {
   cutList: CutList | null;
   selectedSlotIndex: number | null;
   selectedOverlayId: string | null;
@@ -49,7 +49,7 @@ type EditorAction =
   | { type: "UNDO" }
   | { type: "REDO" };
 
-function editorReducer(state: EditorState, action: EditorAction): EditorState {
+export function editorReducer(state: EditorState, action: EditorAction): EditorState {
   switch (action.type) {
     case "SET_CUTLIST":
       return { ...state, cutList: action.payload };
