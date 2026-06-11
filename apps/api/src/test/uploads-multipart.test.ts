@@ -80,6 +80,10 @@ describe("Multipart Upload Routes", () => {
   });
 
   it("POST /api/uploads/multipart/sign-part returns presigned URL", async () => {
+    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce({
+      ...mockAsset,
+      project: mockProject,
+    } as any);
     vi.mocked(presignUploadPart).mockResolvedValueOnce("https://r2.example.com/part-1");
 
     const app = await buildApp();
@@ -88,7 +92,7 @@ describe("Multipart Upload Routes", () => {
       url: "/api/uploads/multipart/sign-part",
       payload: {
         uploadId: "upload-id-123",
-        key: "projects/test/key",
+        key: mockAsset.storageKey,
         partNumber: 1,
       },
     });

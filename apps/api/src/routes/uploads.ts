@@ -199,6 +199,20 @@ export async function uploadRoutes(app: FastifyInstance) {
     { preHandler: validateBody(multipartSignSchema) },
     async (request, reply) => {
       const body = request.validatedBody as z.infer<typeof multipartSignSchema>;
+
+      // Ownership check: look up asset by storage key, verify via project FK
+      const assetRow = await db.query.assets.findFirst({
+        where: eq(assets.storageKey, body.key),
+        with: { project: true },
+      });
+      if (!assetRow) {
+        return sendError(reply, 404, "Asset not found", "NOT_FOUND");
+      }
+      const userId = request.userId;
+      if (!assetRow.project || assetRow.project.userId !== userId) {
+        return sendError(reply, 403, "Forbidden", "FORBIDDEN");
+      }
+
       const url = await presignUploadPart(body.key, body.uploadId, body.partNumber);
       return { url };
     },

@@ -6,15 +6,16 @@
  */
 
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { env } from "../env";
 import { sendError } from "../lib/errors";
 
-const INTERNAL_TOKEN = process.env.INTERNAL_API_TOKEN;
+const INTERNAL_TOKEN = env.INTERNAL_WORKER_TOKEN;
 
 export async function requireInternalToken(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const token = request.headers["x-internal-token"];
 
   if (!INTERNAL_TOKEN) {
-    request.log.error("INTERNAL_API_TOKEN not configured");
+    request.log.error("INTERNAL_WORKER_TOKEN not configured");
     return sendError(reply, 500, "Internal token not configured", "INTERNAL_ERROR");
   }
 

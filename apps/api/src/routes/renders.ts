@@ -8,6 +8,7 @@ import { db } from "../db";
 import { assets, projects, renders } from "../db/schema";
 import { sendError } from "../lib/errors";
 import { rendersActive, rendersTotal } from "../lib/metrics";
+import { requireInternalToken } from "../middleware/requireInternalToken";
 import { createRenderSchema, validateBody } from "../middleware/validate";
 import { enqueueJob } from "../services/queue";
 import { startRenderWorkflow } from "../services/temporal";
@@ -183,43 +184,47 @@ export async function renderRoutes(app: FastifyInstance) {
   });
 
   // Worker webhook: mark render complete/failed
-  app.post("/:jobId/complete", { preHandler: validateBody(completeRenderSchema) }, async (request, reply) => {
-    const { jobId } = request.params as { jobId: string };
-    const body = request.validatedBody as z.infer<typeof completeRenderSchema>;
+  app.post(
+    "/:jobId/complete",
+    { preHandler: [validateBody(completeRenderSchema), requireInternalToken] },
+    async (request, reply) => {
+      const { jobId } = request.params as { jobId: string };
+      const body = request.validatedBody as z.infer<typeof completeRenderSchema>;
 
-    const job = await db.query.renders.findFirst({ where: eq(renders.id, jobId) });
-    if (!job) {
-      return sendError(reply, 404, "Job not found", "NOT_FOUND");
-    }
+      const job = await db.query.renders.findFirst({ where: eq(renders.id, jobId) });
+      if (!job) {
+        return sendError(reply, 404, "Job not found", "NOT_FOUND");
+      }
 
-    const [updated] = await db
-      .update(renders)
-      .set({
-        status: body.status,
-        outputAssetId: body.outputAssetId ?? null,
-        previewAssetId: body.previewAssetId ?? null,
-        errorMessage: body.errorMessage ?? null,
-        completedAt: new Date(),
-      })
-      .where(eq(renders.id, jobId))
-      .returning();
+      const [updated] = await db
+        .update(renders)
+        .set({
+          status: body.status,
+          outputAssetId: body.outputAssetId ?? null,
+          previewAssetId: body.previewAssetId ?? null,
+          errorMessage: body.errorMessage ?? null,
+          completedAt: new Date(),
+        })
+        .where(eq(renders.id, jobId))
+        .returning();
 
-    if (body.status === "complete") {
-      rendersActive.dec();
-      rendersTotal.inc({ status: "complete" });
-      await db
-        .update(projects)
-        .set({ status: "complete", updatedAt: new Date(), renderAssetId: body.outputAssetId ?? null })
-        .where(eq(projects.id, job.projectId));
-    } else {
-      rendersActive.dec();
-      rendersTotal.inc({ status: "failed" });
-      await db
-        .update(projects)
-        .set({ status: "failed", updatedAt: new Date() })
-        .where(eq(projects.id, job.projectId));
-    }
+      if (body.status === "complete") {
+        rendersActive.dec();
+        rendersTotal.inc({ status: "complete" });
+        await db
+          .update(projects)
+          .set({ status: "complete", updatedAt: new Date(), renderAssetId: body.outputAssetId ?? null })
+          .where(eq(projects.id, job.projectId));
+      } else {
+        rendersActive.dec();
+        rendersTotal.inc({ status: "failed" });
+        await db
+          .update(projects)
+          .set({ status: "failed", updatedAt: new Date() })
+          .where(eq(projects.id, job.projectId));
+      }
 
-    return { job: updated };
-  });
+      return { job: updated };
+    },
+  );
 }

@@ -93,6 +93,8 @@ export const renders = pgTable(
   },
   (table) => ({
     projectIdx: index("renders_project_idx").on(table.projectId),
+    statusIdx: index("renders_status_idx").on(table.status),
+    projectStatusIdx: index("renders_project_status_idx").on(table.projectId, table.status),
   }),
 );
 
@@ -130,6 +132,7 @@ export const providerKeys = pgTable(
   },
   (table) => ({
     pk: primaryKey({ columns: [table.userId, table.provider] }),
+    userIdx: index("provider_keys_user_idx").on(table.userId),
   }),
 );
 
