@@ -65,10 +65,16 @@ vi.mock("../db", () => ({
       renders: { findFirst: vi.fn(), findMany: vi.fn() },
       templates: { findFirst: vi.fn(), findMany: vi.fn() },
       providerKeys: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn() },
+      userEvents: { findFirst: vi.fn(), findMany: vi.fn() },
     },
     insert: createChainableInsert(),
     update: createChainableUpdate(),
     delete: createChainableDelete(),
+    select: vi.fn().mockReturnValue({
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue([{ count: 0 }]),
+      }),
+    }),
     execute: vi.fn().mockResolvedValue([]),
   },
 }));

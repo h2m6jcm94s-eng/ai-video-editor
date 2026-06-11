@@ -17,6 +17,7 @@ import {
 } from "./lib/metrics";
 import { requireAuth } from "./middleware/auth";
 import { healthRoutes } from "./routes/health";
+import { internalRoutes } from "./routes/internal";
 import { logRoutes } from "./routes/log";
 import { metricsRoutes } from "./routes/metrics";
 import { presenceRoutes } from "./routes/presence";
@@ -126,6 +127,7 @@ export async function buildApp() {
 
   await app.register(healthRoutes, { prefix: "/api/health" });
   await app.register(metricsRoutes, { prefix: "/api/metrics" });
+  await app.register(internalRoutes);
   await app.register(logRoutes);
 
   app.addHook("onRequest", async (request, reply) => {
