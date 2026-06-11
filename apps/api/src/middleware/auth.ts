@@ -1,10 +1,10 @@
 // Copyright (c) 2025 Devayan Dewri. All rights reserved.
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
-import { createClerkClient, clerkClient } from "@clerk/fastify";
-import type { FastifyRequest, FastifyReply } from "fastify";
-import { getUserByClerkId, upsertUser } from "../services/users";
+import { clerkClient, createClerkClient } from "@clerk/fastify";
+import type { FastifyReply, FastifyRequest } from "fastify";
 import { sendError } from "../lib/errors";
+import { getUserByClerkId, upsertUser } from "../services/users";
 
 const clerk = createClerkClient({
   secretKey: process.env.CLERK_SECRET_KEY!,
@@ -19,16 +19,33 @@ function toClerkRequest(request: FastifyRequest) {
         acc.set(key, Array.isArray(value) ? value.join(",") : value);
       }
       return acc;
-    }, new Headers())
+    }, new Headers()),
   );
   const url = new URL(request.url, `${request.protocol}://clerk-dummy`);
   return new Request(url, { method: request.method, headers });
 }
 
-export async function requireAuth(
-  request: FastifyRequest,
-  reply: FastifyReply
-) {
+const E2E_TEST_TOKEN = process.env.E2E_TEST_TOKEN;
+
+export async function requireAuth(request: FastifyRequest, reply: FastifyReply) {
+  // E2E test bypass: skip Clerk when x-e2e-test-token matches
+  const e2eToken = request.headers["x-e2e-test-token"];
+  if (E2E_TEST_TOKEN && e2eToken === E2E_TEST_TOKEN) {
+    const testClerkId = "e2e-test-user";
+    try {
+      let localUser = await getUserByClerkId(testClerkId);
+      if (!localUser) {
+        localUser = await upsertUser(testClerkId, "e2e@fixture.local", "E2E Test User");
+      }
+      request.userId = localUser.id;
+      request.auth = { userId: testClerkId, sessionId: "e2e-session" } as unknown as FastifyRequest["auth"];
+      return;
+    } catch (err) {
+      request.log.error({ err }, "E2E user resolution failed");
+      return sendError(reply, 500, "Failed to resolve E2E user", "USER_RESOLUTION_ERROR");
+    }
+  }
+
   const req = toClerkRequest(request);
   const state = await clerk.authenticateRequest(req, {
     secretKey: process.env.CLERK_SECRET_KEY,
