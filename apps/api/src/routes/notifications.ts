@@ -73,7 +73,7 @@ export async function notificationRoutes(app: FastifyInstance) {
   );
 
   // List notifications (paginated, cursor-based)
-  app.get("/", async (request, reply) => {
+  app.get("/", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (request, reply) => {
     const userId = request.userId;
     if (!userId) {
       return sendError(reply, 401, "Sign in required", "UNAUTHORIZED");
@@ -110,69 +110,81 @@ export async function notificationRoutes(app: FastifyInstance) {
   });
 
   // Acknowledge single event
-  app.post("/:id/ack", async (request, reply) => {
-    const userId = request.userId;
-    if (!userId) {
-      return sendError(reply, 401, "Sign in required", "UNAUTHORIZED");
-    }
+  app.post(
+    "/:id/ack",
+    { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } },
+    async (request, reply) => {
+      const userId = request.userId;
+      if (!userId) {
+        return sendError(reply, 401, "Sign in required", "UNAUTHORIZED");
+      }
 
-    const { id } = request.params as { id: string };
+      const { id } = request.params as { id: string };
 
-    const [updated] = await db
-      .update(userEvents)
-      .set({ acknowledged: true, updatedAt: new Date() })
-      .where(and(eq(userEvents.id, id), eq(userEvents.userId, userId)))
-      .returning();
+      const [updated] = await db
+        .update(userEvents)
+        .set({ acknowledged: true, updatedAt: new Date() })
+        .where(and(eq(userEvents.id, id), eq(userEvents.userId, userId)))
+        .returning();
 
-    if (!updated) {
-      return sendError(reply, 404, "Notification not found", "NOT_FOUND");
-    }
+      if (!updated) {
+        return sendError(reply, 404, "Notification not found", "NOT_FOUND");
+      }
 
-    return { ok: true };
-  });
+      return { ok: true };
+    },
+  );
 
   // Acknowledge all events
-  app.post("/ack-all", async (request, reply) => {
-    const userId = request.userId;
-    if (!userId) {
-      return sendError(reply, 401, "Sign in required", "UNAUTHORIZED");
-    }
+  app.post(
+    "/ack-all",
+    { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+    async (request, reply) => {
+      const userId = request.userId;
+      if (!userId) {
+        return sendError(reply, 401, "Sign in required", "UNAUTHORIZED");
+      }
 
-    await db
-      .update(userEvents)
-      .set({ acknowledged: true, updatedAt: new Date() })
-      .where(and(eq(userEvents.userId, userId), eq(userEvents.acknowledged, false)));
+      await db
+        .update(userEvents)
+        .set({ acknowledged: true, updatedAt: new Date() })
+        .where(and(eq(userEvents.userId, userId), eq(userEvents.acknowledged, false)));
 
-    return { ok: true };
-  });
+      return { ok: true };
+    },
+  );
 
   // Internal endpoint for workers to report user events
-  app.post("/internal", { preHandler: requireInternalToken }, async (request, reply) => {
-    const body = request.body as {
-      userId: string;
-      code: string;
-      message: string;
-      details?: unknown;
-      route?: string;
-    };
+  app.post(
+    "/internal",
+    { preHandler: requireInternalToken, config: { rateLimit: { max: 60, timeWindow: "1 minute" } } },
+    async (request, reply) => {
+      const body = request.body as {
+        userId: string;
+        code: string;
+        message: string;
+        details?: unknown;
+        route?: string;
+      };
 
-    await db.insert(userEvents).values({
-      userId: body.userId,
-      code: body.code,
-      message: body.message,
-      details: body.details ? JSON.stringify(body.details) : null,
-      route: body.route ?? null,
-    });
+      await db.insert(userEvents).values({
+        userId: body.userId,
+        code: body.code,
+        message: body.message,
+        details: body.details ? JSON.stringify(body.details) : null,
+        route: body.route ?? null,
+      });
 
-    // Publish to SSE channel so bell updates live
-    await publishNotification(body.userId, {
-      id: "internal",
-      code: body.code,
-      message: body.message,
-      occurrenceCount: 1,
-      createdAt: new Date().toISOString(),
-    });
+      // Publish to SSE channel so bell updates live
+      await publishNotification(body.userId, {
+        id: "internal",
+        code: body.code,
+        message: body.message,
+        occurrenceCount: 1,
+        createdAt: new Date().toISOString(),
+      });
 
-    return { ok: true };
-  });
+      return { ok: true };
+    },
+  );
 }
