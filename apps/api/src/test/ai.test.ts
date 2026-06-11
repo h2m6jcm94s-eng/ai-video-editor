@@ -377,10 +377,56 @@ describe("AI Service", () => {
       expect(result.newCutList).toEqual(mockCutList);
     });
 
+    it("calls OpenRouter and applies diff when AI_PROVIDER_TOOLCALL=openrouter", async () => {
+      vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+      vi.stubEnv("AI_PROVIDER", "claude");
+      vi.stubEnv("AI_PROVIDER_TOOLCALL", "openrouter");
+      vi.mocked(fetch).mockResolvedValueOnce(
+        makeOpenAIResponse(
+          [{ op: "replace", path: "/slots/0/transitionIn", value: "dissolve" }],
+          "Dissolved",
+        ) as any,
+      );
+
+      const result = await applyPromptEdit({
+        userId: "user-1",
+        prompt: "dissolve in",
+        cutList: mockCutList,
+      });
+
+      expect(result.diff).toHaveLength(1);
+      expect(result.explanation).toBe("Dissolved");
+      expect((result.newCutList as any).slots[0].transitionIn).toBe("dissolve");
+    });
+
+    it("calls Groq and applies diff when AI_PROVIDER_TOOLCALL=groq", async () => {
+      vi.stubEnv("GROQ_API_KEY", "gsk-test");
+      vi.stubEnv("AI_PROVIDER", "claude");
+      vi.stubEnv("AI_PROVIDER_TOOLCALL", "groq");
+      vi.mocked(fetch).mockResolvedValueOnce(
+        makeOpenAIResponse(
+          [{ op: "replace", path: "/slots/0/transitionIn", value: "zoom" }],
+          "Zoomed",
+        ) as any,
+      );
+
+      const result = await applyPromptEdit({
+        userId: "user-1",
+        prompt: "zoom in",
+        cutList: mockCutList,
+      });
+
+      expect(result.diff).toHaveLength(1);
+      expect(result.explanation).toBe("Zoomed");
+      expect((result.newCutList as any).slots[0].transitionIn).toBe("zoom");
+    });
+
     it("throws when no API keys are configured", async () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "");
       vi.stubEnv("OPENAI_API_KEY", "");
       vi.stubEnv("KIMI_API_KEY", "");
+      vi.stubEnv("OPENROUTER_API_KEY", "");
+      vi.stubEnv("GROQ_API_KEY", "");
       vi.stubEnv("AI_PROVIDER", "claude");
 
       await expect(

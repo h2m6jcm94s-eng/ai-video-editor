@@ -18,7 +18,7 @@ import { validateAIResponse } from "../middleware/guardrails";
 
 async function getProviderKey(
   userId: string,
-  provider: "anthropic" | "openai" | "kimi",
+  provider: "anthropic" | "openai" | "kimi" | "openrouter" | "groq",
 ): Promise<string | undefined> {
   const row = await db.query.providerKeys.findFirst({
     where: and(eq(providerKeys.userId, userId), eq(providerKeys.provider, provider)),
@@ -239,7 +239,8 @@ async function callKimiOnce(
   hint: string,
 ): Promise<{ text: string; durationMs: number }> {
   const start = performance.now();
-  const kimiKey = (await getProviderKey(context.userId, "kimi")) || process.env.KIMI_API_KEY || "";
+  const kimiKey =
+    (await getProviderKey(context.userId, "kimi")) || process.env.KIMI_API_KEY || process.env.KIMI_KEY || "";
   if (!kimiKey) {
     aiCallsTotal.inc({ provider: "kimi", status: "missing_key" });
     const err: Error & { code?: string } = new Error("KIMI_API_KEY not configured");
@@ -290,6 +291,264 @@ async function callKimiOnce(
   aiCallsTotal.inc({ provider: "kimi", status: "success" });
   aiCallDurationSeconds.observe({ provider: "kimi" }, (performance.now() - start) / 1000);
   return { text, durationMs: performance.now() - start };
+}
+
+async function callOpenRouterOnce(
+  context: PromptEditContext,
+  hint: string,
+): Promise<{ text: string; durationMs: number }> {
+  const start = performance.now();
+  const orKey = (await getProviderKey(context.userId, "openrouter")) || process.env.OPENROUTER_API_KEY || "";
+  if (!orKey) {
+    aiCallsTotal.inc({ provider: "openrouter", status: "missing_key" });
+    const err: Error & { code?: string } = new Error("OPENROUTER_API_KEY not configured");
+    err.code = "PROVIDER_KEY_MISSING";
+    throw err;
+  }
+
+  const res = await fetchWithRetry("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${orKey}`,
+      "content-type": "application/json",
+      "http-referer": process.env.WEB_URL || "http://localhost:3000",
+      "x-title": "AI Video Editor",
+    },
+    body: JSON.stringify({
+      model: "anthropic/claude-3.5-haiku",
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT + hint },
+        { role: "user", content: buildPrompt(context) },
+      ],
+      response_format: { type: "json_object" },
+      max_tokens: 4096,
+    }),
+    signal: AbortSignal.timeout(60_000),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    const status = res.status === 429 ? "rate_limited" : res.status >= 500 ? "server_error" : "client_error";
+    aiCallsTotal.inc({ provider: "openrouter", status });
+    aiCallDurationSeconds.observe({ provider: "openrouter" }, (performance.now() - start) / 1000);
+    const error: Error & { code?: string } = new Error(`OpenRouter API error: ${res.status} ${err}`);
+    if (res.status === 401 || res.status === 403) error.code = "PROVIDER_INVALID_RESPONSE";
+    if (res.status === 429) error.code = "PROVIDER_RATE_LIMITED";
+    throw error;
+  }
+
+  const data = (await res.json()) as {
+    choices: Array<{ message: { content: string }; finish_reason?: string }>;
+  };
+
+  if (data.choices?.[0]?.finish_reason === "content_filter") {
+    aiCallsTotal.inc({ provider: "openrouter", status: "content_filter" });
+    aiCallDurationSeconds.observe({ provider: "openrouter" }, (performance.now() - start) / 1000);
+    return { text: "", durationMs: performance.now() - start };
+  }
+
+  const text = data.choices?.[0]?.message?.content || "{}";
+  aiCallsTotal.inc({ provider: "openrouter", status: "success" });
+  aiCallDurationSeconds.observe({ provider: "openrouter" }, (performance.now() - start) / 1000);
+  return { text, durationMs: performance.now() - start };
+}
+
+async function callGroqOnce(
+  context: PromptEditContext,
+  hint: string,
+): Promise<{ text: string; durationMs: number }> {
+  const start = performance.now();
+  const groqKey = (await getProviderKey(context.userId, "groq")) || process.env.GROQ_API_KEY || "";
+  if (!groqKey) {
+    aiCallsTotal.inc({ provider: "groq", status: "missing_key" });
+    const err: Error & { code?: string } = new Error("GROQ_API_KEY not configured");
+    err.code = "PROVIDER_KEY_MISSING";
+    throw err;
+  }
+
+  const res = await fetchWithRetry("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${groqKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT + hint },
+        { role: "user", content: buildPrompt(context) },
+      ],
+      response_format: { type: "json_object" },
+      max_tokens: 4096,
+    }),
+    signal: AbortSignal.timeout(60_000),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    const status = res.status === 429 ? "rate_limited" : res.status >= 500 ? "server_error" : "client_error";
+    aiCallsTotal.inc({ provider: "groq", status });
+    aiCallDurationSeconds.observe({ provider: "groq" }, (performance.now() - start) / 1000);
+    const error: Error & { code?: string } = new Error(`Groq API error: ${res.status} ${err}`);
+    if (res.status === 401 || res.status === 403) error.code = "PROVIDER_INVALID_RESPONSE";
+    if (res.status === 429) error.code = "PROVIDER_RATE_LIMITED";
+    throw error;
+  }
+
+  const data = (await res.json()) as {
+    choices: Array<{ message: { content: string }; finish_reason?: string }>;
+  };
+
+  if (data.choices?.[0]?.finish_reason === "content_filter") {
+    aiCallsTotal.inc({ provider: "groq", status: "content_filter" });
+    aiCallDurationSeconds.observe({ provider: "groq" }, (performance.now() - start) / 1000);
+    return { text: "", durationMs: performance.now() - start };
+  }
+
+  const text = data.choices?.[0]?.message?.content || "{}";
+  aiCallsTotal.inc({ provider: "groq", status: "success" });
+  aiCallDurationSeconds.observe({ provider: "groq" }, (performance.now() - start) / 1000);
+  return { text, durationMs: performance.now() - start };
+}
+
+async function callGroq(context: PromptEditContext): Promise<PromptEditResult> {
+  let { text } = await callGroqOnce(context, "");
+
+  if (text === "") {
+    return {
+      diff: [],
+      explanation: "AI response was blocked by content filters. No changes applied.",
+      fallback: safeFallbackFor("prompt_edit", "content_filter", { previousCutList: context.cutList }),
+    };
+  }
+
+  const guardrailsCheck = await validateAIResponse(text, "groq");
+  if (!guardrailsCheck.allowed) {
+    const categories = guardrailsCheck.flagged_categories || ["unknown"];
+    for (const category of categories) {
+      guardrailsOutputBlocksTotal.inc({ category, provider: "groq" });
+    }
+    return {
+      diff: [],
+      explanation:
+        guardrailsCheck.reason || "AI response was blocked by content filters. No changes applied.",
+      fallback: safeFallbackFor("prompt_edit", "content_filter", { previousCutList: context.cutList }),
+    };
+  }
+
+  let parsed = parseResponse(text);
+  if (!parsed) {
+    const retry = await callGroqOnce(context, CAMELCASE_HINT);
+    if (retry.text === "") {
+      return {
+        diff: [],
+        explanation: "AI response was blocked by content filters. No changes applied.",
+        fallback: safeFallbackFor("prompt_edit", "content_filter", { previousCutList: context.cutList }),
+      };
+    }
+
+    const retryGuardrailsCheck = await validateAIResponse(retry.text, "groq");
+    if (!retryGuardrailsCheck.allowed) {
+      const categories = retryGuardrailsCheck.flagged_categories || ["unknown"];
+      for (const category of categories) {
+        guardrailsOutputBlocksTotal.inc({ category, provider: "groq" });
+      }
+      return {
+        diff: [],
+        explanation:
+          retryGuardrailsCheck.reason || "AI response was blocked by content filters. No changes applied.",
+        fallback: safeFallbackFor("prompt_edit", "content_filter", { previousCutList: context.cutList }),
+      };
+    }
+
+    parsed = parseResponse(retry.text);
+    if (!parsed) {
+      return {
+        diff: [],
+        explanation: "AI returned an unexpected response. No changes applied.",
+        fallback: safeFallbackFor("prompt_edit", "invalid_json", { previousCutList: context.cutList }),
+      };
+    }
+    text = retry.text;
+  }
+
+  const promptText = buildPrompt(context);
+  parsed.usage = {
+    promptTokens: await countTokens(promptText),
+    completionTokens: await countTokens(text),
+    totalTokens: (await countTokens(promptText)) + (await countTokens(text)),
+  };
+  return parsed;
+}
+
+async function callOpenRouter(context: PromptEditContext): Promise<PromptEditResult> {
+  let { text } = await callOpenRouterOnce(context, "");
+
+  if (text === "") {
+    return {
+      diff: [],
+      explanation: "AI response was blocked by content filters. No changes applied.",
+      fallback: safeFallbackFor("prompt_edit", "content_filter", { previousCutList: context.cutList }),
+    };
+  }
+
+  const guardrailsCheck = await validateAIResponse(text, "openrouter");
+  if (!guardrailsCheck.allowed) {
+    const categories = guardrailsCheck.flagged_categories || ["unknown"];
+    for (const category of categories) {
+      guardrailsOutputBlocksTotal.inc({ category, provider: "openrouter" });
+    }
+    return {
+      diff: [],
+      explanation:
+        guardrailsCheck.reason || "AI response was blocked by content filters. No changes applied.",
+      fallback: safeFallbackFor("prompt_edit", "content_filter", { previousCutList: context.cutList }),
+    };
+  }
+
+  let parsed = parseResponse(text);
+  if (!parsed) {
+    const retry = await callOpenRouterOnce(context, CAMELCASE_HINT);
+    if (retry.text === "") {
+      return {
+        diff: [],
+        explanation: "AI response was blocked by content filters. No changes applied.",
+        fallback: safeFallbackFor("prompt_edit", "content_filter", { previousCutList: context.cutList }),
+      };
+    }
+
+    const retryGuardrailsCheck = await validateAIResponse(retry.text, "openrouter");
+    if (!retryGuardrailsCheck.allowed) {
+      const categories = retryGuardrailsCheck.flagged_categories || ["unknown"];
+      for (const category of categories) {
+        guardrailsOutputBlocksTotal.inc({ category, provider: "openrouter" });
+      }
+      return {
+        diff: [],
+        explanation:
+          retryGuardrailsCheck.reason || "AI response was blocked by content filters. No changes applied.",
+        fallback: safeFallbackFor("prompt_edit", "content_filter", { previousCutList: context.cutList }),
+      };
+    }
+
+    parsed = parseResponse(retry.text);
+    if (!parsed) {
+      return {
+        diff: [],
+        explanation: "AI returned an unexpected response. No changes applied.",
+        fallback: safeFallbackFor("prompt_edit", "invalid_json", { previousCutList: context.cutList }),
+      };
+    }
+    text = retry.text;
+  }
+
+  const promptText = buildPrompt(context);
+  parsed.usage = {
+    promptTokens: await countTokens(promptText),
+    completionTokens: await countTokens(text),
+    totalTokens: (await countTokens(promptText)) + (await countTokens(text)),
+  };
+  return parsed;
 }
 
 async function callKimi(context: PromptEditContext): Promise<PromptEditResult> {
@@ -715,6 +974,16 @@ export async function applyPromptEdit(context: PromptEditContext): Promise<
     } else if (provider === "openai") {
       result = await withFallback(
         () => callOpenAI(context),
+        () => callClaude(context),
+      );
+    } else if (provider === "openrouter") {
+      result = await withFallback(
+        () => callOpenRouter(context),
+        () => callClaude(context),
+      );
+    } else if (provider === "groq") {
+      result = await withFallback(
+        () => callGroq(context),
         () => callClaude(context),
       );
     } else {

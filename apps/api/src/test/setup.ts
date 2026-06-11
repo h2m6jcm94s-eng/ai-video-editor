@@ -149,6 +149,7 @@ vi.mock("ioredis", () => ({
 vi.mock("../services/queue", () => ({
   enqueueJob: vi.fn(async () => {}),
   probeRedis: vi.fn(async () => {}),
+  publishNotification: vi.fn(async () => {}),
 }));
 
 // Mock Temporal

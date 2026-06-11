@@ -121,6 +121,36 @@ export async function settingsRoutes(app: FastifyInstance) {
             }),
           });
           if (!res.ok) throw new Error(await res.text());
+        } else if (body.provider === "openrouter") {
+          const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${key}`,
+              "Content-Type": "application/json",
+              "HTTP-Referer": process.env.WEB_URL || "http://localhost:3000",
+              "X-Title": "AI Video Editor",
+            },
+            body: JSON.stringify({
+              model: "anthropic/claude-3.5-haiku",
+              max_tokens: 1,
+              messages: [{ role: "user", content: "hi" }],
+            }),
+          });
+          if (!res.ok) throw new Error(await res.text());
+        } else if (body.provider === "groq") {
+          const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${key}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: "llama-3.3-70b-versatile",
+              max_tokens: 1,
+              messages: [{ role: "user", content: "hi" }],
+            }),
+          });
+          if (!res.ok) throw new Error(await res.text());
         } else {
           return sendError(reply, 400, "Unsupported provider", "VALIDATION_ERROR");
         }
