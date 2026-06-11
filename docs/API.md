@@ -28,6 +28,7 @@
 - [Projects](#projects)
 - [Uploads](#uploads)
 - [Renders](#renders)
+- [Internal](#internal)
 - [Templates](#templates)
 - [Settings](#settings)
 - [Presence](#presence)
@@ -812,6 +813,215 @@ Or for failures:
 **Side Effects**:
 - Updates render record
 - Updates project status (`complete` or `failed`)
+
+---
+
+## Internal
+
+> Routes under `/api/internal` are for worker-to-API communication only. All requests must include the header `x-internal-token: <INTERNAL_WORKER_TOKEN>`.
+
+### `POST /internal/user-events`
+
+Record a user-facing event from a worker (e.g. pipeline stage changes).
+
+**Auth**: `x-internal-token`
+
+**Request Body**:
+```json
+{
+  "userId": "550e8400-e29b-41d4-a716-446655440000",
+  "code": "RENDER_STARTED",
+  "message": "Render workflow started",
+  "details": { "projectId": "..." },
+  "route": "/api/internal/..."
+}
+```
+
+**Response**:
+```json
+{
+  "ok": true
+}
+```
+
+---
+
+### `GET /internal/projects/:id`
+
+Fetch project data needed by the render worker.
+
+**Auth**: `x-internal-token`
+
+**Path Parameters**:
+- `id` (string, UUID) — Project ID
+
+**Response**:
+```json
+{
+  "project": {
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "userId": "550e8400-e29b-41d4-a716-446655440001",
+    "name": "My Project",
+    "status": "rendering",
+    "styleTier": "full_remix",
+    "mode": "auto",
+    "referenceAssetId": "550e8400-e29b-41d4-a716-446655440002",
+    "songAssetId": "550e8400-e29b-41d4-a716-446655440003",
+    "clipAssetIds": ["550e8400-e29b-41d4-a716-446655440004"],
+    "cutList": { /* ... */ },
+    "renderAssetId": null,
+    "createdAt": "2025-01-15T10:30:00Z",
+    "updatedAt": "2025-01-15T10:30:00Z"
+  },
+  "assets": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440004",
+      "projectId": "550e8400-e29b-41d4-a716-446655440000",
+      "type": "clip",
+      "filename": "clip.mp4",
+      "mimeType": "video/mp4",
+      "sizeBytes": 52428800,
+      "durationSec": 15.5,
+      "width": 1920,
+      "height": 1080,
+      "fps": 30,
+      "storageKey": "uploads/.../clip.mp4",
+      "storageUrl": "https://...",
+      "metadata": {}
+    }
+  ],
+  "activeRender": {
+    "id": "550e8400-e29b-41d4-a716-446655440005",
+    "status": "running",
+    "stage": "rendering",
+    "progress": 45,
+    "workflowId": "video-render-workflow-abc123"
+  }
+}
+```
+
+**Status Codes**:
+- `200` — Success
+- `401` — Missing or invalid internal token
+- `404` — Project not found
+
+---
+
+### `POST /internal/assets`
+
+Create an output asset row for worker-generated outputs (render, LUT, etc.).
+
+**Auth**: `x-internal-token`
+
+**Request Body**:
+```json
+{
+  "projectId": "550e8400-e29b-41d4-a716-446655440000",
+  "type": "render",
+  "filename": "output.mp4",
+  "mimeType": "video/mp4"
+}
+```
+
+**Validation Rules**:
+- `projectId`: Required, valid UUID
+- `type`: Required, enum `reference_video | song | clip | render | subtitle | lut | sfx`
+- `filename`: Required, string, max 255 characters
+- `mimeType`: Required, string, max 100 characters
+
+**Response**:
+```json
+{
+  "assetId": "550e8400-e29b-41d4-a716-446655440006",
+  "storageKey": "projects/550e8400-.../render/550e8400-...-output.mp4",
+  "asset": { /* full asset row */ }
+}
+```
+
+**Status Codes**:
+- `200` — Created successfully
+- `401` — Missing or invalid internal token
+- `404` — Project not found
+
+---
+
+### `PATCH /internal/assets/:assetId/probe`
+
+Update asset metadata after ffprobe (used by the ingest worker).
+
+**Auth**: `x-internal-token`
+
+**Path Parameters**:
+- `assetId` (string, UUID) — Asset ID
+
+**Request Body** (all fields optional):
+```json
+{
+  "durationSec": 15.5,
+  "width": 1920,
+  "height": 1080,
+  "fps": 30
+}
+```
+
+**Response**:
+```json
+{
+  "asset": {
+    "id": "550e8400-e29b-41d4-a716-446655440003",
+    "durationSec": 15.5,
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  }
+}
+```
+
+**Status Codes**:
+- `200` — Updated successfully
+- `401` — Missing or invalid internal token
+- `404` — Asset not found
+
+---
+
+### `PATCH /internal/assets/:assetId/complete`
+
+Finalize a worker-generated asset with size and public URL.
+
+**Auth**: `x-internal-token`
+
+**Path Parameters**:
+- `assetId` (string, UUID) — Asset ID
+
+**Request Body**:
+```json
+{
+  "sizeBytes": 52428800,
+  "storageUrl": "https://r2.example.com/...",
+  "metadata": { "codec": "h264" }
+}
+```
+
+**Validation Rules**:
+- `sizeBytes`: Required, integer, 0–5 GB
+- `storageUrl`: Optional, valid URL
+- `metadata`: Optional, object
+
+**Response**:
+```json
+{
+  "asset": {
+    "id": "550e8400-e29b-41d4-a716-446655440006",
+    "sizeBytes": 52428800,
+    "storageUrl": "https://r2.example.com/..."
+  }
+}
+```
+
+**Status Codes**:
+- `200` — Updated successfully
+- `401` — Missing or invalid internal token
+- `404` — Asset not found
 
 ---
 

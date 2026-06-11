@@ -46,15 +46,17 @@ docker build -f infra/docker/Dockerfile.render -t aivideo/render:latest .
 ### Docker Compose (Full Stack)
 
 ```bash
-# Production compose
-docker compose -f infra/docker/docker-compose.yml up -d
+# Local / staging stack
+pnpm infra:up
 
 # With rebuild
-docker compose -f infra/docker/docker-compose.yml up -d --build
+docker compose -f infra/local/docker-compose.yml up -d --build
 
 # Scale workers
-docker compose -f infra/docker/docker-compose.yml up -d --scale ingest-worker=4 --scale render-worker=4
+docker compose -f infra/local/docker-compose.yml up -d --scale ingest-worker=4 --scale render-worker=4
 ```
+
+Production images are built from Dockerfiles in `infra/docker/`.
 
 ### Docker Compose Services
 
@@ -64,7 +66,8 @@ docker compose -f infra/docker/docker-compose.yml up -d --scale ingest-worker=4 
 | `web` | `aivideo/web` | 3000 | 2 |
 | `postgres` | `postgres:16` | 5432 | 1 |
 | `redis` | `redis:7` | 6379 | 1 |
-| `temporal` | `temporalio/auto-setup` | 7233, 8088 | 1 |
+| `temporal` | `temporalio/auto-setup` | 7233, 8233 | 1 |
+| `temporal-ui` | `temporalio/ui` | 8080 | 1 |
 | `ingest-worker` | `aivideo/ingest` | — | 2 |
 | `render-worker` | `aivideo/render` | — | 2 |
 
@@ -172,22 +175,19 @@ TEMPORAL_TLS_KEY=/path/to/key.pem
 
 ### Worker Registration
 
+Run workers directly from the repo root:
+
 ```bash
-# Register Temporal worker
-python infra/temporal/worker.py
+# Ingest worker
+uv run python -m ingest_worker
+
+# Render worker
+uv run python -m render_worker
 ```
 
-The worker connects to Temporal server and registers all activities:
-- `probe_inputs`
-- `detect_beats`
-- `detect_shots`
-- `analyze_reference_style`
-- `embed_user_clips`
-- `generate_cutlist_claude`
-- `rank_clips_per_slot`
-- `render_720p`
-- `upload_to_r2`
-- `notify_user`
+Workers register the following activities:
+- **Ingest**: `probe_asset`
+- **Render**: `fetch_project`, `download_clips`, `compile_video`, `upload_render`, `finalize_render`
 
 ### Workflow Retention
 
@@ -257,6 +257,7 @@ DATABASE_URL=postgresql://user:pass@prod-db:5432/aivideo?sslmode=require
 REDIS_URL=redis://:password@prod-redis:6379/0
 TEMPORAL_HOST=prod-temporal:7233
 TEMPORAL_NAMESPACE=production
+INTERNAL_WORKER_TOKEN=<random-secret>
 WEB_URL=https://app.aivideo.example.com
 CLERK_SECRET_KEY=sk_live_...
 CLERK_PUBLISHABLE_KEY=pk_live_...
@@ -326,7 +327,7 @@ The API exposes built-in Prometheus metrics at `GET /api/metrics`. Protect the e
 
 ```bash
 # Start the monitoring stack
-docker compose -f infra/docker/monitoring/docker-compose.yml up -d
+pnpm obs:up
 
 # Access:
 # Prometheus UI: http://localhost:9090
@@ -342,7 +343,7 @@ Import the dashboard in Grafana via **Dashboards → Import** and paste the JSON
 ### Alerting Rules
 
 ```yaml
-# Prometheus alerting rules (save as infra/docker/monitoring/alerts.yml)
+# Prometheus alerting rules (save as infra/observability/alerts.yml)
 groups:
   - name: ave
     rules:

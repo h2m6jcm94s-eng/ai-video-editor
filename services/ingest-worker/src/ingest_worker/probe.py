@@ -86,11 +86,14 @@ def probe_asset_remote(asset_id: str, storage_key: str) -> Dict[str, Any]:
     # Filter out None values
     payload = {k: v for k, v in payload.items() if v is not None}
 
+    internal_token = os.environ.get("INTERNAL_WORKER_TOKEN")
+    headers = {"x-internal-token": internal_token} if internal_token else {}
+
     try:
         resp = httpx.post(
-            f"{settings.api_base}/uploads/{asset_id}/probe",
+            f"{settings.api_base}/internal/assets/{asset_id}/probe",
             json=payload,
-            headers={"Authorization": f"Bearer {settings.api_token}"},
+            headers=headers,
             timeout=30,
         )
         resp.raise_for_status()

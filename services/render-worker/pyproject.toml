@@ -9,6 +9,8 @@ dependencies = [
     "pillow>=10.0.0",
     "opencv-python>=4.9.0",
     "scipy>=1.13.0",
+    "temporalio>=1.7.0",
+    "httpx>=0.27.0",
 ]
 
 [tool.uv.sources]

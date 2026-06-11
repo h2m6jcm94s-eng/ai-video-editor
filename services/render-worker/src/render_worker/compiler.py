@@ -90,6 +90,13 @@ def _esc_text(t: str) -> str:
     return t.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:").replace("%", "\\%")
 
 
+def _get_param(params, key: str, default):
+    """Read an effect parameter whether params is a dict or a pydantic model."""
+    if isinstance(params, dict):
+        return params.get(key, default)
+    return getattr(params, key, default)
+
+
 def _apply_video_effects(slot: Slot, base_vf: str) -> str:
     """Apply video effects to a slot's filter chain."""
     filters = [base_vf] if base_vf else []
@@ -97,20 +104,20 @@ def _apply_video_effects(slot: Slot, base_vf: str) -> str:
         etype = effect.type
         params = effect.params
         if etype == "zoom_punch_in":
-            scale = getattr(params, "target_scale", 1.3)
-            dur = getattr(params, "duration_ms", 300) / 1000.0
+            scale = _get_param(params, "target_scale", 1.3)
+            dur = _get_param(params, "duration_ms", 300) / 1000.0
             filters.append(
                 f"zoompan=z='1+({scale}-1)*min(t/{dur},1)':d=1:s=1280x720"
             )
         elif etype == "vignette":
-            intensity = getattr(params, "intensity", 0.4)
+            intensity = _get_param(params, "intensity", 0.4)
             filters.append(f"vignette=PI/{max(0.01, 1 - intensity)}")
         elif etype == "film_grain":
-            intensity = getattr(params, "intensity", 0.2)
+            intensity = _get_param(params, "intensity", 0.2)
             filters.append(f"noise=c0s={intensity*10}:allf=t+u")
         elif etype == "shake":
-            intensity = getattr(params, "intensity", 5)
-            dur = getattr(params, "duration_ms", 300) / 1000.0
+            intensity = _get_param(params, "intensity", 5)
+            dur = _get_param(params, "duration_ms", 300) / 1000.0
             filters.append(
                 f"crop=iw:ih:(random(1)*{intensity}):(random(1)*{intensity}):enable='lte(t,{dur})'"
             )

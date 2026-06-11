@@ -3,7 +3,9 @@
 # Commercial SaaS use is prohibited without written permission.
 import os
 import tempfile
+from functools import lru_cache
 from pathlib import Path
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -28,7 +30,7 @@ class Settings(BaseSettings):
     # Worker settings
     max_workers: int = 4
     gpu_device: str = os.environ.get("GPU_DEVICE", "cpu")
-    temp_dir: str = str(Path(tempfile.gettempdir()) / "ai-video-editor")
+    temp_dir: str = Field(default_factory=lambda: str(Path(tempfile.gettempdir()) / "ai-video-editor"))
 
     # API callback
     api_base: str = os.environ.get("API_BASE", "http://localhost:4000/api")
@@ -39,4 +41,17 @@ class Settings(BaseSettings):
         case_sensitive = False
 
 
-settings = Settings()
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()
+
+
+class _LazySettings:
+    """Lazy proxy so callers can keep using `settings.api_base` without triggering
+    instantiation during workflow module import."""
+
+    def __getattr__(self, name: str):
+        return getattr(get_settings(), name)
+
+
+settings = _LazySettings()
