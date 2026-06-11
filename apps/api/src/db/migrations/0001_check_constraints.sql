@@ -1,4 +1,4 @@
--- CHECK constraints for enum columns
+-- CHECK constraints for enum columns (idempotent via exception guards)
 DO $$ BEGIN
   ALTER TABLE projects ADD CONSTRAINT projects_status_chk CHECK (status IN ('uploading', 'processing', 'complete', 'failed'));
 EXCEPTION WHEN duplicate_object THEN null;
