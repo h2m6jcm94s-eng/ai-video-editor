@@ -54,17 +54,18 @@ async function pexelsSearch() {
     .filter((v) => v.video_files?.some((f) => f.file_type === "video/mp4" || f.file_type === "video/quicktime"))
     .sort((a, b) => a.id - b.id) // deterministic
     .slice(0, 4)
-    .map((v) => {
+    .map((v, idx) => {
       const file = v.video_files.find((f) => f.file_type === "video/mp4" && f.width < f.height)
         || v.video_files.find((f) => f.file_type === "video/mp4")
         || v.video_files.find((f) => f.file_type === "video/quicktime")
         || v.video_files[0];
+      const role = idx === 0 ? "reference" : `clip-${idx}`;
       return {
         id: String(v.id),
         source: "pexels",
         type: "video",
         url: file.link,
-        filename: `pexels-${v.id}.${file.file_type === "video/quicktime" ? "mov" : "mp4"}`,
+        filename: `${role}.${file.file_type === "video/quicktime" ? "mov" : "mp4"}`,
         durationSec: v.duration,
         width: file.width,
         height: file.height,
@@ -100,7 +101,7 @@ async function freesoundSearch() {
       source: "freesound",
       type: "audio",
       url: s.previews["preview-hq-mp3"],
-      filename: `freesound-${s.id}.mp3`,
+      filename: "song.mp3",
       durationSec: Math.round(s.duration),
       mimeType: "audio/mpeg",
     }));
