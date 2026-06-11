@@ -14,6 +14,9 @@ importers:
       '@playwright/test':
         specifier: ^1.60.0
         version: 1.60.0
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
       husky:
         specifier: ^9.0.0
         version: 9.1.7
