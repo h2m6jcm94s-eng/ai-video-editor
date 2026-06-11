@@ -1,20 +1,20 @@
 ﻿// Copyright (c) 2025 Devayan Dewri. All rights reserved.
+import { relations } from "drizzle-orm";
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
 import {
+  boolean,
+  index,
+  integer,
+  jsonb,
   pgTable,
-  uuid,
-  varchar,
+  primaryKey,
+  real,
   text,
   timestamp,
-  jsonb,
-  integer,
-  boolean,
-  real,
-  index,
-  primaryKey,
+  uuid,
+  varchar,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -45,7 +45,7 @@ export const projects = pgTable(
   },
   (table) => ({
     userIdx: index("projects_user_idx").on(table.userId),
-  })
+  }),
 );
 
 export const assets = pgTable(
@@ -70,7 +70,7 @@ export const assets = pgTable(
   },
   (table) => ({
     projectIdx: index("assets_project_idx").on(table.projectId),
-  })
+  }),
 );
 
 export const renders = pgTable(
@@ -93,7 +93,7 @@ export const renders = pgTable(
   },
   (table) => ({
     projectIdx: index("renders_project_idx").on(table.projectId),
-  })
+  }),
 );
 
 export const templates = pgTable(
@@ -114,7 +114,7 @@ export const templates = pgTable(
   },
   (table) => ({
     userIdx: index("templates_user_idx").on(table.userId),
-  })
+  }),
 );
 
 export const providerKeys = pgTable(
@@ -130,7 +130,46 @@ export const providerKeys = pgTable(
   },
   (table) => ({
     pk: primaryKey({ columns: [table.userId, table.provider] }),
-  })
+  }),
+);
+
+export const userEvents = pgTable(
+  "user_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").notNull(),
+    code: varchar("code", { length: 50 }).notNull(),
+    message: text("message").notNull(),
+    details: jsonb("details"),
+    route: varchar("route", { length: 255 }),
+    occurrenceCount: integer("occurrence_count").notNull().default(1),
+    acknowledged: boolean("acknowledged").notNull().default(false),
+    dropped: boolean("dropped").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => ({
+    userIdx: index("user_events_user_idx").on(table.userId),
+    userAckIdx: index("user_events_user_ack_idx").on(table.userId, table.acknowledged),
+    createdAtIdx: index("user_events_created_at_idx").on(table.createdAt),
+  }),
+);
+
+export const adminAudit = pgTable(
+  "admin_audit",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    actorId: uuid("actor_id").notNull(),
+    action: varchar("action", { length: 100 }).notNull(),
+    targetType: varchar("target_type", { length: 50 }),
+    targetId: varchar("target_id", { length: 255 }),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => ({
+    actorIdx: index("admin_audit_actor_idx").on(table.actorId),
+    createdAtIdx: index("admin_audit_created_at_idx").on(table.createdAt),
+  }),
 );
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -169,3 +208,7 @@ export type Template = typeof templates.$inferSelect;
 export type NewTemplate = typeof templates.$inferInsert;
 export type ProviderKey = typeof providerKeys.$inferSelect;
 export type NewProviderKey = typeof providerKeys.$inferInsert;
+export type UserEvent = typeof userEvents.$inferSelect;
+export type NewUserEvent = typeof userEvents.$inferInsert;
+export type AdminAudit = typeof adminAudit.$inferSelect;
+export type NewAdminAudit = typeof adminAudit.$inferInsert;
