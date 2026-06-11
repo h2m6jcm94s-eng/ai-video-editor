@@ -301,12 +301,16 @@ export async function projectRoutes(app: FastifyInstance) {
         const rawCode =
           err && typeof err === "object" && "code" in err ? (err as { code?: string }).code : undefined;
         const code: ApiErrorCode = isApiErrorCode(rawCode) ? rawCode : "INTERNAL_ERROR";
-        const status = code === "PROVIDER_KEY_MISSING" ? 400 : 500;
+        const status = code === "PROVIDER_KEY_MISSING" ? 400 : code === "ALL_PROVIDERS_FAILED" ? 503 : 500;
+        const details =
+          err && typeof err === "object" && "details" in err
+            ? (err as { details?: unknown }).details
+            : undefined;
         if (err instanceof Error) {
           const message = err.message || "AI edit failed";
-          return sendError(reply, status, message, code);
+          return sendError(reply, status, message, code, details);
         }
-        return sendError(reply, status, "AI edit failed", code);
+        return sendError(reply, status, "AI edit failed", code, details);
       }
     },
   );

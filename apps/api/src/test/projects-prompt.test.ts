@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
 import { db } from "../db";
 
@@ -18,8 +18,32 @@ describe("Project Prompt Route", () => {
     songAssetId: null,
     clipAssetIds: [],
     cutList: {
-      globals: { totalDurationS: 30, tempoBpm: 120, timeSignature: "4/4", energyCurve: [], sectionMarkers: [], aspectRatio: "9:16" },
-      slots: [{ index: 0, startS: 0, durationS: 5, beatIndex: 0, section: "intro", transitionIn: "hard_cut", transitionOut: "hard_cut", targetShotType: "wide", subjectHint: "establishing", motionHint: "static", energyLevel: 0.5, requiredTags: [], avoidTags: [], effects: [] }],
+      globals: {
+        totalDurationS: 30,
+        tempoBpm: 120,
+        timeSignature: "4/4",
+        energyCurve: [],
+        sectionMarkers: [],
+        aspectRatio: "9:16",
+      },
+      slots: [
+        {
+          index: 0,
+          startS: 0,
+          durationS: 5,
+          beatIndex: 0,
+          section: "intro",
+          transitionIn: "hard_cut",
+          transitionOut: "hard_cut",
+          targetShotType: "wide",
+          subjectHint: "establishing",
+          motionHint: "static",
+          energyLevel: 0.5,
+          requiredTags: [],
+          avoidTags: [],
+          effects: [],
+        },
+      ],
       overlays: [],
       audioTracks: [],
     },
@@ -38,13 +62,24 @@ describe("Project Prompt Route", () => {
       }),
     } as any);
 
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
-      json: async () => ({
-        content: [{ type: "text", text: JSON.stringify({ diff: [{ op: "replace", path: "/slots/0/durationS", value: 10 }], explanation: "Extended" }) }],
-      }),
-      ok: true,
-      status: 200,
-    } as any));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        json: async () => ({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                diff: [{ op: "replace", path: "/slots/0/durationS", value: 10 }],
+                explanation: "Extended",
+              }),
+            },
+          ],
+        }),
+        ok: true,
+        status: 200,
+      } as any),
+    );
     vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
     vi.stubEnv("AI_PROVIDER", "claude");
 
@@ -103,11 +138,12 @@ describe("Project Prompt Route", () => {
     expect(JSON.parse(res.body).code).toBe("NO_CUTLIST");
   });
 
-  it("POST returns 500 when AI service fails", async () => {
+  it("POST returns 503 when all AI providers fail", async () => {
     vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(mockProject);
-    vi.stubGlobal("fetch", vi.fn()
-      .mockRejectedValueOnce(new Error("Claude down"))
-      .mockRejectedValueOnce(new Error("OpenAI down")));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValueOnce(new Error("Claude down")).mockRejectedValueOnce(new Error("OpenAI down")),
+    );
     vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
     vi.stubEnv("OPENAI_API_KEY", "sk-openai-test");
     vi.stubEnv("AI_PROVIDER", "claude");
@@ -118,8 +154,9 @@ describe("Project Prompt Route", () => {
       url: "/api/projects/proj-1/prompt",
       payload: { prompt: "test" },
     });
-    expect(res.statusCode).toBe(500);
-    expect(JSON.parse(res.body).code).toBe("INTERNAL_ERROR");
+    expect(res.statusCode).toBe(503);
+    const body = JSON.parse(res.body);
+    expect(body.code).toBe("ALL_PROVIDERS_FAILED");
+    expect(body.details).toBeDefined();
   });
-
 });
