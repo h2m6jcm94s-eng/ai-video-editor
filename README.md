@@ -76,24 +76,42 @@ cd ai_video_editor
 # JavaScript dependencies
 pnpm install
 
-# Python dependencies
-uv venv
-.venv\Scripts\python -m pip install -e services/shared-py -e services/ingest-worker -e services/style-worker -e services/reason-worker -e services/render-worker
+# Python dependencies (uv workspace)
+uv sync
 ```
 
 ### 2. Start Infrastructure
 
 ```bash
-docker compose -f infra/docker/docker-compose.yml up -d
+pnpm infra:up
 ```
 
-This starts PostgreSQL, Redis, and Temporal.
+This starts PostgreSQL, Redis, Temporal, Temporal UI, and MinIO with the `ai-video-editor` bucket pre-created.
+
+Services:
+- PostgreSQL 16: `localhost:5432`
+- Redis 7: `localhost:6379`
+- Temporal gRPC: `localhost:7233`
+- Temporal UI: `http://localhost:8080`
+- MinIO S3 API: `localhost:9000`
+- MinIO Console: `http://localhost:9001`
 
 ### 3. Configure Environment
 
+Create `apps/api/.env.local` with at least the following values:
+
 ```bash
-cp apps/api/.env.example apps/api/.env
-# Edit apps/api/.env with your Clerk keys and database URL
+DATABASE_URL=postgresql://ave:ave@localhost:5432/ave
+REDIS_URL=redis://localhost:6379
+TEMPORAL_HOST=localhost:7233
+WEB_URL=http://localhost:3000
+CLERK_SECRET_KEY=sk_test_...
+CLERK_PUBLISHABLE_KEY=pk_test_...
+INTERNAL_WORKER_TOKEN=dev-internal-token
+R2_ENDPOINT=http://localhost:9000
+R2_ACCESS_KEY_ID=minioadmin
+R2_SECRET_ACCESS_KEY=minioadmin
+R2_BUCKET_NAME=ai-video-editor
 ```
 
 ### 4. Run Migrations
@@ -102,7 +120,21 @@ cp apps/api/.env.example apps/api/.env
 pnpm --filter @ai-video-editor/api db:migrate
 ```
 
-### 5. Start Development
+### 5. Start Workers
+
+You need the ingest and render workers running for uploads and renders to complete.
+
+```bash
+# Terminal 1 — ingest worker
+uv run python -m ingest_worker
+
+# Terminal 2 — render worker
+uv run python -m render_worker
+```
+
+Workers read environment variables from `apps/api/.env.local`. Make sure the file is sourced or variables are exported in your shell.
+
+### 6. Start Development
 
 ```bash
 pnpm dev
@@ -115,17 +147,25 @@ Open `http://localhost:3000`, sign in with Clerk, and add your AI provider keys 
 ## Architecture Overview
 
 ```
-┌─────────────┐     ┌─────────────┐     ┌─────────────────────────────────────┐
-│   Next.js   │────▶│   Fastify   │────▶│  PostgreSQL  │  Redis  │  Temporal  │
-│   (Web)     │◀────│   (API)     │◀────│  (Drizzle)   │ (Cache) │ (Workflows)│
-└─────────────┘     └──────┬──────┘     └─────────────────────────────────────┘
+┌─────────────┐     ┌─────────────┐     ┌─────────────────────────────────────────┐
+│   Next.js   │────▶│   Fastify   │────▶│  PostgreSQL  │  Redis  │  Temporal      │
+│   (Web)     │◀────│   (API)     │◀────│  (Drizzle)   │ (Cache) │  (Workflows)   │
+└─────────────┘     └──────┬──────┘     └─────────────────────────────────────────┘
                            │
-                           ▼
-                    ┌──────────────┐
-                    │ Python Workers│
-                    │ (FFmpeg, ML)  │
-                    └──────────────┘
+              ┌────────────┼────────────┐
+              ▼            ▼            ▼
+        ┌──────────┐ ┌──────────┐ ┌──────────┐
+        │  Ingest  │ │  Render  │ │  Future  │
+        │  Worker  │ │  Worker  │ │  Workers │
+        │(Temporal)│ │(Temporal)│ │(Temporal)│
+        └──────────┘ └──────────┘ └──────────┘
 ```
+
+Workers connect to Temporal on `localhost:7233`:
+- **Ingest Worker** listens on task queue `ingest` — probes uploaded media and reports metadata back to the API.
+- **Render Worker** listens on task queue `video-render-queue` — downloads clips, compiles the timeline with FFmpeg, uploads the output MP4, and finalizes the render job.
+
+All worker→API calls use the internal route prefix `/api/internal` protected by `x-internal-token`.
 
 **Detailed architecture:** See [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)
 
@@ -168,20 +208,22 @@ ai_video_editor/
 ├── packages/
 │   ├── shared-types/     # Zod schemas, enums, effects
 │   └── eslint-config/    # Shared lint rules
-├── services/
-│   ├── ingest-worker/    # Media probing, beat/shot detection
+├── services/             # Python uv workspace
+│   ├── ingest-worker/    # Temporal worker — media probing
 │   ├── style-worker/     # LUT, transition, text, camera analysis
 │   ├── reason-worker/    # Cutlist generation, clip ranking
-│   ├── render-worker/    # FFmpeg video compilation
+│   ├── render-worker/    # Temporal worker — FFmpeg compilation
 │   ├── upscale-worker/   # Post-render upscaling
 │   ├── shared-py/        # Shared Python library
 │   └── orchestrator.py   # Standalone pipeline CLI
 ├── infra/
-│   ├── docker/           # Docker Compose and Dockerfiles
+│   ├── local/            # Local Docker Compose stack
+│   ├── docker/           # Production Dockerfiles
 │   ├── observability/    # LGTM stack: Grafana + Loki + Tempo + Prometheus
-│   ├── temporal/         # Temporal workflows and activities
+│   ├── temporal/         # Temporal server config
 │   ├── modal/            # Modal.com deployment scripts
 │   └── terraform/        # Infrastructure as code
+├── e2e/                  # Playwright end-to-end tests
 ├── tests/                # Python integration tests
 ├── docs/                 # Documentation
 │   ├── ARCHITECTURE.md
@@ -199,9 +241,19 @@ ai_video_editor/
 ### Running the Application
 
 ```bash
+pnpm infra:up      # Start local infrastructure (Postgres, Redis, Temporal, MinIO)
 pnpm dev           # Start web + api + shared-types watch
-pnpm typecheck     # Type-check all packages
 pnpm obs:up        # Start observability stack (Grafana, Loki, Tempo, etc.)
+```
+
+### Running Workers
+
+```bash
+# Ingest worker — probes uploaded media
+uv run python -m ingest_worker
+
+# Render worker — compiles and uploads final videos
+uv run python -m render_worker
 ```
 
 ### Running Tests
@@ -215,12 +267,16 @@ pnpm --filter @ai-video-editor/api test:coverage
 pnpm --filter @ai-video-editor/web test
 
 # Python tests
-.venv\Scripts\python -m pytest tests/
+uv run pytest tests/
+
+# E2E tests (infrastructure + workers must be running)
+pnpm e2e:headed
 ```
 
 ### Code Quality
 
 ```bash
+pnpm typecheck     # Type-check all packages
 pnpm lint          # ESLint all packages
 pnpm format        # Prettier format
 ```
@@ -237,6 +293,22 @@ pnpm format        # Prettier format
 - **Component tests** for critical UI paths (Vitest + jsdom)
 - **Integration tests** for Python worker pipelines (pytest)
 - **E2E tests** for critical user journeys (Playwright)
+
+### E2E Runbook
+
+Local E2E tests cover two scenarios:
+- **Scenario A**: prompt + song only renders a valid 9:16 MP4.
+- **Scenario B**: reference-driven render produces a measurably different cut-list than Scenario A.
+
+Run order:
+```bash
+pnpm infra:up
+uv run python -m ingest_worker
+uv run python -m render_worker
+pnpm e2e:headed
+```
+
+A `NOT_PROVEN` wedge verdict is logged but does **not** fail the test — it is a product finding. Do not tag `v0.4.0` until the reference pipeline produces measurably different cut-lists.
 
 ### Coverage Thresholds (Enforced in CI)
 
@@ -280,12 +352,14 @@ The API is a RESTful HTTP API built on Fastify 4. All endpoints (except health c
 ### Docker Compose (Recommended for Self-Hosted)
 
 ```bash
-# Core infrastructure (Postgres, Redis, Temporal)
-docker compose -f infra/docker/docker-compose.yml up -d
+# Local / staging stack (Postgres, Redis, Temporal, MinIO)
+pnpm infra:up
 
 # Observability stack (Grafana, Loki, Tempo, Prometheus, OTel Collector, Promtail)
 pnpm obs:up
 ```
+
+Production builds use the Dockerfiles in `infra/docker/`.
 
 ### Modal.com (Serverless Workers)
 
@@ -327,21 +401,41 @@ pnpm install
 ### "Database connection refused"
 
 ```bash
-docker compose -f infra/docker/docker-compose.yml up -d postgres
+pnpm infra:up
 pnpm --filter @ai-video-editor/api db:migrate
 ```
 
 ### "Temporal workflow failed to start"
 
 ```bash
-docker compose -f infra/docker/docker-compose.yml up -d temporal
-# Verify at http://localhost:8088
+pnpm infra:up
+# Verify Temporal UI at http://localhost:8080
+```
+
+Make sure the ingest and render workers are running and registered on their task queues:
+```bash
+uv run python -m ingest_worker
+uv run python -m render_worker
 ```
 
 ### "Rate limit exceeded during development"
 
 ```bash
 NODE_ENV=test pnpm --filter @ai-video-editor/api dev
+```
+
+### "Worker fails with missing environment variables"
+
+Make sure `apps/api/.env.local` is sourced before starting workers. Required variables include:
+- `TEMPORAL_HOST`
+- `INTERNAL_WORKER_TOKEN`
+- `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`
+- `API_BASE` or inferred API URL
+
+Start workers with `uv run` from the repo root:
+```bash
+uv run python -m ingest_worker
+uv run python -m render_worker
 ```
 
 **More issues:** See [`docs/DEVELOPMENT.md`](./docs/DEVELOPMENT.md)

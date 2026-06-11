@@ -57,7 +57,7 @@ Every PR must have a body that answers **what**, **why**, and **how to verify**.
 - [ ] `pnpm typecheck` — clean
 - [ ] `pnpm --filter @ai-video-editor/api test` — N passing
 - [ ] `pnpm --filter @ai-video-editor/web test` — N passing
-- [ ] `.venv/Scripts/python -m pytest tests/` — N passing
+- [ ] `uv run pytest tests/` — N passing
 - [ ] Manual QA: [steps]
 
 ## Regression Risks

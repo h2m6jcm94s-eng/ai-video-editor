@@ -1490,7 +1490,7 @@ The root `pyproject.toml` had a `[build-system]` section with `hatchling`, but t
 | `.github/workflows/security.yml` | Security scanning |
 | `apps/api/vitest.config.ts` | API test configuration |
 | `apps/web/next.config.js` | Next.js configuration |
-| `infra/docker/docker-compose.yml` | Local development stack |
+| `infra/local/docker-compose.yml` | Local development stack |
 
 ---
 
@@ -1599,7 +1599,7 @@ uv run pytest tests/ -v --tb=short
 npx biome check . --no-errors-on-unmatched
 
 # Start local infrastructure
-docker compose -f infra/docker/docker-compose.yml up -d
+pnpm infra:up
 
 # Start API dev server
 cd apps/api
@@ -3138,7 +3138,7 @@ The root `pyproject.toml` had a `[build-system]` section with `hatchling`, but t
 | `.github/workflows/security.yml` | Security scanning |
 | `apps/api/vitest.config.ts` | API test configuration |
 | `apps/web/next.config.js` | Next.js configuration |
-| `infra/docker/docker-compose.yml` | Local development stack |
+| `infra/local/docker-compose.yml` | Local development stack |
 
 ---
 
@@ -3247,7 +3247,7 @@ uv run pytest tests/ -v --tb=short
 npx biome check . --no-errors-on-unmatched
 
 # Start local infrastructure
-docker compose -f infra/docker/docker-compose.yml up -d
+pnpm infra:up
 
 # Start API dev server
 cd apps/api
@@ -4408,7 +4408,7 @@ try {
 ### 24.1 Services
 
 ```yaml
-# infra/docker/docker-compose.yml
+# infra/local/docker-compose.yml
 version: "3.8"
 services:
   postgres:
@@ -4461,7 +4461,7 @@ volumes:
 
 ```bash
 # Start infrastructure
-docker compose -f infra/docker/docker-compose.yml up -d
+pnpm infra:up
 
 # Run migrations
 cd apps/api && pnpm db:migrate
@@ -4473,7 +4473,7 @@ cd apps/api && pnpm dev
 cd apps/web && pnpm dev
 
 # Start Temporal worker (Python)
-cd services/ingest-worker && python -m ingest_worker.worker
+uv run python -m ingest_worker
 ```
 
 ---
@@ -4506,11 +4506,11 @@ pnpm --filter @ai-video-editor/shared-types build
 uv sync --dev
 
 # Start infrastructure
-docker compose -f infra/docker/docker-compose.yml up -d
+pnpm infra:up
 
 # Set up environment variables
-cp apps/api/.env.example apps/api/.env
-cp apps/web/.env.example apps/web/.env
+# Create apps/api/.env.local with required values
+# Create apps/web/.env.local with required values
 # Fill in your Clerk keys, R2 credentials, etc.
 
 # Run database migrations
@@ -4558,7 +4558,7 @@ gh pr create --title "feat(scope): ..." --body "Closes #<issue-number>"
 **Fix:** Run `uv sync --dev` (not `uv sync --no-install-project --dev`)
 
 **Issue:** API tests fail with database connection error
-**Fix:** Start PostgreSQL: `docker compose -f infra/docker/docker-compose.yml up -d postgres`
+**Fix:** Start PostgreSQL: `pnpm infra:up postgres`
 
 **Issue:** Biome formatting errors on commit
 **Fix:** `npx biome check --write --no-errors-on-unmatched .`

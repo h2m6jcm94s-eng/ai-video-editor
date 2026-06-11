@@ -30,18 +30,22 @@ See the [Development Guide](./docs/DEVELOPMENT.md) for detailed setup instructio
 git clone <repo-url>
 cd ai_video_editor
 pnpm install
+uv sync
 
 # 2. Start infrastructure
-docker compose -f infra/docker/docker-compose.yml up -d
+pnpm infra:up
 
 # 3. Set up environment
-cp apps/api/.env.example apps/api/.env
-# Edit with your Clerk keys
+# Create apps/api/.env.local with Clerk keys, database URL, R2/MinIO credentials, INTERNAL_WORKER_TOKEN
 
 # 4. Run migrations
 pnpm --filter @ai-video-editor/api db:migrate
 
-# 5. Start dev
+# 5. Start workers
+uv run python -m ingest_worker
+uv run python -m render_worker
+
+# 6. Start dev
 pnpm dev
 ```
 
@@ -51,7 +55,7 @@ pnpm dev
 # All checks should pass
 pnpm typecheck           # TypeScript type checking
 pnpm --filter @ai-video-editor/api test:coverage  # API tests with coverage
-.venv\Scripts\python -m pytest tests/               # Python tests
+uv run pytest tests/                               # Python tests
 ```
 
 ---
@@ -347,18 +351,18 @@ Maintainers review for:
 ## Adding a New Worker
 
 1. Create `services/<name>-worker/` directory
-2. Add `pyproject.toml` with `shared-py` workspace dependency:
+2. Add `pyproject.toml` with `shared-py` as a uv workspace dependency:
    ```toml
    [project]
    name = "<name>-worker"
    dependencies = ["shared-py"]
    ```
-3. Implement logic in `services/<name>-worker/src/<name>_worker/`
-4. Add entry point in `services/<name>-worker/src/<name>_worker/__main__.py`
-5. Add Dockerfile in `infra/docker/Dockerfile.<name>`
-6. Add Modal deployment in `infra/modal/<name>_modal.py`
-7. Register Temporal activity in `infra/temporal/activities.py`
-8. Update `services/orchestrator.py`
+3. Implement activities in `src/<name>_worker/activities.py`
+4. Implement workflow(s) in `src/<name>_worker/workflows.py`
+5. Add entry point in `src/<name>_worker/__main__.py`
+6. Add Dockerfile in `infra/docker/Dockerfile.<name>`
+7. Add Modal deployment in `infra/modal/<name>_modal.py` (optional)
+8. Update `services/orchestrator.py` if needed
 9. Add tests in `tests/test_<name>.py`
 10. Update documentation
 

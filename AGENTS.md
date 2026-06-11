@@ -232,9 +232,11 @@ Current coverage: **86.79% statements, 76.67% branches**
 | Observability docs | `infra/observability/README.md` |
 | OpenAPI spec | `apps/api/openapi.yaml` |
 | AI providers (Python) | `services/shared-py/src/shared_py/ai_providers/` |
-| Temporal workflows | `infra/temporal/workflows.py` |
-| Temporal activities | `infra/temporal/activities.py` |
-| Docker setup | `infra/docker/docker-compose.yml` |
+| Ingest workflow | `services/ingest-worker/src/ingest_worker/workflows.py` |
+| Ingest activities | `services/ingest-worker/src/ingest_worker/activities.py` |
+| Render workflow | `services/render-worker/src/render_worker/workflows.py` |
+| Render activities | `services/render-worker/src/render_worker/activities.py` |
+| Local Docker setup | `infra/local/docker-compose.yml` |
 | CI workflows | `.github/workflows/` |
 | Test mocks | `apps/api/src/test/setup.ts` |
 | API tests | `apps/api/src/test/*.test.ts` |
@@ -494,7 +496,7 @@ Closes #202
 1. Run `pnpm typecheck` after any TS change
 2. Run `pnpm --filter @ai-video-editor/api test` after any backend change
 3. Run `pnpm --filter @ai-video-editor/web test` after any frontend change
-4. Run `.venv/Scripts/python -m pytest tests/` after any Python change
+4. Run `uv run pytest tests/` after any Python change
 5. Update this file or the layer-specific `AGENTS.md` if you add a new convention
 6. Update relevant docs in `docs/` if behavior changes
 7. Prefer minimal changes. The codebase is fragile; small PRs win

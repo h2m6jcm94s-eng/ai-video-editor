@@ -74,35 +74,33 @@ This installs all packages across the monorepo using pnpm workspaces. The first 
 
 ### 3. Install Python Dependencies
 
-```bash
-# Create Python virtual environment
-uv venv
+The Python services are managed as a [uv workspace](https://docs.astral.sh/uv/concepts/workspaces/). Run once from the repo root:
 
-# Install all Python packages across services
-.venv\Scripts\python -m pip install -e services/shared-py -e services/ingest-worker -e services/style-worker -e services/reason-worker -e services/render-worker -e services/upscale-worker
+```bash
+uv sync
 ```
 
-On macOS/Linux:
-```bash
-source .venv/bin/activate
-python -m pip install -e services/shared-py -e services/ingest-worker -e services/style-worker -e services/reason-worker -e services/render-worker -e services/upscale-worker
-```
+This installs all worker packages and shared libraries into the workspace.
 
 ### 4. Start Infrastructure Services
 
 ```bash
-# Core infrastructure (Postgres, Redis, Temporal)
-docker compose -f infra/docker/docker-compose.yml up -d
+# Core local infrastructure (Postgres, Redis, Temporal, MinIO)
+pnpm infra:up
 
 # Observability stack (Grafana, Loki, Tempo, Prometheus, OTel Collector, Promtail)
 pnpm obs:up
 ```
 
 Core services:
-- PostgreSQL 16 (port 5432)
-- Redis 7 (port 6379)
-- Temporal Server (port 7233)
-- Temporal UI (port 8088)
+- PostgreSQL 16 (`localhost:5432`) — database `ave`, user `ave`, password `ave`
+- Redis 7 (`localhost:6379`)
+- Temporal gRPC (`localhost:7233`)
+- Temporal UI (`http://localhost:8080`)
+- MinIO S3 API (`localhost:9000`)
+- MinIO Console (`http://localhost:9001`) — default credentials `minioadmin` / `minioadmin`
+
+The `ai-video-editor` bucket is created automatically by `minio-init`.
 
 Observability services:
 - Grafana (port 3001) — dashboards and exploration
@@ -113,23 +111,24 @@ Observability services:
 
 ### 5. Set Up Environment Variables
 
-Copy the example environment file:
+Create `apps/api/.env.local` with at least the following values:
 
 ```bash
-cp apps/api/.env.example apps/api/.env
-```
-
-Edit `apps/api/.env` with your values. See the [Environment Variables](#environment-variables) section for details.
-
-**Minimum required for local development:**
-```bash
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/aivideo
+DATABASE_URL=postgresql://ave:ave@localhost:5432/ave
 REDIS_URL=redis://localhost:6379
 TEMPORAL_HOST=localhost:7233
 WEB_URL=http://localhost:3000
 CLERK_SECRET_KEY=sk_test_...
 CLERK_PUBLISHABLE_KEY=pk_test_...
+INTERNAL_WORKER_TOKEN=dev-internal-token
+R2_ENDPOINT=http://localhost:9000
+R2_ACCESS_KEY_ID=minioadmin
+R2_SECRET_ACCESS_KEY=minioadmin
+R2_BUCKET_NAME=ai-video-editor
+LOG_LEVEL=info
 ```
+
+Workers read the same file, so keep all storage and worker token variables there. See the [Environment Variables](#environment-variables) section for the full list.
 
 ### 6. Run Database Migrations
 
@@ -137,7 +136,21 @@ CLERK_PUBLISHABLE_KEY=pk_test_...
 pnpm --filter @ai-video-editor/api db:migrate
 ```
 
-### 7. Start the Development Servers
+### 7. Start Workers
+
+Uploads and renders require Temporal workers. Run each in a separate terminal (from the repo root):
+
+```bash
+# Ingest worker — task queue `ingest`
+uv run python -m ingest_worker
+
+# Render worker — task queue `video-render-queue`
+uv run python -m render_worker
+```
+
+Ensure `apps/api/.env.local` is sourced or its variables are exported in the shell.
+
+### 8. Start the Development Servers
 
 ```bash
 pnpm dev
@@ -148,19 +161,20 @@ This starts:
 - API backend at `http://localhost:4000`
 - Shared types watch mode
 
-### 8. Verify Everything Works
+### 9. Verify Everything Works
 
 1. Open `http://localhost:3000`
-2. Sign in with Clerk (or use test credentials)
+2. Sign in with Clerk
 3. Create a new project
-4. Upload a test video clip
-5. The API should return a presigned URL and process the upload
+4. Upload a test video clip or audio file
+5. The asset spinner should switch to "ingested" once the ingest worker reports metadata
+6. Build a cut-list and click **Render** — the render worker should produce an output MP4
 
 ---
 
 ## Environment Variables
 
-### API Environment (`apps/api/.env`)
+### API Environment (`apps/api/.env.local`)
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
@@ -170,10 +184,11 @@ This starts:
 | `WEB_URL` | Yes | — | Frontend URL (for CORS) |
 | `CLERK_SECRET_KEY` | Yes | — | Clerk backend API key |
 | `CLERK_PUBLISHABLE_KEY` | Yes | — | Clerk frontend key (for JWT validation) |
+| `INTERNAL_WORKER_TOKEN` | Yes | `dev-internal-token` | Shared secret for `/api/internal` routes |
 | `R2_ENDPOINT` | No | — | S3-compatible storage endpoint |
 | `R2_ACCESS_KEY_ID` | No | — | R2/MinIO access key |
 | `R2_SECRET_ACCESS_KEY` | No | — | R2/MinIO secret key |
-| `R2_BUCKET_NAME` | No | `aivideo-assets` | Storage bucket name |
+| `R2_BUCKET_NAME` | No | `ai-video-editor` | Storage bucket name |
 | `ANTHROPIC_API_KEY` | No | — | Global Claude API key |
 | `OPENAI_API_KEY` | No | — | Global OpenAI API key |
 | `AI_PROVIDER` | No | `claude` | Primary AI provider |
@@ -201,8 +216,9 @@ Python workers read from the same `.env` file via `python-dotenv`. Key variables
 | `AI_PROVIDER` | No | Comma-separated provider priority |
 | `ANTHROPIC_API_KEY` | No | Claude API key |
 | `OPENAI_API_KEY` | No | OpenAI API key |
-| `TEMPORAL_HOST` | No | Temporal server address |
-| `R2_*` | No | Object storage credentials |
+| `TEMPORAL_HOST` | Yes | Temporal server address |
+| `INTERNAL_WORKER_TOKEN` | Yes | Shared secret for `/api/internal` routes |
+| `R2_*` | Yes | Object storage credentials |
 
 ---
 
@@ -258,7 +274,7 @@ MONITOR
 
 ### Temporal
 
-**Temporal UI:** `http://localhost:8088`
+**Temporal UI:** `http://localhost:8080`
 
 **Useful commands:**
 ```bash
@@ -274,9 +290,19 @@ temporal workflow query --workflow-id <id> --query-type getProgress
 
 **Temporal worker (local development):**
 ```bash
-cd services
-python orchestrator.py --reference ./test_assets/ref.mp4 --song ./test_assets/song.mp3 --clips ./test_assets/clips/ --output ./output.mp4 --tier full_remix
+uv run python -m ingest_worker
+uv run python -m render_worker
 ```
+
+### MinIO
+
+Local object storage is provided by MinIO.
+
+- **S3 API endpoint:** `http://localhost:9000`
+- **Console:** `http://localhost:9001` (`minioadmin` / `minioadmin`)
+- **Bucket:** `ai-video-editor` (auto-created by `minio-init`)
+
+Use the MinIO console to browse uploaded assets and rendered outputs.
 
 ---
 
@@ -305,34 +331,47 @@ pnpm --filter @ai-video-editor/shared-types dev
 
 ### Running Python Workers Locally
 
+Workers are started with `uv run` from the repo root:
+
 ```bash
-# Activate virtual environment
-source .venv/bin/activate  # macOS/Linux
-# or
-.venv\Scripts\activate  # Windows
+# Ingest worker — task queue `ingest`
+uv run python -m ingest_worker
 
-# Run ingest worker
-python -m ingest_worker
-
-# Run render worker
-python -m render_worker
-
-# Or use the orchestrator for end-to-end pipeline
-python services/orchestrator.py --reference <path> --song <path> --clips <dir> --output <path> --tier <tier>
+# Render worker — task queue `video-render-queue`
+uv run python -m render_worker
 ```
+
+Make sure `apps/api/.env.local` is sourced or variables are exported.
+
+### Running E2E Tests Locally
+
+The Playwright E2E suite covers two scenarios:
+- **Scenario A**: prompt + song only renders a valid 9:16 MP4.
+- **Scenario B**: reference-driven render produces a measurably different cut-list.
+
+Runbook:
+```bash
+pnpm infra:up
+uv run python -m ingest_worker   # terminal 1
+uv run python -m render_worker   # terminal 2
+pnpm e2e:headed
+```
+
+A `NOT_PROVEN` wedge verdict is logged but does not fail the test. Do not tag `v0.4.0` until the reference pipeline produces measurably different cut-lists.
 
 ### Running with Docker Compose (Full Stack)
 
 ```bash
-docker compose -f infra/docker/docker-compose.yml up --build
+docker compose -f infra/local/docker-compose.yml up --build
 ```
 
-This builds and runs the complete stack including:
+This builds and runs the complete local stack including:
 - API (Node.js)
 - Web (Next.js)
 - PostgreSQL
 - Redis
-- Temporal
+- Temporal + Temporal UI
+- MinIO
 - Python workers (2 replicas each)
 
 ---
@@ -372,14 +411,17 @@ Effects require changes across three layers:
    - Add FFmpeg filter chain implementation
 4. **Tests** for all three layers
 
-### Adding a New Worker
+### Adding a New Temporal Worker
 
 1. Create `services/<name>-worker/` with `pyproject.toml`
-2. Add `shared-py` as a workspace dependency
-3. Implement worker logic in `src/<name>_worker/`
-4. Add Modal deployment in `infra/modal/`
-5. Register Temporal activity in `infra/temporal/activities.py`
-6. Register in `services/orchestrator.py`
+2. Add `shared-py` as a uv workspace dependency
+3. Implement activities in `src/<name>_worker/activities.py`
+4. Implement workflow(s) in `src/<name>_worker/workflows.py`
+5. Add entry point in `src/<name>_worker/__main__.py`
+6. Add Modal deployment in `infra/modal/` (optional)
+7. Add Dockerfile in `infra/docker/Dockerfile.<name>` (optional)
+8. Update `services/orchestrator.py` if it should drive the worker
+9. Add tests and update docs
 
 ---
 
@@ -446,7 +488,7 @@ python services/orchestrator.py ... | jq 'select(.component == "render_worker")'
 ### Temporal Debugging
 
 **View workflow history in Temporal UI:**
-1. Open `http://localhost:8088`
+1. Open `http://localhost:8080`
 2. Find your workflow by ID
 3. Examine each activity execution, inputs, and outputs
 
@@ -478,7 +520,7 @@ pnpm install
 
 **Cause**: Missing Clerk secret key.
 
-**Fix**: Ensure `CLERK_SECRET_KEY` is set in `apps/api/.env` and `CLERK_PUBLISHABLE_KEY` is set in both API and web `.env` files.
+**Fix**: Ensure `CLERK_SECRET_KEY` and `CLERK_PUBLISHABLE_KEY` are set in `apps/api/.env.local`. The web app reads `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` from `apps/web/.env.local`.
 
 ### Database connection refused
 
@@ -486,7 +528,7 @@ pnpm install
 
 **Fix**:
 ```bash
-docker compose -f infra/docker/docker-compose.yml up -d postgres
+pnpm infra:up
 # Wait 10 seconds for initialization
 pnpm --filter @ai-video-editor/api db:migrate
 ```
@@ -498,10 +540,16 @@ pnpm --filter @ai-video-editor/api db:migrate
 **Fix**:
 ```bash
 # Check Temporal is running
-docker compose -f infra/docker/docker-compose.yml ps temporal
+pnpm infra:up
 
 # Check Temporal UI for worker registration
-open http://localhost:8088
+open http://localhost:8080
+```
+
+Start the workers:
+```bash
+uv run python -m ingest_worker
+uv run python -m render_worker
 ```
 
 ### Redis connection timeout
@@ -510,18 +558,17 @@ open http://localhost:8088
 
 **Fix**:
 ```bash
-docker compose -f infra/docker/docker-compose.yml up -d redis
+pnpm infra:up
 redis-cli ping  # Should return PONG
 ```
 
 ### Python import errors
 
-**Cause**: Virtual environment not activated or packages not installed.
+**Cause**: uv workspace packages not synced.
 
 **Fix**:
 ```bash
-source .venv/bin/activate  # or .venv\Scripts\activate on Windows
-python -m pip install -e services/shared-py -e services/ingest-worker -e services/style-worker -e services/reason-worker -e services/render-worker
+uv sync
 ```
 
 ### "Rate limit exceeded" during development
@@ -602,23 +649,27 @@ ai_video_editor/
 │   │       └── errors.ts          # Error codes and helpers
 │   ├── eslint-config/             # Shared ESLint configuration
 │   └── ui/                        # Shared UI components (if any)
-├── services/                      # Python workers
-│   ├── ingest-worker/             # Media probing, beat/shot detection
+├── services/                      # Python uv workspace
+│   ├── ingest-worker/             # Temporal worker — media probing
 │   ├── style-worker/              # LUT, transition, text, camera analysis
 │   ├── reason-worker/             # Cutlist generation, clip ranking
-│   ├── render-worker/             # FFmpeg video compilation
+│   ├── render-worker/             # Temporal worker — FFmpeg compilation
 │   ├── upscale-worker/            # Post-render upscaling
 │   ├── shared-py/                 # Shared Python library
 │   │   └── src/shared_py/
 │   │       ├── models.py          # Pydantic models
+│   │       ├── config.py          # Lazy settings proxy
 │   │       ├── logging_config.py  # Structured logging
 │   │       └── ai_providers/      # AI provider abstraction
 │   └── orchestrator.py            # Standalone pipeline CLI
 ├── infra/                         # Infrastructure
-│   ├── docker/                    # Docker Compose and Dockerfiles
-│   ├── temporal/                  # Temporal workflows and activities
+│   ├── local/                     # Local Docker Compose stack
+│   ├── docker/                    # Production Dockerfiles
+│   ├── observability/             # LGTM stack: Grafana + Loki + Tempo + Prometheus
+│   ├── temporal/                  # Temporal server config
 │   ├── modal/                     # Modal.com deployment scripts
 │   └── terraform/                 # Infrastructure as code (planned)
+├── e2e/                           # Playwright E2E tests
 ├── tests/                         # Python integration tests
 ├── docs/                          # Documentation
 └── package.json                   # Root workspace configuration

@@ -33,6 +33,7 @@ The AI Video Editor is a full-stack application that automates video editing thr
 5. **PostgreSQL** — Primary database for projects, assets, renders, users, templates
 6. **Redis** — Caching, job queue, and real-time progress pub/sub
 7. **R2/MinIO** — Object storage for video assets
+8. **Internal API** — Worker-facing routes under `/api/internal` protected by `x-internal-token`
 
 ---
 
@@ -194,6 +195,7 @@ All routes are registered in `app.ts` under the `/api` prefix. Auth middleware (
 | `projects.ts` | `/api/projects` | 8 endpoints | CRUD, cutlist, transcribe, AI prompt edit |
 | `uploads.ts` | `/api/uploads` | 4 endpoints | Presigned URLs, completion, asset probe |
 | `renders.ts` | `/api/renders` | 4 endpoints | Start render, get/list, completion webhook |
+| `internal.ts` | `/api/internal` | 5 endpoints | Worker-facing routes (`x-internal-token`) |
 | `templates.ts` | `/api/templates` | 6 endpoints | CRUD, apply to project |
 | `settings.ts` | `/api/settings` | 4 endpoints | Provider key management |
 | `presence.ts` | `/api/presence` | 2 endpoints | Real-time cursor presence |
@@ -346,53 +348,57 @@ All foreign keys have B-tree indexes. Additional indexes:
 
 ### Worker Responsibilities
 
-| Worker | Primary Tasks | Key Libraries |
-|---|---|---|
-| **Ingest Worker** | Probe media metadata, detect beats, detect shot boundaries | PyAV, librosa, allin1, PySceneDetect, TransNet V2 |
-| **Style Worker** | Extract LUT, classify transitions, detect text, analyze camera motion | PIL, scikit-learn, OpenCV |
-| **Reason Worker** | Generate cutlist, rank clips per slot | Claude/OpenAI APIs, programmatic fallback |
-| **Render Worker** | Compile final video with effects, transitions, overlays | FFmpeg, PyAV |
-| **Upscale Worker** | Optional post-render upscaling | Real-ESRGAN, Topaz (placeholder) |
+| Worker | Type | Primary Tasks | Key Libraries |
+|---|---|---|---|
+| **Ingest Worker** | Temporal | Probe uploaded media metadata | PyAV, temporalio |
+| **Render Worker** | Temporal | Compile final video with FFmpeg | FFmpeg, PyAV, temporalio |
+| **Style Worker** | On-demand | Extract LUT, classify transitions, detect text, analyze camera motion | PIL, scikit-learn, OpenCV |
+| **Reason Worker** | On-demand | Generate cutlist, rank clips per slot | Claude/OpenAI APIs, programmatic fallback |
+| **Upscale Worker** | On-demand | Optional post-render upscaling | Real-ESRGAN, Topaz (placeholder) |
 
-### Data Flow Between Workers
+### Temporal Task Queues
+
+| Queue | Worker | Workflow | Purpose |
+|---|---|---|---|
+| `ingest` | Ingest Worker | `ProbeAssetWorkflow` | One-shot probe of a single uploaded asset |
+| `video-render-queue` | Render Worker | `VideoRenderWorkflow` | End-to-end render: fetch, download, compile, upload, finalize |
+
+### Data Flow (Current Temporal Pipeline)
 
 ```
-Reference Video + Song + Clips
+User uploads asset
     ↓
-┌─────────────────┐
-│  Ingest Worker  │
-│  - probe ref    │
-│  - detect beats │
-│  - detect shots │
-└────────┬────────┘
+API creates asset row + presigned URL
+    ↓
+Browser uploads to MinIO/R2
+    ↓
+Browser calls POST /uploads/:assetId/complete
+    ↓
+API starts ProbeAssetWorkflow on `ingest` queue
+    ↓
+Ingest Worker downloads asset → probes with PyAV
+    ↓
+PATCH /api/internal/assets/:assetId/probe (metadata)
+    ↓
+Asset appears as "ingested" in the editor
          ↓
-┌─────────────────┐
-│  Style Worker   │
-│  - extract LUT  │
-│  - transitions  │
-│  - text overlays│
-│  - camera motion│
-└────────┬────────┘
+[User builds cut-list via prompt edit or reference pipeline]
          ↓
-┌─────────────────┐
-│  Reason Worker  │
-│  - generate     │
-│    cutlist      │
-│  - rank clips   │
-└────────┬────────┘
+User clicks Render
          ↓
-[User review / prompt edit]
+API starts VideoRenderWorkflow on `video-render-queue`
          ↓
-┌─────────────────┐
-│  Render Worker  │
-│  - compile      │
-│  - effects      │
-│  - transitions  │
-│  - audio mix    │
-└────────┬────────┘
+Render Worker:
+  1. fetch_project   → GET /api/internal/projects/:id
+  2. download_clips  → from MinIO/R2
+  3. compile_video   → FFmpeg filter_complex
+  4. upload_render   → PUT to MinIO/R2
+  5. finalize_render → PATCH /api/renders/:renderId/complete
          ↓
-    Final MP4
+    Final MP4 + project/render status updated
 ```
+
+All worker→API calls include `x-internal-token: <INTERNAL_WORKER_TOKEN>`.
 
 ### Shared Python Library
 
@@ -405,73 +411,50 @@ All workers depend on `shared-py` which provides:
 
 ## Render Workflow (Temporal)
 
-The `VideoRenderWorkflow` is a 10-step Temporal workflow that orchestrates the entire render pipeline:
+The `VideoRenderWorkflow` is a 5-step Temporal workflow that renders a project cut-list to a final MP4.
 
 ### Workflow Steps
 
 ```
-1. PROBE_INPUTS
-   └─► Probe reference video, song, and all clips
-   └─► Extract metadata: duration, resolution, codec, fps
+1. fetch_project
+   └─► GET /api/internal/projects/:id
+   └─► Returns cut-list, asset IDs, asset key map, active render job
 
-2. DETECT_BEATS
-   └─► Analyze song for beats, downbeats, and musical sections
-   └─► Output: BeatGrid with timestamps and confidence
+2. download_clips
+   └─► Download each clip from MinIO/R2 to a local temp path
+   └─► Uses asset key map from fetch_project
 
-3. DETECT_SHOTS
-   └─► Analyze reference video for shot boundaries
-   └─► Output: ShotBoundary array with transition types
+3. compile_video
+   └─► Build FFmpeg filter_complex from cut-list
+   └─► Apply video effects, transitions, overlays, audio mix
+   └─► Output: local MP4 file
 
-4. ANALYZE_REFERENCE_STYLE
-   └─► Extract LUT (color grading)
-   └─► Classify transitions
-   └─► Detect text overlays
-   └─► Analyze camera motion
-   └─► Output: StyleAnalysis
+4. upload_render
+   └─► Upload rendered MP4 to MinIO/R2
+   └─► Return storage key
 
-5. EMBED_USER_CLIPS
-   └─► Generate embeddings for user clips
-   └─► Compute shot type, aesthetic, motion features
+5. finalize_render
+   └─► PATCH /api/renders/:renderId/complete
+   └─► API updates render status, project status, output asset
+```
 
-6. GENERATE_CUTLIST
-   └─► AI-generated or programmatic cutlist
-   └─► Maps shots to time slots in the song
-   └─► Output: CutList with globals + slots
+### Ingest Workflow
 
-7. RANK_CLIPS_PER_SLOT
-   └─► For each slot, rank user clips by relevance
-   └─► Weighted scoring: semantic, shot type, aesthetic, motion, duration
-   └─► Select top-1 clip per slot
-   └─► Output: CutList with assigned clip IDs + confidence score
+The `ProbeAssetWorkflow` is a single-activity workflow on the `ingest` queue:
 
-   [ASSISTED MODE: Workflow pauses here for user approval]
-   
-   User can:
-   - Approve cutlist → workflow continues
-   - Edit cutlist manually → send signal to workflow
-   - Prompt-edit → API calls AI service, updates cutlist
-
-8. RENDER_720P
-   └─► Compile final video with FFmpeg
-   └─► Apply effects, transitions, overlays, LUT
-   └─► Mix audio tracks
-   └─► Output: 720p MP4 + 360p preview
-
-9. UPLOAD_TO_R2
-   └─► Upload rendered video to object storage
-   └─► Update render record with outputAssetId
-
-10. NOTIFY_USER
-    └─► Send completion notification
-    └─► Update project status
+```
+ProbeAssetWorkflow(input: { asset_id, storage_key })
+  └─► probe_asset
+      └─► Download asset from MinIO/R2
+      └─► Probe with PyAV
+      └─► PATCH /api/internal/assets/:assetId/probe
 ```
 
 ### Temporal Configuration
 
-- **Task Queue**: `video-render-queue`
 - **Namespace**: `default`
+- **Task queues**: `ingest` (probe), `video-render-queue` (render)
 - **Retry Policy**: Exponential backoff, max 3 attempts per activity
-- **Signal**: `cutlistApproved` — resumes workflow after user review in assisted mode
 - **Query**: `getProgress` — returns current stage and progress percentage
 
 ---
@@ -545,7 +528,11 @@ Browser PUTs file directly to R2 (bypasses API)
 On success, browser notifies API:
     POST /api/uploads/:assetId/complete
     ↓
-API probes file with PyAV (via ingest worker or direct)
+API starts `ProbeAssetWorkflow` on the `ingest` task queue
+    ↓
+Ingest Worker downloads the file, probes with PyAV
+    ↓
+PATCH /api/internal/assets/:assetId/probe
     ↓
 API stores metadata: duration, width, height, fps
     ↓
@@ -576,17 +563,15 @@ API validates:
     ↓
 API creates render record (status: queued)
     ↓
-API starts Temporal workflow
-    ↓
-API enqueues job to Redis queue
+API starts `VideoRenderWorkflow` on `video-render-queue`
     ↓
 Response: { job: { id, status, stage } }
     ↓
 Frontend opens SSE to /api/progress/:jobId/events
     ↓
-Temporal worker picks up workflow
+Render Worker picks up workflow
     ↓
-[Pipeline executes — see Temporal Workflow section]
+[Pipeline executes — see Render Workflow section]
     ↓
 Each stage publishes progress to Redis pub/sub
     ↓
@@ -594,7 +579,7 @@ SSE endpoint broadcasts progress to frontend
     ↓
 Workflow completes
     ↓
-Worker POSTs to /api/renders/:jobId/complete
+Worker PATCHes /api/renders/:jobId/complete
     ↓
 API updates render status and project status
     ↓

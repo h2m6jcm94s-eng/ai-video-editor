@@ -131,17 +131,16 @@ pnpm --filter @ai-video-editor/web vitest --ui
 
 ```bash
 # All Python tests
-.venv\Scripts\python -m pytest tests/  # Windows
-python -m pytest tests/                # macOS/Linux
+uv run pytest tests/
 
 # With coverage
-python -m pytest tests/ --cov=services/shared-py/src --cov-report=html
+uv run pytest tests/ --cov=services/shared-py/src --cov-report=html
 
 # Specific test file
-python -m pytest tests/test_ingest.py -v
+uv run pytest tests/test_ingest.py -v
 
 # Run with markers
-python -m pytest tests/ -m "not slow"
+uv run pytest tests/ -m "not slow"
 ```
 
 ### Full Test Suite
@@ -153,8 +152,68 @@ pnpm test
 # This runs:
 # 1. pnpm --filter @ai-video-editor/api test
 # 2. pnpm --filter @ai-video-editor/web test
-# 3. python -m pytest tests/
+# 3. uv run pytest tests/
 ```
+
+---
+
+## E2E Testing
+
+E2E tests live in `e2e/` and are driven by Playwright. They cover the full user journey from project creation through rendered output.
+
+### Scenarios
+
+- **Scenario A**: prompt + song only renders a valid 9:16 MP4.
+- **Scenario B**: reference-driven render produces a measurably different cut-list than Scenario A.
+
+### Local Runbook
+
+```bash
+# 1. Start infrastructure
+pnpm infra:up
+
+# 2. Start workers in separate terminals
+uv run python -m ingest_worker
+uv run python -m render_worker
+
+# 3. Run E2E in headed mode
+pnpm e2e:headed
+
+# Or headless
+pnpm e2e
+```
+
+### Wedge Verdict
+
+Scenario B compares its cut-list against Scenario A using the wedge helper in `e2e/helpers/wedge.ts`. Possible verdicts:
+
+| Verdict | Meaning |
+|---|---|
+| `PROVEN` | Reference pipeline produced a measurably different cut-list |
+| `NOT_PROVEN` | Differences are within tolerance — product finding, not a test failure |
+
+The E2E suite **passes** even when the wedge is `NOT_PROVEN`, but `v0.4.0` must **not** be tagged until the reference pipeline consistently produces `PROVEN` results.
+
+### E2E Configuration
+
+Playwright config: `e2e/playwright.config.ts`
+
+Key settings:
+- `workers: 1` — scenarios run sequentially (shared test user)
+- `timeout: 15 * 60 * 1000` — 15 minutes per test
+- `fullyParallel: false`
+- Loads `.env.local` for `E2E_TEST_USER_EMAIL` / `E2E_TEST_USER_PASSWORD`
+
+### E2E Fixtures
+
+Fixtures live in `e2e/fixtures/`:
+
+| File | Purpose |
+|---|---|
+| `reference.mp4` | Reference style video |
+| `song.mp3` | Song for sync |
+| `clip-1.mp4`, `clip-2.mp4`, `clip-3.mp4` | User clips |
+| `manifest.json` | Fixture metadata |
 
 ---
 
@@ -706,7 +765,7 @@ Tests run automatically on every PR via GitHub Actions:
 |---|---|---|
 | `test-api` | `pnpm --filter @ai-video-editor/api test:coverage` | ~45s |
 | `test-web` | `pnpm --filter @ai-video-editor/web test` | ~30s |
-| `test-py` | `python -m pytest tests/` | ~25s |
+| `test-py` | `uv run pytest tests/` | ~25s |
 | `test-js` | Lint + typecheck + build | ~75s |
 
 All must pass before merge.
