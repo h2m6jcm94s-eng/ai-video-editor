@@ -4,35 +4,9 @@
 
 ---
 
-## 1. Issue-First Rule (Scoped)
+## 1. Issue-First Rule (Non-Negotiable)
 
-**An issue is required before writing code for:**
-- New features (any net-new capability)
-- BREAKING changes (API, DB schema, observable behavior)
-- Security-sensitive work (auth, crypto, rate-limiting, secrets)
-- Anything >150 LOC
-
-**An issue is NOT required for:**
-- Unit / integration tests (the PR description is enough)
-- Bug fixes ≤50 LOC where the diff is self-explanatory
-- Refactors ≤50 LOC with no behavior change
-- Documentation, comments, README updates
-- Chores: dependency bumps, config tweaks, lint fixes
-- CI-only changes
-- Test fixtures
-
-**Even when an issue is required, the body can be short.** A 3-sentence web-UI issue is enough — Problem / Solution / Verification, one line each. The full mandatory-sections template (Problem Statement, Root Cause, Proposed Solution, Alternatives Considered, Verification Plan, Semantic Classification) is reserved for:
-- Features that gate a release tag
-- BREAKING changes
-- Architectural decisions (new service, new dependency, new pattern)
-
-For everything else, the PR description carries the context. Title + 2 paragraphs + verification checklist.
-
-### When to use the full template
-If a stakeholder might ask "why did we build this?" 6 months later and the answer needs to be searchable, use the full template. Otherwise short form.
-
-### Rationale
-Solo-founder phase prioritizes velocity. Audit trail still matters for big decisions. Relaxing the rule scope captures both. Re-tighten when a second contributor joins.
+**Before writing any code, open a GitHub issue.** No exceptions — not for bugs, not for features, not for refactors.
 
 ### Issue Template (Mandatory Sections)
 
