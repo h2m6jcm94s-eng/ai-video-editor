@@ -13,6 +13,9 @@ import { redis } from "../lib/redis";
 import { BUCKET, s3 } from "../services/storage";
 
 const HEALTH_TIMEOUT_MS = 1_000;
+const HEALTH_CACHE_TTL_MS = 5_000;
+
+let cachedReady: { payload: unknown; at: number } | null = null;
 
 async function withTimeout<T>(
   label: string,
@@ -51,7 +54,12 @@ export async function healthRoutes(app: FastifyInstance) {
     }
   });
 
-  app.get("/ready", async () => {
+  app.get("/ready", { config: { rateLimit: { max: 12, timeWindow: "1 minute" } } }, async () => {
+    const now = Date.now();
+    if (process.env.NODE_ENV !== "test" && cachedReady && now - cachedReady.at < HEALTH_CACHE_TTL_MS) {
+      return cachedReady.payload;
+    }
+
     const [dbCheck, redisCheck, r2Check, temporalCheck] = await Promise.all([
       withTimeout("db", db.execute(sql`SELECT 1`)),
       withTimeout("redis", redis.ping()),
@@ -64,7 +72,7 @@ export async function healthRoutes(app: FastifyInstance) {
 
     const allOk = dbCheck.ok && redisCheck.ok && r2Check.ok && temporalCheck.ok;
 
-    return {
+    const payload = {
       status: allOk ? "ok" : "degraded",
       checks: {
         db: dbCheck,
@@ -73,5 +81,8 @@ export async function healthRoutes(app: FastifyInstance) {
         temporal: temporalCheck,
       },
     };
+
+    cachedReady = { payload, at: now };
+    return payload;
   });
 }

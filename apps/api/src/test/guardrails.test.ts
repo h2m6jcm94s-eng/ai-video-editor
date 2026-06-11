@@ -87,11 +87,6 @@ describe("Guardrails evaluateGuardrails (with enabled env)", () => {
 
     const { validatePromptGuardrails } = await import("../middleware/guardrails");
     const app = await buildApp();
-    const reply = app.inject({
-      method: "POST",
-      url: "/api/projects/proj-1/prompt",
-      payload: { prompt: "bad" },
-    });
 
     // We can't easily test through the full route because guardrails is a preHandler.
     // Instead, test the middleware directly.
