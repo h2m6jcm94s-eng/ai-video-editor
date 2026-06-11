@@ -5,9 +5,13 @@
  * Token counting utilities using tiktoken (dynamic import for ESM compatibility).
  */
 
-let encoding: any = null;
+interface TokenEncoder {
+  encode(text: string): number[];
+}
 
-async function getEncoding(): Promise<any> {
+let encoding: TokenEncoder | null = null;
+
+async function getEncoding(): Promise<TokenEncoder> {
   if (encoding) return encoding;
   const { getEncoding: getEnc } = await import("js-tiktoken");
   encoding = getEnc("cl100k_base"); // Used by GPT-4, GPT-3.5, Claude
