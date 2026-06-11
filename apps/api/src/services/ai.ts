@@ -16,7 +16,10 @@ import { aiCallDurationSeconds, aiCallsTotal, guardrailsOutputBlocksTotal } from
 import { countTokens } from "../lib/tokens";
 import { validateAIResponse } from "../middleware/guardrails";
 
-async function getProviderKey(userId: string, provider: "anthropic" | "openai"): Promise<string | undefined> {
+async function getProviderKey(
+  userId: string,
+  provider: "anthropic" | "openai" | "kimi",
+): Promise<string | undefined> {
   const row = await db.query.providerKeys.findFirst({
     where: and(eq(providerKeys.userId, userId), eq(providerKeys.provider, provider)),
   });
@@ -202,6 +205,134 @@ async function callClaude(context: PromptEditContext): Promise<PromptEditResult>
       const categories = retryGuardrailsCheck.flagged_categories || ["unknown"];
       for (const category of categories) {
         guardrailsOutputBlocksTotal.inc({ category, provider: "claude" });
+      }
+      return {
+        diff: [],
+        explanation:
+          retryGuardrailsCheck.reason || "AI response was blocked by content filters. No changes applied.",
+        fallback: safeFallbackFor("prompt_edit", "content_filter", { previousCutList: context.cutList }),
+      };
+    }
+
+    parsed = parseResponse(retry.text);
+    if (!parsed) {
+      return {
+        diff: [],
+        explanation: "AI returned an unexpected response. No changes applied.",
+        fallback: safeFallbackFor("prompt_edit", "invalid_json", { previousCutList: context.cutList }),
+      };
+    }
+    text = retry.text;
+  }
+
+  const promptText = buildPrompt(context);
+  parsed.usage = {
+    promptTokens: await countTokens(promptText),
+    completionTokens: await countTokens(text),
+    totalTokens: (await countTokens(promptText)) + (await countTokens(text)),
+  };
+  return parsed;
+}
+
+async function callKimiOnce(
+  context: PromptEditContext,
+  hint: string,
+): Promise<{ text: string; durationMs: number }> {
+  const start = performance.now();
+  const kimiKey = (await getProviderKey(context.userId, "kimi")) || process.env.KIMI_API_KEY || "";
+  if (!kimiKey) {
+    aiCallsTotal.inc({ provider: "kimi", status: "missing_key" });
+    const err: Error & { code?: string } = new Error("KIMI_API_KEY not configured");
+    err.code = "PROVIDER_KEY_MISSING";
+    throw err;
+  }
+
+  const res = await fetchWithRetry("https://api.moonshot.cn/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${kimiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "moonshot-v1-8k",
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT + hint },
+        { role: "user", content: buildPrompt(context) },
+      ],
+      response_format: { type: "json_object" },
+      max_tokens: 4096,
+    }),
+    signal: AbortSignal.timeout(60_000),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    const status = res.status === 429 ? "rate_limited" : res.status >= 500 ? "server_error" : "client_error";
+    aiCallsTotal.inc({ provider: "kimi", status });
+    aiCallDurationSeconds.observe({ provider: "kimi" }, (performance.now() - start) / 1000);
+    const error: Error & { code?: string } = new Error(`Kimi API error: ${res.status} ${err}`);
+    if (res.status === 401 || res.status === 403) error.code = "PROVIDER_INVALID_RESPONSE";
+    if (res.status === 429) error.code = "PROVIDER_RATE_LIMITED";
+    throw error;
+  }
+
+  const data = (await res.json()) as {
+    choices: Array<{ message: { content: string }; finish_reason?: string }>;
+  };
+
+  if (data.choices?.[0]?.finish_reason === "content_filter") {
+    aiCallsTotal.inc({ provider: "kimi", status: "content_filter" });
+    aiCallDurationSeconds.observe({ provider: "kimi" }, (performance.now() - start) / 1000);
+    return { text: "", durationMs: performance.now() - start };
+  }
+
+  const text = data.choices?.[0]?.message?.content || "{}";
+  aiCallsTotal.inc({ provider: "kimi", status: "success" });
+  aiCallDurationSeconds.observe({ provider: "kimi" }, (performance.now() - start) / 1000);
+  return { text, durationMs: performance.now() - start };
+}
+
+async function callKimi(context: PromptEditContext): Promise<PromptEditResult> {
+  let { text } = await callKimiOnce(context, "");
+
+  if (text === "") {
+    return {
+      diff: [],
+      explanation: "AI response was blocked by content filters. No changes applied.",
+      fallback: safeFallbackFor("prompt_edit", "content_filter", { previousCutList: context.cutList }),
+    };
+  }
+
+  const guardrailsCheck = await validateAIResponse(text, "kimi");
+  if (!guardrailsCheck.allowed) {
+    const categories = guardrailsCheck.flagged_categories || ["unknown"];
+    for (const category of categories) {
+      guardrailsOutputBlocksTotal.inc({ category, provider: "kimi" });
+    }
+    return {
+      diff: [],
+      explanation:
+        guardrailsCheck.reason || "AI response was blocked by content filters. No changes applied.",
+      fallback: safeFallbackFor("prompt_edit", "content_filter", { previousCutList: context.cutList }),
+    };
+  }
+
+  let parsed = parseResponse(text);
+  if (!parsed) {
+    const retry = await callKimiOnce(context, CAMELCASE_HINT);
+    if (retry.text === "") {
+      return {
+        diff: [],
+        explanation: "AI response was blocked by content filters. No changes applied.",
+        fallback: safeFallbackFor("prompt_edit", "content_filter", { previousCutList: context.cutList }),
+      };
+    }
+
+    const retryGuardrailsCheck = await validateAIResponse(retry.text, "kimi");
+    if (!retryGuardrailsCheck.allowed) {
+      const categories = retryGuardrailsCheck.flagged_categories || ["unknown"];
+      for (const category of categories) {
+        guardrailsOutputBlocksTotal.inc({ category, provider: "kimi" });
       }
       return {
         diff: [],
@@ -545,7 +676,10 @@ export async function applyPromptEdit(context: PromptEditContext): Promise<
     usage: { promptTokens: number; completionTokens: number; totalTokens: number };
   }
 > {
-  const provider = process.env.AI_PROVIDER?.split(",")[0]?.trim() || "claude";
+  const provider =
+    process.env.AI_PROVIDER_TOOLCALL?.split(",")[0]?.trim() ||
+    process.env.AI_PROVIDER?.split(",")[0]?.trim() ||
+    "claude";
 
   let result: PromptEditResult;
 
@@ -568,7 +702,12 @@ export async function applyPromptEdit(context: PromptEditContext): Promise<
   }
 
   try {
-    if (provider === "claude") {
+    if (provider === "kimi") {
+      result = await withFallback(
+        () => callKimi(context),
+        () => callClaude(context),
+      );
+    } else if (provider === "claude") {
       result = await withFallback(
         () => callClaude(context),
         () => callOpenAI(context),
