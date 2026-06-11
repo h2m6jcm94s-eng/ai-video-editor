@@ -156,6 +156,20 @@ export const budgetViolationsTotal = getOrCreateCounter({
   labelNames: ["user_id"],
 });
 
+// ─── Anomaly Metrics ────────────────────────────────────────────────────────
+
+export const anomaliesDetectedTotal = getOrCreateCounter({
+  name: "ave_anomalies_detected_total",
+  help: "Total anomalies detected by metric type",
+  labelNames: ["metric"],
+});
+
+export const slidingWindowRejectsTotal = getOrCreateCounter({
+  name: "ave_sliding_window_rejects_total",
+  help: "Total requests rejected by sliding window rate limiter",
+  labelNames: ["route"],
+});
+
 // ─── Startup / Health ───────────────────────────────────────────────────────
 
 export const startupTimestamp = getOrCreateGauge({

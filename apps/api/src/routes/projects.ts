@@ -18,6 +18,7 @@ import { db } from "../db";
 import { assets, projects, renders } from "../db/schema";
 import { cacheDel, cacheGet, cacheSet } from "../lib/cache";
 import { sendError } from "../lib/errors";
+import { slidingWindowCheck } from "../lib/rateLimit";
 import { validatePromptGuardrails } from "../middleware/guardrails";
 import { enforceTokenBudget, getUsageForUser, incrementTokenUsage } from "../middleware/tokenBudget";
 import {
@@ -232,7 +233,28 @@ export async function projectRoutes(app: FastifyInstance) {
   app.post(
     "/:id/prompt",
     {
-      preHandler: [validateBody(promptEditSchema), validatePromptGuardrails, enforceTokenBudget],
+      preHandler: [
+        validateBody(promptEditSchema),
+        validatePromptGuardrails,
+        enforceTokenBudget,
+        async (request, reply) => {
+          const userId = request.userId;
+          const rl = await slidingWindowCheck({
+            key: `rl:prompt:${userId}`,
+            limit: 10,
+            windowMs: 60_000,
+          });
+          if (!rl.allowed) {
+            return sendError(
+              reply,
+              429,
+              `Rate limit exceeded. Try again in ${Math.ceil((rl.resetMs - Date.now()) / 1000)}s.`,
+              "RATE_LIMITED",
+              { resetMs: rl.resetMs, limit: rl.limit },
+            );
+          }
+        },
+      ],
       config: {
         rateLimit: {
           max: 10,

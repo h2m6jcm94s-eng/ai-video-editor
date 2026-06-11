@@ -130,6 +130,9 @@ vi.mock("ioredis", () => ({
     ping = vi.fn().mockResolvedValue("PONG");
     zadd = vi.fn().mockResolvedValue(1);
     zpopmin = vi.fn().mockResolvedValue([]);
+    zremrangebyscore = vi.fn().mockResolvedValue(0);
+    zcard = vi.fn().mockResolvedValue(0);
+    zrange = vi.fn().mockResolvedValue([]);
     publish = vi.fn().mockResolvedValue(1);
     get = vi.fn().mockResolvedValue(null);
     setex = vi.fn().mockResolvedValue("OK");
@@ -137,6 +140,10 @@ vi.mock("ioredis", () => ({
     keys = vi.fn().mockResolvedValue([]);
     incrby = vi.fn().mockResolvedValue(1);
     expire = vi.fn().mockResolvedValue(1);
+    pexpire = vi.fn().mockResolvedValue(1);
+    lpush = vi.fn().mockResolvedValue(1);
+    ltrim = vi.fn().mockResolvedValue("OK");
+    lrange = vi.fn().mockResolvedValue([]);
     pipeline = vi.fn(() => ({
       incrby: vi.fn().mockReturnThis(),
       expire: vi.fn().mockReturnThis(),
