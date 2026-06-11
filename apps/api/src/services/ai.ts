@@ -177,7 +177,7 @@ async function callClaude(context: PromptEditContext): Promise<PromptEditResult>
   if (!guardrailsCheck.allowed) {
     const categories = guardrailsCheck.flagged_categories || ["unknown"];
     for (const category of categories) {
-      guardrailsOutputBlocksTotal.inc({ category, provider: "claude" });
+      guardrailsOutputBlocksTotal.inc({ stage: "output", reason: category });
     }
     return {
       diff: [],
@@ -204,7 +204,7 @@ async function callClaude(context: PromptEditContext): Promise<PromptEditResult>
     if (!retryGuardrailsCheck.allowed) {
       const categories = retryGuardrailsCheck.flagged_categories || ["unknown"];
       for (const category of categories) {
-        guardrailsOutputBlocksTotal.inc({ category, provider: "claude" });
+        guardrailsOutputBlocksTotal.inc({ stage: "output", reason: category });
       }
       return {
         diff: [],
@@ -426,7 +426,7 @@ async function callGroq(context: PromptEditContext): Promise<PromptEditResult> {
   if (!guardrailsCheck.allowed) {
     const categories = guardrailsCheck.flagged_categories || ["unknown"];
     for (const category of categories) {
-      guardrailsOutputBlocksTotal.inc({ category, provider: "groq" });
+      guardrailsOutputBlocksTotal.inc({ stage: "output", reason: category });
     }
     return {
       diff: [],
@@ -451,7 +451,7 @@ async function callGroq(context: PromptEditContext): Promise<PromptEditResult> {
     if (!retryGuardrailsCheck.allowed) {
       const categories = retryGuardrailsCheck.flagged_categories || ["unknown"];
       for (const category of categories) {
-        guardrailsOutputBlocksTotal.inc({ category, provider: "groq" });
+        guardrailsOutputBlocksTotal.inc({ stage: "output", reason: category });
       }
       return {
         diff: [],
@@ -496,7 +496,7 @@ async function callOpenRouter(context: PromptEditContext): Promise<PromptEditRes
   if (!guardrailsCheck.allowed) {
     const categories = guardrailsCheck.flagged_categories || ["unknown"];
     for (const category of categories) {
-      guardrailsOutputBlocksTotal.inc({ category, provider: "openrouter" });
+      guardrailsOutputBlocksTotal.inc({ stage: "output", reason: category });
     }
     return {
       diff: [],
@@ -521,7 +521,7 @@ async function callOpenRouter(context: PromptEditContext): Promise<PromptEditRes
     if (!retryGuardrailsCheck.allowed) {
       const categories = retryGuardrailsCheck.flagged_categories || ["unknown"];
       for (const category of categories) {
-        guardrailsOutputBlocksTotal.inc({ category, provider: "openrouter" });
+        guardrailsOutputBlocksTotal.inc({ stage: "output", reason: category });
       }
       return {
         diff: [],
@@ -566,7 +566,7 @@ async function callKimi(context: PromptEditContext): Promise<PromptEditResult> {
   if (!guardrailsCheck.allowed) {
     const categories = guardrailsCheck.flagged_categories || ["unknown"];
     for (const category of categories) {
-      guardrailsOutputBlocksTotal.inc({ category, provider: "kimi" });
+      guardrailsOutputBlocksTotal.inc({ stage: "output", reason: category });
     }
     return {
       diff: [],
@@ -591,7 +591,7 @@ async function callKimi(context: PromptEditContext): Promise<PromptEditResult> {
     if (!retryGuardrailsCheck.allowed) {
       const categories = retryGuardrailsCheck.flagged_categories || ["unknown"];
       for (const category of categories) {
-        guardrailsOutputBlocksTotal.inc({ category, provider: "kimi" });
+        guardrailsOutputBlocksTotal.inc({ stage: "output", reason: category });
       }
       return {
         diff: [],
@@ -696,7 +696,7 @@ async function callOpenAI(context: PromptEditContext): Promise<PromptEditResult>
   if (!guardrailsCheck.allowed) {
     const categories = guardrailsCheck.flagged_categories || ["unknown"];
     for (const category of categories) {
-      guardrailsOutputBlocksTotal.inc({ category, provider: "openai" });
+      guardrailsOutputBlocksTotal.inc({ stage: "output", reason: category });
     }
     return {
       diff: [],
@@ -723,7 +723,7 @@ async function callOpenAI(context: PromptEditContext): Promise<PromptEditResult>
     if (!retryGuardrailsCheck.allowed) {
       const categories = retryGuardrailsCheck.flagged_categories || ["unknown"];
       for (const category of categories) {
-        guardrailsOutputBlocksTotal.inc({ category, provider: "openai" });
+        guardrailsOutputBlocksTotal.inc({ stage: "output", reason: category });
       }
       return {
         diff: [],
@@ -951,21 +951,37 @@ export async function applyPromptEdit(context: PromptEditContext): Promise<
     );
   }
 
+  function classifyProviderError(err: unknown): { provider: string; code: string } {
+    const code =
+      err !== null && typeof err === "object" && "code" in err ? (err as { code?: string }).code : undefined;
+    const message = err instanceof Error ? err.message : "";
+
+    if (code === "PROVIDER_KEY_MISSING") return { provider: "", code: "PROVIDER_KEY_MISSING" };
+    if (code === "PROVIDER_TIMEOUT") return { provider: "", code: "PROVIDER_TIMEOUT" };
+    if (code === "PROVIDER_RATE_LIMITED") return { provider: "", code: "PROVIDER_RATE_LIMITED" };
+    if (code === "PROVIDER_QUOTA_EXCEEDED") return { provider: "", code: "PROVIDER_QUOTA_EXCEEDED" };
+    if (code === "PROVIDER_INVALID_RESPONSE") return { provider: "", code: "PROVIDER_INVALID_RESPONSE" };
+    if (/timeout|timed out/i.test(message)) return { provider: "", code: "PROVIDER_TIMEOUT" };
+    if (/quota|exceeded|limit/i.test(message)) return { provider: "", code: "PROVIDER_QUOTA_EXCEEDED" };
+    return { provider: "", code: "UNKNOWN" };
+  }
+
   async function withFallback<T>(attempts: Array<{ name: string; fn: () => Promise<T> }>): Promise<T> {
-    const errors: Array<{ provider: string; reason: string }> = [];
+    const errors: Array<{ provider: string; code: string }> = [];
     for (const attempt of attempts) {
       try {
         return await attempt.fn();
       } catch (err) {
         if (isMissingKey(err)) throw err;
+        const classified = classifyProviderError(err);
         errors.push({
           provider: attempt.name,
-          reason: err instanceof Error ? err.message : "unknown",
+          code: classified.code,
         });
       }
     }
     const err: Error & { code?: string; details?: unknown } = new Error(
-      `All providers failed. Attempted: ${errors.map((e) => `${e.provider}: ${e.reason}`).join("; ")}`,
+      `All providers failed. Attempted: ${errors.map((e) => `${e.provider}: ${e.code}`).join("; ")}`,
     );
     err.code = "ALL_PROVIDERS_FAILED";
     err.details = { attempted: errors };

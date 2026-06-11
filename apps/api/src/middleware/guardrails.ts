@@ -143,12 +143,11 @@ export async function validatePromptGuardrails(request: FastifyRequest, reply: F
   const result = await evaluateGuardrails(prompt, request.url, request.log);
 
   if (!result.allowed) {
-    const route = request.routeOptions?.url || request.url;
     const categories = result.flagged_categories || ["unknown"];
     for (const category of categories) {
-      guardrailsBlocksTotal.inc({ category, route });
+      guardrailsBlocksTotal.inc({ stage: "input", reason: category });
     }
-    request.log.warn({ flagged: result.flagged_categories, route }, "Guardrails blocked prompt");
+    request.log.warn({ flagged: result.flagged_categories }, "Guardrails blocked prompt");
     return sendError(reply, 400, result.reason || "Prompt violates safety policy", "GUARDRAILS_VIOLATION", {
       flagged_categories: result.flagged_categories,
     });

@@ -6,7 +6,7 @@ export class APIError extends Error {
     public readonly code: ApiErrorCode,
     message: string,
     public readonly details?: unknown,
-    public readonly requestId?: string
+    public readonly requestId?: string,
   ) {
     super(message);
     this.name = "APIError";
@@ -24,7 +24,7 @@ export class APIError extends Error {
       parsed.code ?? "INTERNAL_ERROR",
       parsed.error ?? `HTTP ${res.status}`,
       parsed.details,
-      parsed.requestId
+      parsed.requestId,
     );
   }
 
@@ -64,6 +64,31 @@ export class APIError extends Error {
       case "UPLOAD_INCOMPLETE":
       case "ETAG_MISMATCH":
         return "Upload failed. Please try again.";
+      case "SIGNUP_REQUIRED":
+        return "Please complete sign-up to continue.";
+      case "INVALID_ENUM":
+        return "Invalid option selected. Please choose a valid value.";
+      case "PAYLOAD_TOO_LARGE":
+        return "Your request is too large. Try reducing the size.";
+      case "CUTLIST_SCHEMA_DRIFT":
+        return "Your project data is out of date. Refresh the page.";
+      case "PROMPT_TOO_LONG":
+        return "Your prompt is too long. Shorten it and try again.";
+      case "BEAT_DETECT_FAILED":
+        return "Couldn't analyze the song's beat. Try a different audio file.";
+      case "SHOT_DETECT_FAILED":
+        return "Couldn't analyze the video. Try a different file.";
+      case "RENDER_FFMPEG_FAILED":
+        return "Rendering failed. Try again or adjust your project.";
+      case "DB_UNAVAILABLE":
+      case "REDIS_UNAVAILABLE":
+      case "TEMPORAL_UNAVAILABLE":
+      case "R2_UNAVAILABLE":
+        return "Service temporarily unavailable. Try again in a moment.";
+      case "ALL_PROVIDERS_FAILED":
+        return "Every AI provider in your chain failed. Check your keys in Settings or try again.";
+      case "NO_CUTLIST":
+        return "This project has no timeline yet. Generate or import one first.";
       default:
         return "Something went wrong.";
     }

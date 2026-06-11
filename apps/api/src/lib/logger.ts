@@ -50,7 +50,7 @@ export const logger = pino({
       }),
 });
 
-const REDACTED_FIELDS = [
+const REDACTED_HEADER_FIELDS = [
   "encryptedKey",
   "authorization",
   "apiKey",
@@ -58,8 +58,19 @@ const REDACTED_FIELDS = [
   "token",
   "secret",
   "cookie",
-  "x-api-key",
-  "x-clerk-auth",
+];
+
+const REDACTED_PATHS = [
+  ...REDACTED_HEADER_FIELDS.map((f) => `req.headers.${f}`),
+  'req.headers["x-internal-token"]',
+  'req.headers["x-api-key"]',
+  'req.headers["x-clerk-auth"]',
+  'req.headers["set-cookie"]',
+  "req.query.apiKey",
+  "req.query.key",
+  "req.body.encryptedKey",
+  "req.body.password",
+  'res.headers["set-cookie"]',
 ];
 
 /**
@@ -72,7 +83,7 @@ export function getLoggerConfig() {
   return {
     level,
     redact: {
-      paths: REDACTED_FIELDS.map((f) => `req.headers.${f}`),
+      paths: REDACTED_PATHS,
       censor: "[REDACTED]",
     },
     ...(isProduction

@@ -561,6 +561,44 @@ describe("AI Service", () => {
       });
     });
 
+    it("normalizes ALL_PROVIDERS_FAILED details to structured codes without raw messages", async () => {
+      vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+      vi.stubEnv("OPENAI_API_KEY", "sk-openai-test");
+      vi.stubEnv("AI_PROVIDER", "claude");
+
+      await withInstantRetries(async () => {
+        const badRequest = { ok: false, status: 400, text: async () => "Bad request" };
+        vi.mocked(fetch)
+          .mockResolvedValueOnce(badRequest as any)
+          .mockResolvedValueOnce(badRequest as any)
+          .mockResolvedValueOnce(badRequest as any)
+          .mockResolvedValueOnce(badRequest as any);
+
+        try {
+          await applyPromptEdit({ userId: "user-1", prompt: "test", cutList: mockCutList });
+        } catch (err: any) {
+          expect(err.code).toBe("ALL_PROVIDERS_FAILED");
+          expect(err.details).toBeDefined();
+          expect(err.details.attempted).toBeInstanceOf(Array);
+          for (const attempt of err.details.attempted) {
+            expect(attempt).toHaveProperty("provider");
+            expect(attempt).toHaveProperty("code");
+            expect(attempt).not.toHaveProperty("reason");
+            expect(attempt).not.toHaveProperty("message");
+            expect([
+              "PROVIDER_INVALID_RESPONSE",
+              "PROVIDER_RATE_LIMITED",
+              "PROVIDER_TIMEOUT",
+              "PROVIDER_QUOTA_EXCEEDED",
+              "UNKNOWN",
+            ]).toContain(attempt.code);
+          }
+          return;
+        }
+        throw new Error("Expected ALL_PROVIDERS_FAILED");
+      });
+    });
+
     it("returns safe fallback when Claude returns stop_reason refusal", async () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
       vi.stubEnv("OPENAI_API_KEY", "sk-openai-test");

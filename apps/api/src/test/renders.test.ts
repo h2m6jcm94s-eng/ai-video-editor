@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
 import { db } from "../db";
-import { startRenderWorkflow } from "../services/temporal";
 import { enqueueJob } from "../services/queue";
+import { startRenderWorkflow } from "../services/temporal";
 
 describe("Render Routes", () => {
   beforeEach(() => {
@@ -123,6 +123,47 @@ describe("Render Routes", () => {
       payload: { projectId: PROJ_ID },
     });
     expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.body).code).toBe("RENDER_ALREADY_RUNNING");
+  });
+
+  it("POST /api/renders twice returns 409 on second call within active window", async () => {
+    // First call succeeds
+    vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(mockProject as any);
+    vi.mocked(db.query.assets.findMany).mockResolvedValueOnce([]);
+    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(undefined);
+    vi.mocked(db.insert).mockReturnValueOnce({
+      values: vi.fn().mockReturnValueOnce({
+        returning: vi.fn().mockResolvedValueOnce([mockRender]),
+      }),
+    } as any);
+    vi.mocked(db.update).mockReturnValueOnce({
+      set: vi.fn().mockReturnValueOnce({
+        where: vi.fn().mockReturnValueOnce({
+          returning: vi.fn().mockResolvedValueOnce([mockRender]),
+        }),
+      }),
+    } as any);
+    vi.mocked(startRenderWorkflow).mockResolvedValueOnce("wf-123");
+
+    const app = await buildApp();
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/renders",
+      payload: { projectId: PROJ_ID },
+    });
+    expect(first.statusCode).toBe(200);
+
+    // Second call finds the active render
+    vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(mockProject as any);
+    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(mockRender as any);
+
+    const second = await app.inject({
+      method: "POST",
+      url: "/api/renders",
+      payload: { projectId: PROJ_ID },
+    });
+    expect(second.statusCode).toBe(409);
+    expect(JSON.parse(second.body).code).toBe("RENDER_ALREADY_RUNNING");
   });
 
   it("POST /api/renders returns 500 when Temporal workflow fails", async () => {
@@ -151,7 +192,10 @@ describe("Render Routes", () => {
   });
 
   it("GET /api/renders/:jobId returns render job", async () => {
-    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce({ ...mockRender, project: mockProject } as any);
+    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce({
+      ...mockRender,
+      project: mockProject,
+    } as any);
 
     const app = await buildApp();
     const res = await app.inject({ method: "GET", url: `/api/renders/${RENDER_ID}` });
