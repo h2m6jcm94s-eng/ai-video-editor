@@ -2,7 +2,7 @@
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
 import "./env";
-import { API_ERROR_CODES } from "@ai-video-editor/shared-types";
+import { API_ERROR_CODES, type ApiErrorCode, isApiErrorCode } from "@ai-video-editor/shared-types";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";
@@ -45,10 +45,7 @@ export async function buildApp() {
     }
 
     const isClientError = (error.statusCode ?? 500) < 500;
-    const errorCode =
-      error.code && API_ERROR_CODES.includes(error.code as any)
-        ? (error.code as (typeof API_ERROR_CODES)[number])
-        : "INTERNAL_ERROR";
+    const errorCode: ApiErrorCode = isApiErrorCode(error.code) ? error.code : "INTERNAL_ERROR";
     return sendError(
       reply,
       error.statusCode || 500,
