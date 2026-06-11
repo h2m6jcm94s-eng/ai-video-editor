@@ -2,6 +2,7 @@
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
 import Redis from "ioredis";
+import { logger } from "../lib/logger";
 import { queueDepth } from "../lib/metrics";
 
 const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
@@ -31,8 +32,7 @@ export async function dequeueJob(): Promise<JobMessage | null> {
   try {
     return JSON.parse(data[1]);
   } catch (e) {
-    // Log via stderr since this function has no request context
-    // In production, this should be caught by a worker logger
+    logger.warn({ err: e, raw: data[1] }, "Dequeue failed to parse job JSON");
     return null;
   }
 }
@@ -72,8 +72,8 @@ export async function getBufferedEvents(
       if (typeof parsed.id === "number" && parsed.id > afterId) {
         events.push(parsed);
       }
-    } catch {
-      // skip corrupt entries
+    } catch (e) {
+      logger.warn({ err: e, item }, "Skipping corrupt buffered event");
     }
   }
   return events;
@@ -88,7 +88,8 @@ export async function getJobStatus(jobId: string): Promise<{
   if (!data) return { stage: "unknown", progress: 0, message: "" };
   try {
     return JSON.parse(data);
-  } catch {
+  } catch (e) {
+    logger.warn({ err: e, data }, "Failed to parse job status JSON");
     return { stage: "unknown", progress: 0, message: "" };
   }
 }
