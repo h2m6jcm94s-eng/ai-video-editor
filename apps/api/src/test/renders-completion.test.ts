@@ -54,6 +54,29 @@ describe("Render completion webhook", () => {
     expect(JSON.parse(res.body).code).toBe("VALIDATION_ERROR");
   });
 
+  it("POST /api/renders/:jobId/complete returns 401 without x-internal-token", async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/renders/job-1/complete",
+      payload: { status: "complete" },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(JSON.parse(res.body).code).toBe("UNAUTHORIZED");
+  });
+
+  it("POST /api/renders/:jobId/complete returns 401 with wrong x-internal-token", async () => {
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/renders/job-1/complete",
+      payload: { status: "complete" },
+      headers: { "x-internal-token": "bad-token" },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(JSON.parse(res.body).code).toBe("UNAUTHORIZED");
+  });
+
   it("POST /api/renders/:jobId/complete returns 404 for missing render", async () => {
     vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(undefined);
 
