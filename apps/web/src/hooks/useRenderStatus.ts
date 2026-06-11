@@ -10,6 +10,7 @@ const ACTIVE_STATUSES = ["queued", "running"] as const;
 
 interface RenderStatus {
   activeRender: RenderJob | null;
+  latestRender: RenderJob | null;
   isRendering: boolean;
   isLoading: boolean;
 }
@@ -17,6 +18,7 @@ interface RenderStatus {
 export function useRenderStatus(projectId: string): RenderStatus {
   const api = useApi();
   const [activeRender, setActiveRender] = useState<RenderJob | null>(null);
+  const [latestRender, setLatestRender] = useState<RenderJob | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeRenderRef = useRef(activeRender);
@@ -33,6 +35,13 @@ export function useRenderStatus(projectId: string): RenderStatus {
         ACTIVE_STATUSES.includes(j.status as (typeof ACTIVE_STATUSES)[number]),
       );
       setActiveRender(active || null);
+      // Track most recent completed or failed render
+      const done = jobs
+        .filter((j: RenderJob) => j.status === "complete" || j.status === "failed")
+        .sort(
+          (a: RenderJob, b: RenderJob) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        )[0];
+      if (done) setLatestRender(done);
     } catch (err) {
       console.error("Render status poll failed:", err);
     } finally {
@@ -73,6 +82,7 @@ export function useRenderStatus(projectId: string): RenderStatus {
 
   return {
     activeRender,
+    latestRender,
     isRendering: !!activeRender,
     isLoading,
   };

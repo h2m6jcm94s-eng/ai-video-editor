@@ -13,11 +13,13 @@
     "obs:logs": "docker compose -f infra/observability/docker-compose.yml logs -f",
     "branch:clean": "bash scripts/clean-branches.sh",
     "fixtures": "bash scripts/download-fixtures.sh",
-    "e2e": "tsx e2e/manual-pipeline-test.ts",
+    "e2e": "playwright test --config e2e/playwright.config.ts",
+    "e2e:headed": "playwright test --headed --config e2e/playwright.config.ts",
     "prepare": "husky"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.0",
+    "@playwright/test": "^1.60.0",
     "husky": "^9.0.0",
     "lint-staged": "^15.0.0",
     "prettier": "^3.2.5",

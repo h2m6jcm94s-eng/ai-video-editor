@@ -42,6 +42,7 @@ const PromptPanel = dynamic(() => import("./panels/PromptPanel").then((m) => m.P
 import { toast } from "sonner";
 import { type CommandAction, CommandPalette, useCommandPalette } from "@/components/cmdk/CommandPalette";
 import { useEditor } from "@/hooks/useEditor";
+import { useRenderStatus } from "@/hooks/useRenderStatus";
 import { useTimeline } from "@/hooks/useTimeline";
 import { useApi } from "@/lib/api/client";
 import { APIError } from "@/lib/api/error";
@@ -64,15 +65,16 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
     assets,
   });
   const timeline = useTimeline();
+  const renderStatus = useRenderStatus(project.id);
   const [promptOpen, setPromptOpen] = useState(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [showSubtitles, setShowSubtitles] = useState(true);
   const [selectedSubtitleId, setSelectedSubtitleId] = useState<string | null>(null);
   const [transcribing, setTranscribing] = useState(false);
-  const [generatingRef, setGeneratingRef] = useState(false);
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [loadTemplateOpen, setLoadTemplateOpen] = useState(false);
   const [cmdkOpen, setCmdkOpen] = useState(false);
+  const [generatingRef, setGeneratingRef] = useState(false);
   const api = useApi();
 
   const aspectRatio = state.cutList?.globals?.aspectRatio || "9:16";
@@ -283,7 +285,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
           </button>
           <button
             onClick={async () => {
-              const refAsset = assets.find((a) => a.type === "reference_video");
+              const refAsset = assets.find((a) => a.type === "reference");
               if (!refAsset) {
                 toast.error("Upload a reference video first");
                 return;
@@ -349,6 +351,38 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
           >
             {generatingRef ? "Generating..." : "Generate from reference"}
           </button>
+          <button
+            onClick={async () => {
+              const songAsset = assets.find((a) => a.type === "song");
+              const clipAsset = assets.find((a) => a.type === "clip");
+              const targetAsset = songAsset || clipAsset;
+              if (!targetAsset) {
+                toast.error("Upload a song or clip to transcribe");
+                return;
+              }
+              setTranscribing(true);
+              try {
+                const result = await api.projects.transcribe(project.id, targetAsset.id);
+                if (result.subtitles.length > 0 && state.cutList) {
+                  actions.setCutList({ ...state.cutList, subtitles: result.subtitles });
+                  toast.success(`Generated ${result.subtitles.length} subtitles`);
+                } else {
+                  toast.info("No speech detected");
+                }
+              } catch (err) {
+                toast.error(err instanceof Error ? err.message : "Transcription failed");
+              } finally {
+                setTranscribing(false);
+              }
+            }}
+            disabled={transcribing}
+            className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition disabled:opacity-50 flex items-center gap-1.5"
+            title="Generate subtitles from audio"
+          >
+            <Subtitles className="w-3.5 h-3.5" />
+            {transcribing ? "..." : "Subtitles"}
+          </button>
+
           {/* Aspect ratio dropdown */}
           <div className="relative group">
             <button className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition flex items-center gap-1.5">
@@ -393,6 +427,19 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
           </div>
 
           <RenderButton projectId={project.id} onJobStart={setActiveJobId} />
+          {renderStatus.latestRender && !renderStatus.activeRender && (
+            <span
+              className={`text-xs px-2 py-1 rounded-lg ${
+                renderStatus.latestRender.status === "complete"
+                  ? "bg-green-900/50 text-green-400"
+                  : "bg-red-900/50 text-red-400"
+              }`}
+              data-render-status={renderStatus.latestRender.status}
+              data-testid="render-status"
+            >
+              {renderStatus.latestRender.status === "complete" ? "Render complete" : "Render failed"}
+            </span>
+          )}
         </div>
       </div>
 

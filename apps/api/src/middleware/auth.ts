@@ -25,27 +25,7 @@ function toClerkRequest(request: FastifyRequest) {
   return new Request(url, { method: request.method, headers });
 }
 
-const E2E_TEST_TOKEN = process.env.E2E_TEST_TOKEN;
-
 export async function requireAuth(request: FastifyRequest, reply: FastifyReply) {
-  // E2E test bypass: skip Clerk when x-e2e-test-token matches
-  const e2eToken = request.headers["x-e2e-test-token"];
-  if (E2E_TEST_TOKEN && e2eToken === E2E_TEST_TOKEN) {
-    const testClerkId = "e2e-test-user";
-    try {
-      let localUser = await getUserByClerkId(testClerkId);
-      if (!localUser) {
-        localUser = await upsertUser(testClerkId, "e2e@fixture.local", "E2E Test User");
-      }
-      request.userId = localUser.id;
-      request.auth = { userId: testClerkId, sessionId: "e2e-session" } as unknown as FastifyRequest["auth"];
-      return;
-    } catch (err) {
-      request.log.error({ err }, "E2E user resolution failed");
-      return sendError(reply, 500, "Failed to resolve E2E user", "USER_RESOLUTION_ERROR");
-    }
-  }
-
   const req = toClerkRequest(request);
   const state = await clerk.authenticateRequest(req, {
     secretKey: process.env.CLERK_SECRET_KEY,
