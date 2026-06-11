@@ -2,9 +2,10 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 export const dynamic = "force-dynamic";
 
+import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
-import { ClerkProvider } from "@clerk/nextjs";
+import { NotificationBell } from "@/components/NotificationBell";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
@@ -26,7 +27,12 @@ export default function RootLayout({
       <html lang="en" suppressHydrationWarning>
         <body className={`${inter.variable} font-sans antialiased`}>
           <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
-            {children}
+            <div className="relative">
+              {children}
+              <div className="fixed top-4 right-4 z-50">
+                <NotificationBell />
+              </div>
+            </div>
             <Toaster />
           </ThemeProvider>
         </body>

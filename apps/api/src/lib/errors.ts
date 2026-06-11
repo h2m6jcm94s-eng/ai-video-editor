@@ -21,7 +21,7 @@ export function sendError(
 ) {
   // Log the error via the request logger if available
   try {
-    const req = (reply as any).request;
+    const req = reply.request;
     if (req?.log) {
       if (status >= 500) {
         req.log.error({ status, code, error, details }, "Error response sent");
@@ -31,7 +31,7 @@ export function sendError(
     }
 
     // Persist per-user error event (fire-and-forget)
-    const userId = req?.user?.id as string | undefined;
+    const userId = req?.userId as string | undefined;
     if (userId) {
       recordUserEvent({
         userId,

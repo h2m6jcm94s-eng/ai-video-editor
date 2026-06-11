@@ -1,15 +1,16 @@
 // Copyright (c) 2025 Devayan Dewri. All rights reserved.
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
+
+import { providerKeySchema, testProviderKeySchema } from "@ai-video-editor/shared-types";
+import { and, eq } from "drizzle-orm";
 import { FastifyInstance } from "fastify";
-import { eq, and } from "drizzle-orm";
 import { db } from "../db";
 import { providerKeys } from "../db/schema";
-import { providerKeySchema, testProviderKeySchema } from "@ai-video-editor/shared-types";
-import { validateBody } from "../middleware/validate";
+import { decrypt as aesDecrypt, encrypt as aesEncrypt } from "../lib/crypto";
 import { sendError } from "../lib/errors";
 import { getUsageForUser } from "../middleware/tokenBudget";
-import { encrypt as aesEncrypt, decrypt as aesDecrypt } from "../lib/crypto";
+import { validateBody } from "../middleware/validate";
 
 export async function settingsRoutes(app: FastifyInstance) {
   // Get user's AI token usage
@@ -65,51 +66,105 @@ export async function settingsRoutes(app: FastifyInstance) {
   });
 
   // Test a provider key (cheap call)
-  app.post("/provider-keys/test", { preHandler: validateBody(testProviderKeySchema) }, async (request, reply) => {
-    const body = request.validatedBody as { provider: string };
-    const userId = request.userId;
+  app.post(
+    "/provider-keys/test",
+    { preHandler: validateBody(testProviderKeySchema) },
+    async (request, reply) => {
+      const body = request.validatedBody as { provider: string };
+      const userId = request.userId;
 
-    const row = await db.query.providerKeys.findFirst({
-      where: and(eq(providerKeys.userId, userId), eq(providerKeys.provider, body.provider)),
-    });
+      const row = await db.query.providerKeys.findFirst({
+        where: and(eq(providerKeys.userId, userId), eq(providerKeys.provider, body.provider)),
+      });
 
-    if (!row) {
-      return sendError(reply, 404, "Key not found", "NOT_FOUND");
-    }
-
-    const key = aesDecrypt(row.encryptedKey);
-
-    try {
-      if (body.provider === "anthropic") {
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "x-api-key": key,
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "claude-3-haiku-20240307",
-            max_tokens: 1,
-            messages: [{ role: "user", content: "hi" }],
-          }),
-        });
-        if (!res.ok) throw new Error(await res.text());
-      } else if (body.provider === "openai") {
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ model: "gpt-4o-mini", max_tokens: 1, messages: [{ role: "user", content: "hi" }] }),
-        });
-        if (!res.ok) throw new Error(await res.text());
-      } else {
-        return sendError(reply, 400, "Unsupported provider", "VALIDATION_ERROR");
+      if (!row) {
+        return sendError(reply, 404, "Key not found", "NOT_FOUND");
       }
-      return { success: true };
-    } catch (err: unknown) {
-      return sendError(reply, 400, err instanceof Error ? err.message : "Test failed", "PROVIDER_INVALID_RESPONSE");
-    }
-  });
+
+      const key = aesDecrypt(row.encryptedKey);
+
+      try {
+        if (body.provider === "anthropic") {
+          const res = await fetch("https://api.anthropic.com/v1/messages", {
+            method: "POST",
+            headers: {
+              "x-api-key": key,
+              "anthropic-version": "2023-06-01",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: "claude-3-haiku-20240307",
+              max_tokens: 1,
+              messages: [{ role: "user", content: "hi" }],
+            }),
+          });
+          if (!res.ok) throw new Error(await res.text());
+        } else if (body.provider === "openai") {
+          const res = await fetch("https://api.openai.com/v1/chat/completions", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: "gpt-4o-mini",
+              max_tokens: 1,
+              messages: [{ role: "user", content: "hi" }],
+            }),
+          });
+          if (!res.ok) throw new Error(await res.text());
+        } else if (body.provider === "kimi") {
+          const res = await fetch("https://api.moonshot.cn/v1/chat/completions", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: "moonshot-v1-8k",
+              max_tokens: 1,
+              messages: [{ role: "user", content: "hi" }],
+            }),
+          });
+          if (!res.ok) throw new Error(await res.text());
+        } else if (body.provider === "openrouter") {
+          const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${key}`,
+              "Content-Type": "application/json",
+              "HTTP-Referer": process.env.WEB_URL || "http://localhost:3000",
+              "X-Title": "AI Video Editor",
+            },
+            body: JSON.stringify({
+              model: "anthropic/claude-3.5-haiku",
+              max_tokens: 1,
+              messages: [{ role: "user", content: "hi" }],
+            }),
+          });
+          if (!res.ok) throw new Error(await res.text());
+        } else if (body.provider === "groq") {
+          const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${key}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: "llama-3.3-70b-versatile",
+              max_tokens: 1,
+              messages: [{ role: "user", content: "hi" }],
+            }),
+          });
+          if (!res.ok) throw new Error(await res.text());
+        } else {
+          return sendError(reply, 400, "Unsupported provider", "VALIDATION_ERROR");
+        }
+        return { success: true };
+      } catch (err: unknown) {
+        return sendError(
+          reply,
+          400,
+          err instanceof Error ? err.message : "Test failed",
+          "PROVIDER_INVALID_RESPONSE",
+        );
+      }
+    },
+  );
 }
 
 function maskKey(key: string): string {

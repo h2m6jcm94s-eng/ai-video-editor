@@ -176,6 +176,62 @@ export function createAPI(getToken: TokenGetter) {
           fetchJSON("/settings/provider-keys/test", { method: "POST", body: JSON.stringify({ provider }) }),
       },
     },
+    notifications: {
+      list: (): Promise<{
+        items: Array<{
+          id: string;
+          code: string;
+          message: string;
+          occurrenceCount: number;
+          createdAt: string;
+        }>;
+        nextCursor?: string;
+        hasMore: boolean;
+      }> => fetchJSON("/notifications"),
+      ack: (id: string): Promise<{ ok: boolean }> =>
+        fetchJSON(`/notifications/${id}/ack`, { method: "POST" }),
+      ackAll: (): Promise<{ ok: boolean }> => fetchJSON("/notifications/ack-all", { method: "POST" }),
+    },
+    admin: {
+      overview: (): Promise<{
+        users: { total: number; active24h: number };
+        errors: { total: number; last24h: number };
+        renders: { total: number; queued: number; running: number };
+      }> => fetchJSON("/admin/overview"),
+      users: {
+        list: (): Promise<{
+          items: Array<{ id: string; email: string; name: string | null; createdAt: string }>;
+          nextCursor?: string;
+          hasMore: boolean;
+        }> => fetchJSON("/admin/users"),
+        get: (
+          userId: string,
+        ): Promise<{
+          user: { id: string; email: string; name: string | null };
+          stats: { errors: number; projects: number; renders: number };
+        }> => fetchJSON(`/admin/users/${userId}`),
+      },
+      errors: (): Promise<{
+        items: Array<{ id: string; userId: string; code: string; message: string; createdAt: string }>;
+        nextCursor?: string;
+        hasMore: boolean;
+      }> => fetchJSON("/admin/errors"),
+      renders: (): Promise<{
+        items: Array<{ id: string; status: string; stage: string; progress: number; createdAt: string }>;
+        statusCounts: Array<{ status: string; count: number }>;
+      }> => fetchJSON("/admin/renders"),
+      audit: (): Promise<{
+        items: Array<{
+          id: string;
+          actorId: string;
+          action: string;
+          targetType: string | null;
+          createdAt: string;
+        }>;
+        nextCursor?: string;
+        hasMore: boolean;
+      }> => fetchJSON("/admin/audit"),
+    },
   };
 }
 

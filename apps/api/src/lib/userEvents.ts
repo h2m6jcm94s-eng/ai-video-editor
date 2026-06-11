@@ -11,6 +11,7 @@
 import { and, count, eq, gte, sql } from "drizzle-orm";
 import { db } from "../db";
 import { userEvents } from "../db/schema";
+import { publishNotification } from "../services/queue";
 
 const DEDUP_WINDOW_MINUTES = 5;
 const MAX_UNACKED_PER_USER = 50;
@@ -99,14 +100,28 @@ export async function recordUserEvent(input: RecordEventInput): Promise<void> {
     }
 
     // Insert new event
-    await db.insert(userEvents).values({
-      userId,
-      code,
-      message,
-      details: details ? JSON.stringify(details) : null,
-      route: route ?? null,
-      dropped,
-    });
+    const [inserted] = await db
+      .insert(userEvents)
+      .values({
+        userId,
+        code,
+        message,
+        details: details ? JSON.stringify(details) : null,
+        route: route ?? null,
+        dropped,
+      })
+      .returning();
+
+    // Publish to SSE channel so bell updates live
+    if (inserted) {
+      await publishNotification(userId, {
+        id: inserted.id,
+        code: inserted.code,
+        message: inserted.message,
+        occurrenceCount: inserted.occurrenceCount,
+        createdAt: inserted.createdAt?.toISOString() ?? new Date().toISOString(),
+      });
+    }
   } catch (err) {
     // Never throw — event recording must not break the request
     console.error("[recordUserEvent] failed:", err);

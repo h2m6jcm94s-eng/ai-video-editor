@@ -61,11 +61,15 @@ export interface ApiError {
   requestId?: string;
 }
 
+export function isApiErrorCode(code: string | undefined): code is ApiErrorCode {
+  return code !== undefined && (API_ERROR_CODES as readonly string[]).includes(code as ApiErrorCode);
+}
+
 export function createApiError(
   code: ApiErrorCode,
   message: string,
   details?: unknown,
-  requestId?: string
+  requestId?: string,
 ): ApiError {
   return { code, message, details, requestId };
 }

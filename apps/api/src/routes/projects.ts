@@ -1,6 +1,12 @@
 ﻿// Copyright (c) 2025 Devayan Dewri. All rights reserved.
-import type { CutList, EditMode, ProjectStatus, StyleTier } from "@ai-video-editor/shared-types";
-import { API_ERROR_CODES } from "@ai-video-editor/shared-types";
+import type {
+  ApiErrorCode,
+  CutList,
+  EditMode,
+  ProjectStatus,
+  StyleTier,
+} from "@ai-video-editor/shared-types";
+import { API_ERROR_CODES, isApiErrorCode } from "@ai-video-editor/shared-types";
 import { and, desc, eq, inArray } from "drizzle-orm";
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
@@ -200,10 +206,7 @@ export async function projectRoutes(app: FastifyInstance) {
         request.log.error({ err }, "Transcription failed");
         const rawCode =
           err && typeof err === "object" && "code" in err ? (err as { code?: string }).code : undefined;
-        const code =
-          rawCode && API_ERROR_CODES.includes(rawCode as any)
-            ? (rawCode as (typeof API_ERROR_CODES)[number])
-            : "INTERNAL_ERROR";
+        const code: ApiErrorCode = isApiErrorCode(rawCode) ? rawCode : "INTERNAL_ERROR";
         const status =
           code === "PROVIDER_KEY_MISSING" || code === "AI_REFUSED"
             ? 400
@@ -297,10 +300,7 @@ export async function projectRoutes(app: FastifyInstance) {
         request.log.error({ err }, "Prompt edit failed");
         const rawCode =
           err && typeof err === "object" && "code" in err ? (err as { code?: string }).code : undefined;
-        const code =
-          rawCode && API_ERROR_CODES.includes(rawCode as any)
-            ? (rawCode as (typeof API_ERROR_CODES)[number])
-            : "INTERNAL_ERROR";
+        const code: ApiErrorCode = isApiErrorCode(rawCode) ? rawCode : "INTERNAL_ERROR";
         const status = code === "PROVIDER_KEY_MISSING" ? 400 : 500;
         if (err instanceof Error) {
           const message = err.message || "AI edit failed";

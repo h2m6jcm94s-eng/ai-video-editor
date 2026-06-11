@@ -73,6 +73,16 @@ describe("AI Service", () => {
       status: 200,
     });
 
+    const makeKimiResponse = (diff: unknown[], explanation: string, finishReason?: string) => ({
+      json: async () => ({
+        choices: [
+          { message: { content: JSON.stringify({ diff, explanation }) }, finish_reason: finishReason },
+        ],
+      }),
+      ok: true,
+      status: 200,
+    });
+
     function withInstantRetries<T>(fn: () => Promise<T>): Promise<T> {
       const original = global.setTimeout;
       global.setTimeout = ((cb: any) => {
@@ -285,9 +295,138 @@ describe("AI Service", () => {
       expect((result.newCutList as any).slots[0]).not.toHaveProperty("selectedClipId");
     });
 
+    it("calls Kimi and applies diff when AI_PROVIDER_TOOLCALL=kimi", async () => {
+      vi.stubEnv("KIMI_API_KEY", "sk-kimi-test");
+      vi.stubEnv("AI_PROVIDER", "claude");
+      vi.stubEnv("AI_PROVIDER_TOOLCALL", "kimi");
+      vi.mocked(fetch).mockResolvedValueOnce(
+        makeKimiResponse(
+          [{ op: "replace", path: "/slots/0/transitionIn", value: "dissolve" }],
+          "Dissolved",
+        ) as any,
+      );
+
+      const result = await applyPromptEdit({
+        userId: "user-1",
+        prompt: "dissolve in",
+        cutList: mockCutList,
+      });
+
+      expect(result.diff).toHaveLength(1);
+      expect(result.explanation).toBe("Dissolved");
+      expect((result.newCutList as any).slots[0].transitionIn).toBe("dissolve");
+    });
+
+    it("falls back to Claude when Kimi fails", async () => {
+      vi.stubEnv("KIMI_API_KEY", "sk-kimi-test");
+      vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+      vi.stubEnv("AI_PROVIDER_TOOLCALL", "kimi");
+      vi.mocked(fetch)
+        .mockRejectedValueOnce(new Error("Kimi down"))
+        .mockResolvedValueOnce(
+          makeClaudeResponse([{ op: "add", path: "/overlays", value: [] }], "Added overlays") as any,
+        );
+
+      const result = await applyPromptEdit({
+        userId: "user-1",
+        prompt: "add overlays",
+        cutList: mockCutList,
+      });
+
+      expect(result.explanation).toBe("Added overlays");
+    });
+
+    it("returns safe fallback when Kimi returns content_filter", async () => {
+      vi.stubEnv("KIMI_API_KEY", "sk-kimi-test");
+      vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+      vi.stubEnv("AI_PROVIDER_TOOLCALL", "kimi");
+      vi.mocked(fetch).mockResolvedValueOnce({
+        json: async () => ({
+          choices: [{ message: { content: "" }, finish_reason: "content_filter" }],
+        }),
+        ok: true,
+        status: 200,
+      } as any);
+
+      const result = await applyPromptEdit({ userId: "user-1", prompt: "test", cutList: mockCutList });
+      expect(result.fallback).toBeDefined();
+      expect(result.fallback?.reason).toBe("content_filter");
+      expect(result.newCutList).toEqual(mockCutList);
+    });
+
+    it("returns safe fallback when output guardrails block Kimi response", async () => {
+      vi.stubEnv("KIMI_API_KEY", "sk-kimi-test");
+      vi.stubEnv("AI_PROVIDER_TOOLCALL", "kimi");
+      vi.mocked(fetch).mockResolvedValueOnce(
+        makeKimiResponse(
+          [{ op: "replace", path: "/slots/0/transitionIn", value: "fade" }],
+          "Added fade",
+        ) as any,
+      );
+      vi.mocked(validateAIResponse).mockResolvedValueOnce({
+        allowed: false,
+        reason: "Output blocked by guardrails: toxicity",
+        flagged_categories: ["toxicity"],
+        confidence: 0.88,
+      });
+
+      const result = await applyPromptEdit({ userId: "user-1", prompt: "fade", cutList: mockCutList });
+      expect(result.fallback).toBeDefined();
+      expect(result.fallback?.reason).toBe("content_filter");
+      expect(result.explanation).toBe("Output blocked by guardrails: toxicity");
+      expect(result.newCutList).toEqual(mockCutList);
+    });
+
+    it("calls OpenRouter and applies diff when AI_PROVIDER_TOOLCALL=openrouter", async () => {
+      vi.stubEnv("OPENROUTER_API_KEY", "sk-or-test");
+      vi.stubEnv("AI_PROVIDER", "claude");
+      vi.stubEnv("AI_PROVIDER_TOOLCALL", "openrouter");
+      vi.mocked(fetch).mockResolvedValueOnce(
+        makeOpenAIResponse(
+          [{ op: "replace", path: "/slots/0/transitionIn", value: "dissolve" }],
+          "Dissolved",
+        ) as any,
+      );
+
+      const result = await applyPromptEdit({
+        userId: "user-1",
+        prompt: "dissolve in",
+        cutList: mockCutList,
+      });
+
+      expect(result.diff).toHaveLength(1);
+      expect(result.explanation).toBe("Dissolved");
+      expect((result.newCutList as any).slots[0].transitionIn).toBe("dissolve");
+    });
+
+    it("calls Groq and applies diff when AI_PROVIDER_TOOLCALL=groq", async () => {
+      vi.stubEnv("GROQ_API_KEY", "gsk-test");
+      vi.stubEnv("AI_PROVIDER", "claude");
+      vi.stubEnv("AI_PROVIDER_TOOLCALL", "groq");
+      vi.mocked(fetch).mockResolvedValueOnce(
+        makeOpenAIResponse(
+          [{ op: "replace", path: "/slots/0/transitionIn", value: "zoom" }],
+          "Zoomed",
+        ) as any,
+      );
+
+      const result = await applyPromptEdit({
+        userId: "user-1",
+        prompt: "zoom in",
+        cutList: mockCutList,
+      });
+
+      expect(result.diff).toHaveLength(1);
+      expect(result.explanation).toBe("Zoomed");
+      expect((result.newCutList as any).slots[0].transitionIn).toBe("zoom");
+    });
+
     it("throws when no API keys are configured", async () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "");
       vi.stubEnv("OPENAI_API_KEY", "");
+      vi.stubEnv("KIMI_API_KEY", "");
+      vi.stubEnv("OPENROUTER_API_KEY", "");
+      vi.stubEnv("GROQ_API_KEY", "");
       vi.stubEnv("AI_PROVIDER", "claude");
 
       await expect(
