@@ -44,7 +44,7 @@ export async function publishProgress(
   jobId: string,
   stage: string,
   progress: number,
-  message: string
+  message: string,
 ): Promise<void> {
   const eventId = await redis.incr(`ave:job:${jobId}:eventId`);
   const payload = JSON.stringify({ jobId, stage, progress, message, timestamp: new Date().toISOString() });
@@ -61,7 +61,7 @@ export async function publishProgress(
 
 export async function getBufferedEvents(
   jobId: string,
-  afterId: number
+  afterId: number,
 ): Promise<{ id: number; data: string }[]> {
   const listKey = `ave:job:${jobId}:events`;
   const raw = await redis.lrange(listKey, 0, SSE_HISTORY_MAX - 1);
@@ -97,13 +97,20 @@ export async function setJobStatus(
   jobId: string,
   stage: string,
   progress: number,
-  message: string
+  message: string,
 ): Promise<void> {
   await redis.setex(
     `ave:job:${jobId}:status`,
     86400, // 24 hours
-    JSON.stringify({ stage, progress, message, updatedAt: new Date().toISOString() })
+    JSON.stringify({ stage, progress, message, updatedAt: new Date().toISOString() }),
   );
+}
+
+export async function publishNotification(
+  userId: string,
+  event: { id: string; code: string; message: string; occurrenceCount: number; createdAt: string },
+): Promise<void> {
+  await redis.publish(`user:${userId}:events`, JSON.stringify({ type: "notification", data: event }));
 }
 
 export async function probeRedis(): Promise<void> {

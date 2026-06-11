@@ -16,10 +16,12 @@ import {
   rateLimitHitsTotal,
 } from "./lib/metrics";
 import { requireAuth } from "./middleware/auth";
+import { adminRoutes } from "./routes/admin";
 import { healthRoutes } from "./routes/health";
 import { internalRoutes } from "./routes/internal";
 import { logRoutes } from "./routes/log";
 import { metricsRoutes } from "./routes/metrics";
+import { notificationRoutes } from "./routes/notifications";
 import { presenceRoutes } from "./routes/presence";
 import { progressRoutes } from "./routes/progress";
 import { projectRoutes } from "./routes/projects";
@@ -147,6 +149,8 @@ export async function buildApp() {
   await app.register(templateRoutes, { prefix: "/api/templates" });
   await app.register(presenceRoutes, { prefix: "/api/presence" });
   await app.register(settingsRoutes, { prefix: "/api/settings" });
+  await app.register(notificationRoutes, { prefix: "/api/notifications" });
+  await app.register(adminRoutes, { prefix: "/api/admin" });
 
   return app;
 }
