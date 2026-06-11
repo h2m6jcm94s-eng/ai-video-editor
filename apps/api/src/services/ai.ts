@@ -951,54 +951,72 @@ export async function applyPromptEdit(context: PromptEditContext): Promise<
     );
   }
 
-  async function withFallback<T>(primary: () => Promise<T>, fallback: () => Promise<T>): Promise<T> {
-    try {
-      return await primary();
-    } catch (err) {
-      if (isMissingKey(err)) throw err;
-      return await fallback();
+  async function withFallback<T>(attempts: Array<{ name: string; fn: () => Promise<T> }>): Promise<T> {
+    const errors: Array<{ provider: string; reason: string }> = [];
+    for (const attempt of attempts) {
+      try {
+        return await attempt.fn();
+      } catch (err) {
+        if (isMissingKey(err)) throw err;
+        errors.push({
+          provider: attempt.name,
+          reason: err instanceof Error ? err.message : "unknown",
+        });
+      }
     }
+    const err: Error & { code?: string; details?: unknown } = new Error(
+      `All providers failed. Attempted: ${errors.map((e) => `${e.provider}: ${e.reason}`).join("; ")}`,
+    );
+    err.code = "ALL_PROVIDERS_FAILED";
+    err.details = { attempted: errors };
+    throw err;
   }
 
   try {
     if (provider === "kimi") {
-      result = await withFallback(
-        () => callKimi(context),
-        () => callClaude(context),
-      );
+      result = await withFallback([
+        { name: "kimi", fn: () => callKimi(context) },
+        { name: "claude", fn: () => callClaude(context) },
+        { name: "openai", fn: () => callOpenAI(context) },
+      ]);
     } else if (provider === "claude") {
-      result = await withFallback(
-        () => callClaude(context),
-        () => callOpenAI(context),
-      );
+      result = await withFallback([
+        { name: "claude", fn: () => callClaude(context) },
+        { name: "openai", fn: () => callOpenAI(context) },
+      ]);
     } else if (provider === "openai") {
-      result = await withFallback(
-        () => callOpenAI(context),
-        () => callClaude(context),
-      );
+      result = await withFallback([
+        { name: "openai", fn: () => callOpenAI(context) },
+        { name: "claude", fn: () => callClaude(context) },
+      ]);
     } else if (provider === "openrouter") {
-      result = await withFallback(
-        () => callOpenRouter(context),
-        () => callClaude(context),
-      );
+      result = await withFallback([
+        { name: "openrouter", fn: () => callOpenRouter(context) },
+        { name: "claude", fn: () => callClaude(context) },
+        { name: "openai", fn: () => callOpenAI(context) },
+      ]);
     } else if (provider === "groq") {
-      result = await withFallback(
-        () => callGroq(context),
-        () => callClaude(context),
-      );
+      result = await withFallback([
+        { name: "groq", fn: () => callGroq(context) },
+        { name: "claude", fn: () => callClaude(context) },
+        { name: "openai", fn: () => callOpenAI(context) },
+      ]);
     } else {
-      result = await withFallback(
-        () => callClaude(context),
-        () => callOpenAI(context),
-      );
+      result = await withFallback([
+        { name: "claude", fn: () => callClaude(context) },
+        { name: "openai", fn: () => callOpenAI(context) },
+      ]);
     }
   } catch (err) {
     const code =
       err && typeof err === "object" && "code" in err ? (err as { code?: string }).code : undefined;
-    const apiErr: Error & { code?: string } = new Error(
+    const apiErr: Error & { code?: string; details?: unknown } = new Error(
       `AI prompt edit failed: ${err instanceof Error ? err.message : "unknown"}`,
     );
     if (code) apiErr.code = code;
+    if (err && typeof err === "object" && "details" in err) {
+      apiErr.details = (err as { details?: unknown }).details;
+    }
     throw apiErr;
   }
 
