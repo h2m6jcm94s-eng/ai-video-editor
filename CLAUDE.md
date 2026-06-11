@@ -73,6 +73,7 @@ Every PR must have a body that answers **what**, **why**, and **how to verify**.
 ## Regression Risks
 [What could break and how it's guarded against.]
 
+## Linked Issues
 Closes #<issue-number>
 ```
 

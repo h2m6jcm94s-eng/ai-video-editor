@@ -79,8 +79,9 @@ export function useSSE<T>({
             es.close();
             setConnected(false);
           }
-        } catch {
-          /* heartbeat or non-JSON */
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn("[useSSE] Failed to parse event data:", e);
         }
       };
       es.onerror = () => {

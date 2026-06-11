@@ -15,7 +15,9 @@ export default async function AdminUserDetailPage({ params }: Props) {
   let data;
   try {
     data = await apiServer.admin.users.get(userId);
-  } catch {
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error("[admin/users/" + userId + "] Failed to load:", e);
     return (
       <div>
         <h2 className="text-xl font-semibold mb-4">User not found</h2>

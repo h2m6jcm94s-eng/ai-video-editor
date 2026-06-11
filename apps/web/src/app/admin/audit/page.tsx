@@ -15,8 +15,9 @@ export default async function AdminAuditPage() {
   try {
     const res = await apiServer.admin.audit();
     logs = res.items;
-  } catch {
-    // leave empty
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error("[admin/audit] Failed to load:", e);
   }
 
   return (

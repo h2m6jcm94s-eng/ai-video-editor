@@ -3,10 +3,10 @@
 export const dynamic = "force-dynamic";
 
 import { auth } from "@clerk/nextjs/server";
-import { redirect, notFound } from "next/navigation";
-import { apiServer } from "@/lib/api/server";
+import { notFound, redirect } from "next/navigation";
 import { EditorLayout } from "@/components/editor/EditorLayout";
 import { EditorErrorBoundary } from "@/components/editor/ErrorBoundary";
+import { apiServer } from "@/lib/api/server";
 
 interface EditorPageProps {
   params: Promise<{ projectId: string }>;
@@ -24,7 +24,9 @@ export default async function EditorPage({ params }: EditorPageProps) {
     const res = await apiServer.projects.get(projectId);
     project = res.project;
     assets = res.project.assets;
-  } catch {
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error("[editor/" + projectId + "] Failed to load project:", e);
     notFound();
   }
 

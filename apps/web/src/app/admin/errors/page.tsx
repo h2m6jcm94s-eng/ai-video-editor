@@ -9,8 +9,9 @@ export default async function AdminErrorsPage() {
   try {
     const res = await apiServer.admin.errors();
     events = res.items;
-  } catch {
-    // leave empty
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error("[admin/errors] Failed to load:", e);
   }
 
   return (

@@ -47,8 +47,9 @@ export function useNotifications(): UseNotificationsReturn {
         const data = await res.json();
         setItems(data.items || []);
       }
-    } catch {
-      // Silent fail
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn("[useNotifications] Fetch failed:", e);
     } finally {
       setIsLoading(false);
     }
@@ -73,8 +74,9 @@ export function useNotifications(): UseNotificationsReturn {
         if (parsed.type === "notification") {
           setItems((prev) => [parsed.data, ...prev]);
         }
-      } catch {
-        // ignore parse errors
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn("[useNotifications] SSE parse failed:", e);
       }
     };
 

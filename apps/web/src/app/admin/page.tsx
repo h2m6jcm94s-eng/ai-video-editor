@@ -8,7 +8,9 @@ export default async function AdminOverviewPage() {
   let overview;
   try {
     overview = await apiServer.admin.overview();
-  } catch {
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error("[admin/overview] Failed to load:", e);
     overview = {
       users: { total: 0, active24h: 0 },
       errors: { total: 0, last24h: 0 },

@@ -10,8 +10,9 @@ export default async function AdminUsersPage() {
   try {
     const res = await apiServer.admin.users.list();
     users = res.items;
-  } catch {
-    // leave empty
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error("[admin/users] Failed to load:", e);
   }
 
   return (
