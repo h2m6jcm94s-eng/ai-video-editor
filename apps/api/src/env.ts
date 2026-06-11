@@ -54,7 +54,6 @@ const schema = z.object({
     .length(64, "PROVIDER_KEK must be exactly 64 hex characters (32 bytes)")
     .regex(/^[0-9a-fA-F]+$/, "PROVIDER_KEK must be a hex string")
     .optional(),
-  E2E_TEST_TOKEN: z.string().min(32).optional(),
 });
 
 const result = schema.safeParse(process.env);

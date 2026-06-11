@@ -112,6 +112,7 @@ function PromptPanelInner({ projectId, cutList, onPromptApply, onUndo, onClose }
                     placeholder="Ask AI to edit..."
                     className="bg-zinc-950 border-zinc-800 h-8 text-xs"
                     disabled={form.formState.isSubmitting}
+                    data-testid="prompt-input"
                     {...field}
                   />
                 </FormControl>

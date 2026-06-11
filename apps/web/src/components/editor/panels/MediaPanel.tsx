@@ -17,11 +17,12 @@ interface MediaPanelProps {
 
 function AssetItem({ asset }: { asset: Asset }) {
   const icons = {
-    reference_video: Video,
+    reference: Video,
     song: Music,
     clip: Film,
   };
   const Icon = icons[asset.type as keyof typeof icons] || ImageIcon;
+  const isIngested = asset.durationSec != null && asset.durationSec > 0;
 
   return (
     <div
@@ -33,6 +34,8 @@ function AssetItem({ asset }: { asset: Asset }) {
       className="flex items-center gap-2 p-2 rounded-lg hover:bg-zinc-800 cursor-grab active:cursor-grabbing transition"
       role="button"
       aria-label={`Drag ${asset.filename}`}
+      data-testid={`asset-${asset.id}`}
+      data-state={isIngested ? "ingested" : "uploading"}
     >
       <div className="w-8 h-8 rounded bg-zinc-800 flex items-center justify-center shrink-0">
         <Icon className="w-4 h-4 text-zinc-400" />
@@ -49,7 +52,7 @@ function AssetItem({ asset }: { asset: Asset }) {
 }
 
 export function MediaPanel({ projectId, assets, onAssetsChange }: MediaPanelProps) {
-  const [activeTab, setActiveTab] = useState<"all" | "reference_video" | "song" | "clip">("all");
+  const [activeTab, setActiveTab] = useState<"all" | "reference" | "song" | "clip">("all");
   const { uploadFile, uploading } = useUpload(projectId);
   const fileInputRef = useCallback((node: HTMLInputElement | null) => {
     // no-op, used for ref assignment in JSX
@@ -66,7 +69,7 @@ export function MediaPanel({ projectId, assets, onAssetsChange }: MediaPanelProp
 
   const tabs: { key: typeof activeTab; label: string; icon: React.ReactNode }[] = [
     { key: "all", label: "All", icon: <ImageIcon className="w-3 h-3" /> },
-    { key: "reference_video", label: "Ref", icon: <Video className="w-3 h-3" /> },
+    { key: "reference", label: "Ref", icon: <Video className="w-3 h-3" /> },
     { key: "song", label: "Song", icon: <Music className="w-3 h-3" /> },
     { key: "clip", label: "Clips", icon: <Film className="w-3 h-3" /> },
   ];
@@ -104,7 +107,7 @@ export function MediaPanel({ projectId, assets, onAssetsChange }: MediaPanelProp
           className="hidden"
           id="upload-reference"
           data-testid="upload-reference"
-          onChange={(e) => handleFileChange(e, "reference_video")}
+          onChange={(e) => handleFileChange(e, "reference")}
         />
         <label htmlFor="upload-reference">
           <Button variant="outline" className="w-full gap-2 text-xs" size="sm" disabled={uploading} asChild>
