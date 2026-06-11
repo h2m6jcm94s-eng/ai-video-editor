@@ -1,5 +1,15 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { validateAIResponse } from "../middleware/guardrails";
 import { applyPromptEdit, transcribeAudio } from "../services/ai";
+
+// Mock guardrails output validation so tests don't need to mock sidecar calls
+vi.mock("../middleware/guardrails", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../middleware/guardrails")>();
+  return {
+    ...actual,
+    validateAIResponse: vi.fn().mockResolvedValue({ allowed: true }),
+  };
+});
 
 describe("AI Service", () => {
   beforeEach(() => {
@@ -55,7 +65,9 @@ describe("AI Service", () => {
 
     const makeOpenAIResponse = (diff: unknown[], explanation: string, finishReason?: string) => ({
       json: async () => ({
-        choices: [{ message: { content: JSON.stringify({ diff, explanation }) }, finish_reason: finishReason }],
+        choices: [
+          { message: { content: JSON.stringify({ diff, explanation }) }, finish_reason: finishReason },
+        ],
       }),
       ok: true,
       status: 200,
@@ -76,7 +88,10 @@ describe("AI Service", () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
       vi.stubEnv("AI_PROVIDER", "claude");
       vi.mocked(fetch).mockResolvedValueOnce(
-        makeClaudeResponse([{ op: "replace", path: "/slots/0/transitionIn", value: "fade" }], "Added fade") as any
+        makeClaudeResponse(
+          [{ op: "replace", path: "/slots/0/transitionIn", value: "fade" }],
+          "Added fade",
+        ) as any,
       );
 
       const result = await applyPromptEdit({
@@ -97,7 +112,7 @@ describe("AI Service", () => {
       vi.mocked(fetch)
         .mockRejectedValueOnce(new Error("Claude down"))
         .mockResolvedValueOnce(
-          makeOpenAIResponse([{ op: "add", path: "/overlays", value: [] }], "Added overlays") as any
+          makeOpenAIResponse([{ op: "add", path: "/overlays", value: [] }], "Added overlays") as any,
         );
 
       const result = await applyPromptEdit({
@@ -113,7 +128,7 @@ describe("AI Service", () => {
       vi.stubEnv("OPENAI_API_KEY", "sk-openai-test");
       vi.stubEnv("AI_PROVIDER", "openai");
       vi.mocked(fetch).mockResolvedValueOnce(
-        makeOpenAIResponse([{ op: "replace", path: "/globals/tempoBpm", value: 140 }], "Speed up") as any
+        makeOpenAIResponse([{ op: "replace", path: "/globals/tempoBpm", value: 140 }], "Speed up") as any,
       );
 
       const result = await applyPromptEdit({
@@ -129,7 +144,7 @@ describe("AI Service", () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
       vi.stubEnv("AI_PROVIDER", "unknown-provider");
       vi.mocked(fetch).mockResolvedValueOnce(
-        makeClaudeResponse([{ op: "replace", path: "/globals/tempoBpm", value: 130 }], "Adjusted") as any
+        makeClaudeResponse([{ op: "replace", path: "/globals/tempoBpm", value: 130 }], "Adjusted") as any,
       );
 
       const result = await applyPromptEdit({
@@ -169,8 +184,8 @@ describe("AI Service", () => {
               },
             },
           ],
-          "Shortened and added"
-        ) as any
+          "Shortened and added",
+        ) as any,
       );
 
       const result = await applyPromptEdit({ userId: "user-1", prompt: "edit", cutList: mockCutList });
@@ -191,7 +206,7 @@ describe("AI Service", () => {
         ],
       };
       vi.mocked(fetch).mockResolvedValueOnce(
-        makeClaudeResponse([{ op: "move", from: "/slots/0", path: "/slots/1" }], "Moved") as any
+        makeClaudeResponse([{ op: "move", from: "/slots/0", path: "/slots/1" }], "Moved") as any,
       );
 
       const result = await applyPromptEdit({ userId: "user-1", prompt: "move", cutList: listWithSlots });
@@ -202,7 +217,7 @@ describe("AI Service", () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
       vi.stubEnv("AI_PROVIDER", "claude");
       vi.mocked(fetch).mockResolvedValueOnce(
-        makeClaudeResponse([{ op: "copy", from: "/slots/0", path: "/slots/1" }], "Copied") as any
+        makeClaudeResponse([{ op: "copy", from: "/slots/0", path: "/slots/1" }], "Copied") as any,
       );
 
       const result = await applyPromptEdit({ userId: "user-1", prompt: "copy", cutList: mockCutList });
@@ -220,10 +235,14 @@ describe("AI Service", () => {
         ],
       };
       vi.mocked(fetch).mockResolvedValueOnce(
-        makeClaudeResponse([{ op: "remove", path: "/slots/0" }], "Removed first") as any
+        makeClaudeResponse([{ op: "remove", path: "/slots/0" }], "Removed first") as any,
       );
 
-      const result = await applyPromptEdit({ userId: "user-1", prompt: "remove first", cutList: listWithSlots });
+      const result = await applyPromptEdit({
+        userId: "user-1",
+        prompt: "remove first",
+        cutList: listWithSlots,
+      });
       expect((result.newCutList as any).slots).toHaveLength(1);
       expect((result.newCutList as any).slots[0].index).toBe(1);
     });
@@ -236,10 +255,14 @@ describe("AI Service", () => {
         slots: [{ ...mockCutList.slots[0], effects: [{ type: "zoom" as const, startS: 0, endS: 1 }] }],
       };
       vi.mocked(fetch).mockResolvedValueOnce(
-        makeClaudeResponse([{ op: "remove", path: "/slots/0/effects/0" }], "Removed nested") as any
+        makeClaudeResponse([{ op: "remove", path: "/slots/0/effects/0" }], "Removed nested") as any,
       );
 
-      const result = await applyPromptEdit({ userId: "user-1", prompt: "remove nested", cutList: listWithNested });
+      const result = await applyPromptEdit({
+        userId: "user-1",
+        prompt: "remove nested",
+        cutList: listWithNested,
+      });
       expect((result.newCutList as any).slots[0].effects).toHaveLength(0);
     });
 
@@ -251,10 +274,14 @@ describe("AI Service", () => {
         slots: [{ ...mockCutList.slots[0], selectedClipId: "clip-1" }],
       };
       vi.mocked(fetch).mockResolvedValueOnce(
-        makeClaudeResponse([{ op: "remove", path: "/slots/0/selectedClipId" }], "Removed clip") as any
+        makeClaudeResponse([{ op: "remove", path: "/slots/0/selectedClipId" }], "Removed clip") as any,
       );
 
-      const result = await applyPromptEdit({ userId: "user-1", prompt: "remove clip", cutList: listWithOptional });
+      const result = await applyPromptEdit({
+        userId: "user-1",
+        prompt: "remove clip",
+        cutList: listWithOptional,
+      });
       expect((result.newCutList as any).slots[0]).not.toHaveProperty("selectedClipId");
     });
 
@@ -264,7 +291,7 @@ describe("AI Service", () => {
       vi.stubEnv("AI_PROVIDER", "claude");
 
       await expect(
-        applyPromptEdit({ userId: "user-1", prompt: "test", cutList: mockCutList })
+        applyPromptEdit({ userId: "user-1", prompt: "test", cutList: mockCutList }),
       ).rejects.toThrow("AI prompt edit failed");
     });
 
@@ -296,7 +323,7 @@ describe("AI Service", () => {
       vi.stubEnv("AI_PROVIDER", "claude");
       vi.mocked(fetch).mockResolvedValueOnce({
         json: async () => ({
-          content: [{ type: "text", text: "```json\n{\"diff\":[],\"explanation\":\"ok\"}\n```" }],
+          content: [{ type: "text", text: '```json\n{"diff":[],"explanation":"ok"}\n```' }],
         }),
         ok: true,
         status: 200,
@@ -323,7 +350,7 @@ describe("AI Service", () => {
         } as any);
 
       await expect(
-        applyPromptEdit({ userId: "user-1", prompt: "test", cutList: mockCutList })
+        applyPromptEdit({ userId: "user-1", prompt: "test", cutList: mockCutList }),
       ).rejects.toThrow("AI prompt edit failed");
     });
 
@@ -335,7 +362,10 @@ describe("AI Service", () => {
         vi.mocked(fetch)
           .mockResolvedValueOnce({ ok: false, status: 429, text: async () => "Rate limited" } as any)
           .mockResolvedValueOnce(
-            makeClaudeResponse([{ op: "replace", path: "/slots/0/transitionIn", value: "fade" }], "Added fade") as any
+            makeClaudeResponse(
+              [{ op: "replace", path: "/slots/0/transitionIn", value: "fade" }],
+              "Added fade",
+            ) as any,
           );
 
         const result = await applyPromptEdit({ userId: "user-1", prompt: "fade", cutList: mockCutList });
@@ -356,7 +386,10 @@ describe("AI Service", () => {
           .mockResolvedValueOnce({ ok: false, status: 429, text: async () => "Rate limited" } as any)
           .mockResolvedValueOnce({ ok: false, status: 429, text: async () => "Rate limited" } as any)
           .mockResolvedValueOnce(
-            makeOpenAIResponse([{ op: "replace", path: "/slots/0/transitionIn", value: "dissolve" }], "Dissolved") as any
+            makeOpenAIResponse(
+              [{ op: "replace", path: "/slots/0/transitionIn", value: "dissolve" }],
+              "Dissolved",
+            ) as any,
           );
 
         const result = await applyPromptEdit({ userId: "user-1", prompt: "dissolve", cutList: mockCutList });
@@ -383,7 +416,7 @@ describe("AI Service", () => {
           .mockResolvedValueOnce(rateLimited as any);
 
         await expect(
-          applyPromptEdit({ userId: "user-1", prompt: "test", cutList: mockCutList })
+          applyPromptEdit({ userId: "user-1", prompt: "test", cutList: mockCutList }),
         ).rejects.toThrow("AI prompt edit failed");
         expect(vi.mocked(fetch)).toHaveBeenCalledTimes(8);
       });
@@ -428,6 +461,52 @@ describe("AI Service", () => {
       expect(result.newCutList).toEqual(mockCutList);
     });
 
+    it("returns safe fallback when output guardrails block Claude response", async () => {
+      vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+      vi.stubEnv("AI_PROVIDER", "claude");
+      vi.mocked(fetch).mockResolvedValueOnce(
+        makeClaudeResponse(
+          [{ op: "replace", path: "/slots/0/transitionIn", value: "fade" }],
+          "Added fade",
+        ) as any,
+      );
+      vi.mocked(validateAIResponse).mockResolvedValueOnce({
+        allowed: false,
+        reason: "Output blocked by guardrails: secrets",
+        flagged_categories: ["secrets"],
+        confidence: 0.95,
+      });
+
+      const result = await applyPromptEdit({ userId: "user-1", prompt: "fade", cutList: mockCutList });
+      expect(result.fallback).toBeDefined();
+      expect(result.fallback?.reason).toBe("content_filter");
+      expect(result.explanation).toBe("Output blocked by guardrails: secrets");
+      expect(result.newCutList).toEqual(mockCutList);
+    });
+
+    it("returns safe fallback when output guardrails block OpenAI response", async () => {
+      vi.stubEnv("OPENAI_API_KEY", "sk-openai-test");
+      vi.stubEnv("AI_PROVIDER", "openai");
+      vi.mocked(fetch).mockResolvedValueOnce(
+        makeOpenAIResponse(
+          [{ op: "replace", path: "/slots/0/transitionIn", value: "fade" }],
+          "Added fade",
+        ) as any,
+      );
+      vi.mocked(validateAIResponse).mockResolvedValueOnce({
+        allowed: false,
+        reason: "Output blocked by guardrails: toxicity",
+        flagged_categories: ["toxicity"],
+        confidence: 0.88,
+      });
+
+      const result = await applyPromptEdit({ userId: "user-1", prompt: "fade", cutList: mockCutList });
+      expect(result.fallback).toBeDefined();
+      expect(result.fallback?.reason).toBe("content_filter");
+      expect(result.explanation).toBe("Output blocked by guardrails: toxicity");
+      expect(result.newCutList).toEqual(mockCutList);
+    });
+
     it("returns safe fallback when both providers refuse", async () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
       vi.stubEnv("OPENAI_API_KEY", "sk-openai-test");
@@ -467,8 +546,8 @@ describe("AI Service", () => {
               value: { index: 1, startS: 5 }, // missing required fields
             },
           ],
-          "Added slot"
-        ) as any
+          "Added slot",
+        ) as any,
       );
 
       try {
@@ -483,7 +562,7 @@ describe("AI Service", () => {
       vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
       vi.stubEnv("AI_PROVIDER", "claude");
       vi.mocked(fetch).mockResolvedValueOnce(
-        makeClaudeResponse([{ op: "add", path: "/evil", value: true }], "Added evil") as any
+        makeClaudeResponse([{ op: "add", path: "/evil", value: true }], "Added evil") as any,
       );
 
       try {
@@ -536,12 +615,16 @@ describe("AI Service", () => {
         text: async () => "Rate limited",
       } as any);
 
-      await expect(transcribeAudio("user-1", Buffer.from("audio"), "test.mp3")).rejects.toThrow("Whisper API error");
+      await expect(transcribeAudio("user-1", Buffer.from("audio"), "test.mp3")).rejects.toThrow(
+        "Whisper API error",
+      );
     });
 
     it("throws when OPENAI_API_KEY is missing", async () => {
       vi.stubEnv("OPENAI_API_KEY", "");
-      await expect(transcribeAudio("user-1", Buffer.from("audio"), "test.mp3")).rejects.toThrow("not configured");
+      await expect(transcribeAudio("user-1", Buffer.from("audio"), "test.mp3")).rejects.toThrow(
+        "not configured",
+      );
     });
   });
 });
