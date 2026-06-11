@@ -12,6 +12,8 @@
     "obs:down": "docker compose -f infra/observability/docker-compose.yml down",
     "obs:logs": "docker compose -f infra/observability/docker-compose.yml logs -f",
     "branch:clean": "bash scripts/clean-branches.sh",
+    "fixtures": "bash scripts/download-fixtures.sh",
+    "e2e": "tsx e2e/manual-pipeline-test.ts",
     "prepare": "husky"
   },
   "devDependencies": {
@@ -19,6 +21,7 @@
     "husky": "^9.0.0",
     "lint-staged": "^15.0.0",
     "prettier": "^3.2.5",
+    "tsx": "^4.11.0",
     "turbo": "^2.0.0"
   },
   "packageManager": "pnpm@9.15.9",

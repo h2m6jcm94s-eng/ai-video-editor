@@ -17,10 +17,8 @@ if (isTest) {
   // Prevent .env.local's AI_PROVIDER_TOOLCALL from hijacking applyPromptEdit in tests.
   // Tests that need it can vi.stubEnv() after this point.
   delete process.env.AI_PROVIDER_TOOLCALL;
-  // Ensure internal worker token is set for webhook auth tests
-  if (!process.env.INTERNAL_WORKER_TOKEN) {
-    process.env.INTERNAL_WORKER_TOKEN = "test-internal-token-1234567890abcdef";
-  }
+  // Force test internal worker token so webhook auth tests pass regardless of .env.local
+  process.env.INTERNAL_WORKER_TOKEN = "test-internal-token-1234567890abcdef";
 }
 
 const schema = z.object({
@@ -56,6 +54,7 @@ const schema = z.object({
     .length(64, "PROVIDER_KEK must be exactly 64 hex characters (32 bytes)")
     .regex(/^[0-9a-fA-F]+$/, "PROVIDER_KEK must be a hex string")
     .optional(),
+  E2E_TEST_TOKEN: z.string().min(32).optional(),
 });
 
 const result = schema.safeParse(process.env);

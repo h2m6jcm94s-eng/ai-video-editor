@@ -62,3 +62,10 @@ secrets.env
 
 # Test coverage
 coverage/
+
+# E2E fixtures & reports (keep directory via .gitkeep)
+e2e/fixtures/*
+!e2e/fixtures/.gitkeep
+!e2e/fixtures/manifest.json
+e2e/reports/*
+!e2e/reports/.gitkeep
