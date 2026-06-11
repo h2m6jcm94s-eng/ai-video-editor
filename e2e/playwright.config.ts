@@ -1,9 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
-// Load .env.local so E2E_TEST_USER_EMAIL/PASSWORD are available
+// Load .env.local (or .env) so E2E_TEST_USER_EMAIL/PASSWORD are available
 import { config } from "dotenv";
+import { existsSync } from "fs";
 import path from "path";
 
-config({ path: ".env.local" });
+config({ path: existsSync(".env.local") ? ".env.local" : ".env" });
 
 export default defineConfig({
   testDir: path.join(__dirname, "specs"),
