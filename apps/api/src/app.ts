@@ -17,6 +17,7 @@ import {
 } from "./lib/metrics";
 import { requireAuth } from "./middleware/auth";
 import { adminRoutes } from "./routes/admin";
+import { anomalyRoutes } from "./routes/anomaly";
 import { healthRoutes } from "./routes/health";
 import { internalRoutes } from "./routes/internal";
 import { logRoutes } from "./routes/log";
@@ -29,6 +30,7 @@ import { renderRoutes } from "./routes/renders";
 import { settingsRoutes } from "./routes/settings";
 import { templateRoutes } from "./routes/templates";
 import { uploadRoutes } from "./routes/uploads";
+import { recordMetric } from "./services/anomaly";
 
 export async function buildApp() {
   const app = Fastify({
@@ -148,6 +150,24 @@ export async function buildApp() {
   await app.register(settingsRoutes, { prefix: "/api/settings" });
   await app.register(notificationRoutes, { prefix: "/api/notifications" });
   await app.register(adminRoutes, { prefix: "/api/admin" });
+  await app.register(anomalyRoutes, { prefix: "/api/anomalies" });
+
+  // Anomaly tracking: flag users with unusual request velocity
+  app.addHook("onResponse", async (request, reply) => {
+    const userId = request.userId;
+    if (!userId || process.env.NODE_ENV === "test") return;
+
+    const route = normalizeRoutePath(request.routeOptions?.url || request.url);
+
+    // Fire-and-forget anomaly detection
+    recordMetric(userId, `req:${route}`, 1).catch(() => {
+      // silently ignore — anomaly detection must not break responses
+    });
+
+    if (reply.statusCode >= 500) {
+      recordMetric(userId, "error_rate", 1).catch(() => {});
+    }
+  });
 
   return app;
 }
