@@ -86,8 +86,11 @@ export async function progressRoutes(app: FastifyInstance) {
       reply.raw.write(`:heartbeat\n\n`);
     }, 15000);
 
-    // Cleanup on close
+    // Cleanup on close — guarded against double-fire from close + error
+    let cleaned = false;
     const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
       clearInterval(heartbeat);
       const refCount = (subscriberRefCount.get(channel) || 1) - 1;
       subscriberRefCount.set(channel, refCount);

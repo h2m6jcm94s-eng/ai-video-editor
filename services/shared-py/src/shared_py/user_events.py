@@ -9,7 +9,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 _API_URL = os.environ.get("API_URL", "http://localhost:4000")
-_INTERNAL_TOKEN = os.environ.get("INTERNAL_API_TOKEN", "")
+_INTERNAL_TOKEN = os.environ.get("INTERNAL_WORKER_TOKEN", "")
 
 
 class UserEventReporter:
@@ -19,7 +19,7 @@ class UserEventReporter:
         self.api_url = (api_url or _API_URL).rstrip("/")
         self.token = token or _INTERNAL_TOKEN
         if not self.token:
-            logger.warning("INTERNAL_API_TOKEN not set; user event reporting will fail")
+            logger.warning("INTERNAL_WORKER_TOKEN not set; user event reporting will fail")
 
     def report(
         self,
@@ -31,7 +31,7 @@ class UserEventReporter:
     ) -> bool:
         """Report a user event. Returns True if accepted."""
         if not self.token:
-            logger.debug("Skipping user event report — no INTERNAL_API_TOKEN")
+            logger.debug("Skipping user event report — no INTERNAL_WORKER_TOKEN")
             return False
 
         try:
@@ -65,7 +65,7 @@ class UserEventReporter:
     ) -> bool:
         """Async version of report."""
         if not self.token:
-            logger.debug("Skipping user event report — no INTERNAL_API_TOKEN")
+            logger.debug("Skipping user event report — no INTERNAL_WORKER_TOKEN")
             return False
 
         try:

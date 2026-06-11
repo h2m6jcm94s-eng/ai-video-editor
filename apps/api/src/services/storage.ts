@@ -36,6 +36,10 @@ export const s3 = new S3Client({
     secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",
   },
   forcePathStyle: isLocal,
+  requestHandler: {
+    requestTimeout: 30_000,
+    connectionTimeout: 5_000,
+  },
 });
 
 export const BUCKET = process.env.R2_BUCKET_NAME || "ai-video-editor";

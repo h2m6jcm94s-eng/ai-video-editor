@@ -80,6 +80,10 @@ describe("Multipart Upload Routes", () => {
   });
 
   it("POST /api/uploads/multipart/sign-part returns presigned URL", async () => {
+    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce({
+      ...mockAsset,
+      project: mockProject,
+    } as any);
     vi.mocked(presignUploadPart).mockResolvedValueOnce("https://r2.example.com/part-1");
 
     const app = await buildApp();
@@ -88,7 +92,7 @@ describe("Multipart Upload Routes", () => {
       url: "/api/uploads/multipart/sign-part",
       payload: {
         uploadId: "upload-id-123",
-        key: "projects/test/key",
+        key: mockAsset.storageKey,
         partNumber: 1,
       },
     });
@@ -96,6 +100,45 @@ describe("Multipart Upload Routes", () => {
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(body.url).toBe("https://r2.example.com/part-1");
+  });
+
+  it("POST /api/uploads/multipart/sign-part returns 404 for non-existent key", async () => {
+    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce(undefined);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/uploads/multipart/sign-part",
+      payload: {
+        uploadId: "upload-id-123",
+        key: "projects/other/key",
+        partNumber: 1,
+      },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.body).code).toBe("NOT_FOUND");
+  });
+
+  it("POST /api/uploads/multipart/sign-part returns 403 for another user's asset", async () => {
+    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce({
+      ...mockAsset,
+      project: { ...mockProject, userId: "other-user-id" },
+    } as any);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/uploads/multipart/sign-part",
+      payload: {
+        uploadId: "upload-id-123",
+        key: mockAsset.storageKey,
+        partNumber: 1,
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(JSON.parse(res.body).code).toBe("FORBIDDEN");
   });
 
   it("POST /api/uploads/multipart/complete updates asset and triggers probe", async () => {
