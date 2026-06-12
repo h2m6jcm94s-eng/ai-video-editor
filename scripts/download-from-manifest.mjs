@@ -2,9 +2,37 @@
 // Copyright (c) 2025 Devayan Dewri. All rights reserved.
 // Download fixtures from manifest, verify magic bytes, skip if cached.
 
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from "fs";
-import { join, dirname } from "path";
+import { readFileSync, existsSync, writeFileSync, mkdirSync, renameSync, statSync } from "fs";
+import { join, dirname, basename, resolve } from "path";
 import { fileURLToPath } from "url";
+
+// Strict allowlist of fixture-source hosts. Manifest URLs from outside this
+// list are rejected — defangs the "outbound request from file data" risk.
+const ALLOWED_HOSTS = new Set([
+  "videos.pexels.com",
+  "video-previews.pexels.com",
+  "cdn.pixabay.com",
+  "freesound.org",
+  "cdn.freesound.org",
+]);
+
+function assertSafeUrl(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Invalid URL: ${url}`);
+  }
+  if (parsed.protocol !== "https:") throw new Error(`Refusing non-HTTPS URL: ${url}`);
+  if (!ALLOWED_HOSTS.has(parsed.hostname))
+    throw new Error(`Host not in allowlist: ${parsed.hostname}`);
+}
+
+function assertSafeFilename(name) {
+  // Reject path separators, parent refs, absolute paths — filename must be a leaf.
+  if (!name || name !== basename(name) || name === "." || name === "..")
+    throw new Error(`Invalid filename: ${name}`);
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = join(__dirname, "..", "e2e", "fixtures");
@@ -54,18 +82,17 @@ function checkMagic(bytes, filename) {
 }
 
 async function downloadFixture(fixture) {
-  const outPath = join(FIXTURES_DIR, fixture.filename);
-
-  if (existsSync(outPath)) {
-    const headRes = await fetch(fixture.url, { method: "HEAD" });
-    const remoteSize = parseInt(headRes.headers.get("content-length") || "0", 10);
-    const localSize = (await import("fs")).statSync(outPath).size;
-    if (localSize === remoteSize && remoteSize > 0) {
-      console.log(`  ✓ ${fixture.filename} already cached (${localSize} bytes)`);
-      return outPath;
-    }
+  assertSafeUrl(fixture.url);
+  assertSafeFilename(fixture.filename);
+  const fixturesAbs = resolve(FIXTURES_DIR);
+  const outPath = resolve(fixturesAbs, fixture.filename);
+  // Defence-in-depth: confirm resolved path stays inside FIXTURES_DIR.
+  if (!outPath.startsWith(fixturesAbs + (process.platform === "win32" ? "\\" : "/"))) {
+    throw new Error(`Resolved path escapes fixtures dir: ${outPath}`);
   }
 
+  // Download → write to temp → atomic rename. No HEAD-then-GET race; if the
+  // file exists we still re-download and replace in one syscall.
   console.log(`  ↓ ${fixture.filename} ...`);
   const res = await fetch(fixture.url);
   if (!res.ok) throw new Error(`Download failed: ${res.status} ${fixture.url}`);
@@ -75,8 +102,12 @@ async function downloadFixture(fixture) {
     throw new Error(`Magic-byte mismatch for ${fixture.filename}`);
   }
 
-  writeFileSync(outPath, buf);
-  console.log(`  ✓ ${fixture.filename} (${buf.length} bytes)`);
+  const tmpPath = `${outPath}.part-${process.pid}-${Date.now()}`;
+  writeFileSync(tmpPath, buf, { mode: 0o644 });
+  renameSync(tmpPath, outPath);
+
+  const wrote = statSync(outPath).size;
+  console.log(`  ✓ ${fixture.filename} (${wrote} bytes)`);
   return outPath;
 }
 
