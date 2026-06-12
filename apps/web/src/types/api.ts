@@ -2,16 +2,11 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 
 // ── Re-exports from shared-types (single source of truth) ──
-import type {
-  SectionMarker,
-  AudioTrack,
-  Effect,
-  Slot,
-} from "@ai-video-editor/shared-types";
+import type { AssetType, AudioTrack, Effect, SectionMarker, Slot } from "@ai-video-editor/shared-types";
 
-export type { SectionMarker, AudioTrack, Effect, Slot } from "@ai-video-editor/shared-types";
+export type { AssetType, AudioTrack, Effect, SectionMarker, Slot } from "@ai-video-editor/shared-types";
 
-import type { EffectType, Easing } from "@ai-video-editor/shared-types";
+import type { Easing, EffectType } from "@ai-video-editor/shared-types";
 
 // ── Web-only types (UI state, local shapes, API response wrappers) ──
 
@@ -33,7 +28,7 @@ export interface Project {
 export interface Asset {
   id: string;
   projectId: string;
-  type: "reference" | "song" | "clip";
+  type: AssetType;
   filename: string;
   mimeType: string;
   sizeBytes: number;
@@ -135,7 +130,11 @@ export type EffectParams = {
   vignette: { intensity: number; color: string };
   film_grain: { intensity: number };
   color_pop: { hueShift: number; saturation: number };
-  text_kinetic: { text: string; animation: "fade_up" | "typewriter" | "pop" | "slide_left"; fontSize: number };
+  text_kinetic: {
+    text: string;
+    animation: "fade_up" | "typewriter" | "pop" | "slide_left";
+    fontSize: number;
+  };
   lower_third: { text: string; subtext?: string; style: "minimal" | "bold" | "news" };
   callout_arrow: { direction: "up" | "down" | "left" | "right"; color: string };
   whoosh_sfx: { variant: "short" | "long" | "dramatic"; gainDb: number };

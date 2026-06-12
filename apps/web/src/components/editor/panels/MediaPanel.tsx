@@ -17,7 +17,7 @@ interface MediaPanelProps {
 
 function AssetItem({ asset }: { asset: Asset }) {
   const icons = {
-    reference: Video,
+    reference_video: Video,
     song: Music,
     clip: Film,
   };
@@ -49,7 +49,7 @@ function AssetItem({ asset }: { asset: Asset }) {
 }
 
 export function MediaPanel({ projectId, assets, onAssetsChange }: MediaPanelProps) {
-  const [activeTab, setActiveTab] = useState<"all" | "reference" | "song" | "clip">("all");
+  const [activeTab, setActiveTab] = useState<"all" | "reference_video" | "song" | "clip">("all");
   const { uploadFile, uploading } = useUpload(projectId);
   const fileInputRef = useCallback((node: HTMLInputElement | null) => {
     // no-op, used for ref assignment in JSX
@@ -66,7 +66,7 @@ export function MediaPanel({ projectId, assets, onAssetsChange }: MediaPanelProp
 
   const tabs: { key: typeof activeTab; label: string; icon: React.ReactNode }[] = [
     { key: "all", label: "All", icon: <ImageIcon className="w-3 h-3" /> },
-    { key: "reference", label: "Ref", icon: <Video className="w-3 h-3" /> },
+    { key: "reference_video", label: "Ref", icon: <Video className="w-3 h-3" /> },
     { key: "song", label: "Song", icon: <Music className="w-3 h-3" /> },
     { key: "clip", label: "Clips", icon: <Film className="w-3 h-3" /> },
   ];
@@ -101,22 +101,37 @@ export function MediaPanel({ projectId, assets, onAssetsChange }: MediaPanelProp
 
       <div className="p-3 border-t border-zinc-800 space-y-2">
         <input
-          ref={fileInputRef}
           type="file"
           accept="video/*"
           className="hidden"
-          id="upload-clip"
-          onChange={(e) => handleFileChange(e, "clip")}
+          id="upload-reference"
+          data-testid="upload-reference"
+          onChange={(e) => handleFileChange(e, "reference_video")}
         />
-        <label htmlFor="upload-clip">
+        <label htmlFor="upload-reference">
           <Button variant="outline" className="w-full gap-2 text-xs" size="sm" disabled={uploading} asChild>
             <span>
               <Upload className="w-3 h-3" />
-              {uploading ? "Uploading..." : "Upload Clip"}
+              {uploading ? "Uploading..." : "Upload Reference"}
             </span>
           </Button>
         </label>
-      </div>
-    </div>
-  );
-}
+
+        <input
+          type="file"
+          accept="audio/*"
+          className="hidden"
+          id="upload-song"
+          data-testid="upload-song"
+          onChange={(e) => handleFileChange(e, "song")}
+        />
+        <label htmlFor="upload-song">
+          <Button variant="outline" className="w-full gap-2 text-xs" size="sm" disabled={uploading} asChild>
+            <span>
+              <Upload className="w-3 h-3" />
+              {uploading ? "Uploading..." : "Upload Song"}
+            </span>
+          </Button>
+        </label>
+
+        <input
