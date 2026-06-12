@@ -26,6 +26,17 @@ function toClerkRequest(request: FastifyRequest) {
 }
 
 export async function requireAuth(request: FastifyRequest, reply: FastifyReply) {
+  // ---- E2E auth bypass — dev only, never enable in prod ----
+  if (process.env.DISABLE_CLERK_AUTH === "1") {
+    const testUserId = process.env.E2E_TEST_USER_ID ?? "00000000-0000-0000-0000-000000000001";
+    const existing = await getUserByClerkId(`e2e-${testUserId}`);
+    const localUser = existing ?? (await upsertUser(`e2e-${testUserId}`, "e2e@test.local", "E2E Test User"));
+    request.userId = localUser.id;
+    (request as any).auth = { userId: `e2e-${testUserId}` };
+    return;
+  }
+  // ---- end bypass ----
+
   const req = toClerkRequest(request);
   const state = await clerk.authenticateRequest(req, {
     secretKey: process.env.CLERK_SECRET_KEY,

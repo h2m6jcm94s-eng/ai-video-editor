@@ -2,7 +2,6 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 export const dynamic = "force-dynamic";
 
-import { auth } from "@clerk/nextjs/server";
 import { Settings } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -10,9 +9,10 @@ import { CreateProjectDialog } from "@/components/dashboard/CreateProjectDialog"
 import { ProjectList } from "@/components/dashboard/ProjectList";
 import { Button } from "@/components/ui/button";
 import { apiServer } from "@/lib/api/server";
+import { getServerAuth } from "@/lib/auth";
 
 export default async function DashboardPage() {
-  const { userId } = await auth();
+  const { userId } = await getServerAuth();
   if (!userId) redirect("/sign-in");
 
   let projects: Awaited<ReturnType<typeof apiServer.projects.list>>["projects"] = [];

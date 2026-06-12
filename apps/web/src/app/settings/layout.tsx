@@ -2,10 +2,10 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 export const dynamic = "force-dynamic";
 
+import { ArrowLeft, Keyboard, KeyRound, Palette, Settings, User } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { auth } from "@clerk/nextjs/server";
-import { KeyRound, User, Palette, Keyboard, Settings, ArrowLeft } from "lucide-react";
+import { getServerAuth } from "@/lib/auth";
 
 const tabs = [
   { label: "Account", href: "/settings/account", icon: User, disabled: true },
@@ -15,12 +15,8 @@ const tabs = [
   { label: "Advanced", href: "/settings/advanced", icon: Settings, disabled: true },
 ];
 
-export default async function SettingsLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
-  const { userId } = await auth();
+export default async function SettingsLayout({ children }: { children: React.ReactNode }) {
+  const { userId } = await getServerAuth();
   if (!userId) redirect("/sign-in");
 
   return (

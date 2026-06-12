@@ -2,13 +2,13 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 export const dynamic = "force-dynamic";
 
-import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { ProviderKeyManager } from "@/components/settings/ProviderKeyManager";
 import { apiServer } from "@/lib/api/server";
+import { getServerAuth } from "@/lib/auth";
 
 export default async function KeysPage() {
-  const { userId } = await auth();
+  const { userId } = await getServerAuth();
   if (!userId) redirect("/sign-in");
 
   let keys: Awaited<ReturnType<typeof apiServer.settings.providerKeys.list>>["keys"] = [];

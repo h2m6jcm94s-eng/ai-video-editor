@@ -3,7 +3,9 @@ import { NextResponse } from "next/server";
 
 const isPublicRoute = createRouteMatcher(["/sign-in(.*)", "/sign-up(.*)"]);
 
-export default clerkMiddleware(async (auth, request) => {
+const isAuthDisabled = process.env.DISABLE_CLERK_AUTH === "1";
+
+const productionMiddleware = clerkMiddleware(async (auth, request) => {
   if (!isPublicRoute(request)) {
     const { userId } = await auth();
     if (!userId) {
@@ -11,6 +13,12 @@ export default clerkMiddleware(async (auth, request) => {
     }
   }
 });
+
+export default isAuthDisabled
+  ? function bypassedMiddleware() {
+      return;
+    }
+  : productionMiddleware;
 
 export const config = {
   matcher: [
