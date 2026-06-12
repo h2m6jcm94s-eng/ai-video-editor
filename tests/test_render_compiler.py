@@ -14,8 +14,10 @@ import shutil
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "services", "render-worker", "src"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "services", "shared-py", "src"))
 
+import warnings
+
 from render_worker.compiler import compile_timeline, render_preview, XFADE_MAP
-from shared_py.models import CutList, CutListGlobals, Slot, Overlay, RenderConfig
+from shared_py.models import CutList, CutListGlobals, Slot, Overlay, RenderConfig, Effect
 
 
 def create_test_video(path: str, duration: float = 5.0, fps: int = 30,
@@ -143,3 +145,58 @@ class TestRenderEdgeCases:
                               position=pos, font="Inter",
                               font_size_px=48, color="#FFFFFF", animation="none")
             assert overlay.position == pos
+
+
+class TestStyleTierWarnings:
+    """M1: compiler emits warnings when cutlist features exceed the purchased tier."""
+
+    def _base_cutlist(self, **slot_overrides):
+        return CutList(
+            globals=CutListGlobals(total_duration_s=2.0, tempo_bpm=120,
+                                   time_signature="4/4", energy_curve=[0.5],
+                                   section_markers=[], aspect_ratio="16:9"),
+            slots=[Slot(index=0, start_s=0.0, duration_s=2.0, beat_index=0,
+                        section="intro", target_shot_type="wide",
+                        subject_hint="test", motion_hint="static",
+                        energy_level=0.5, required_tags=[], avoid_tags=[],
+                        selected_clip_id=None, **slot_overrides)],
+        )
+
+    def test_cuts_only_warns_on_transition(self):
+        cutlist = self._base_cutlist(transition_out="fade")
+        config = RenderConfig(output_path="/tmp/out.mp4")
+        with pytest.warns(UserWarning, match="does not include transitions"):
+            with pytest.raises(ValueError, match="No valid segments"):
+                compile_timeline(cutlist, {}, "/tmp/out.mp4", config, style_tier="cuts_only")
+
+    def test_color_grade_warns_on_overlay(self):
+        cutlist = self._base_cutlist()
+        cutlist.overlays = [Overlay(text="Hi", start_s=0.0, end_s=1.0, position="center",
+                                    font="Inter", font_size_px=48, color="#FFFFFF", animation="none")]
+        config = RenderConfig(output_path="/tmp/out.mp4")
+        with pytest.warns(UserWarning, match="does not include text overlays"):
+            with pytest.raises(ValueError, match="No valid segments"):
+                compile_timeline(cutlist, {}, "/tmp/out.mp4", config, style_tier="color_grade")
+
+    def test_with_text_warns_on_effects(self):
+        cutlist = self._base_cutlist(effects=[Effect(type="vignette", start_s=0.0,
+                                                     duration_s=1.0, params={"intensity": 0.4})])
+        config = RenderConfig(output_path="/tmp/out.mp4")
+        with pytest.warns(UserWarning, match="does not include slot effects"):
+            with pytest.raises(ValueError, match="No valid segments"):
+                compile_timeline(cutlist, {}, "/tmp/out.mp4", config, style_tier="with_text")
+
+    def test_full_remix_no_warnings(self):
+        cutlist = self._base_cutlist(transition_out="fade",
+                                     effects=[Effect(type="vignette", start_s=0.0,
+                                                     duration_s=1.0, params={"intensity": 0.4})])
+        cutlist.overlays = [Overlay(text="Hi", start_s=0.0, end_s=1.0, position="center",
+                                    font="Inter", font_size_px=48, color="#FFFFFF", animation="none")]
+        config = RenderConfig(output_path="/tmp/out.mp4", lut_path="/tmp/lut.cube")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            try:
+                compile_timeline(cutlist, {}, "/tmp/out.mp4", config, style_tier="full_remix")
+            except ValueError:
+                pass  # clips are absent; warnings are what we care about
+        assert not [w for w in caught if "Style tier" in str(w.message)]
