@@ -157,9 +157,12 @@ class TestSettingsEdgeCases:
         assert s.redis_url == "unix:///var/run/redis/redis.sock"
 
     def test_settings_singleton(self):
-        """Verify settings module exposes a singleton."""
-        from shared_py.config import settings
-        assert isinstance(settings, Settings)
+        """Verify settings module exposes a usable singleton (lazy proxy over Settings)."""
+        from shared_py.config import settings, get_settings
+        # `settings` is a _LazySettings proxy; verify it resolves to a Settings instance
+        # and that attribute access goes through to the underlying Settings object.
+        assert isinstance(get_settings(), Settings)
+        assert settings.redis_url == get_settings().redis_url
 
     def test_settings_reinstantiation(self):
         """Fresh Settings instance picks up current env."""
