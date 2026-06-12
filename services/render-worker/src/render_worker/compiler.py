@@ -6,11 +6,32 @@
 import os
 import tempfile
 import subprocess
+import warnings
 from typing import List, Optional, Dict
 import numpy as np
 from PIL import ImageFont
 
 from shared_py.models import CutList, Slot, Overlay, RenderConfig, Effect, AudioTrack
+
+
+# Ordered from least to most capability. Used for tier-gating warnings only in M1.
+STYLE_TIERS = ("cuts_only", "color_grade", "with_text", "with_effects", "full_remix")
+
+
+def _tier_index(tier: str) -> int:
+    try:
+        return STYLE_TIERS.index(tier)
+    except ValueError:
+        return len(STYLE_TIERS) - 1
+
+
+def _warn_if_below(style_tier: str, required_tier: str, feature: str) -> None:
+    if _tier_index(style_tier) < _tier_index(required_tier):
+        warnings.warn(
+            f"Style tier '{style_tier}' does not include {feature}; "
+            f"upgrade to '{required_tier}' or higher to render it.",
+            stacklevel=3,
+        )
 
 
 def _find_font() -> str:
@@ -129,10 +150,25 @@ def compile_timeline(
     clip_paths: Dict[str, str],
     output_path: str,
     config: RenderConfig,
+    style_tier: str = "full_remix",
 ) -> str:
     """Compile a cut-list into a final video using FFmpeg."""
     if not cutlist.slots:
         raise ValueError("Cut list has no slots")
+
+    # M1: warn when the cutlist requests features above the purchased style tier.
+    #     Hard cuts are allowed at every tier; everything else is gated.
+    if config.lut_path:
+        _warn_if_below(style_tier, "color_grade", "LUT / color grade")
+    if cutlist.overlays:
+        _warn_if_below(style_tier, "with_text", "text overlays")
+    if cutlist.audio_tracks or config.song_path:
+        _warn_if_below(style_tier, "full_remix", "audio tracks / song")
+    for slot in cutlist.slots:
+        if slot.effects:
+            _warn_if_below(style_tier, "with_effects", f"slot effects ({slot.index})")
+        if slot.transition_out != "hard_cut" or slot.transition_in != "hard_cut":
+            _warn_if_below(style_tier, "with_effects", f"transitions ({slot.index})")
 
     # Stage 1: Extract each slot's segment from its assigned clip
     slot_segments = []
@@ -155,6 +191,7 @@ def compile_timeline(
             f"scale={config.width}:{config.height}:force_original_aspect_ratio=decrease,"
             f"pad={config.width}:{config.height}:(ow-iw)/2:(oh-ih)/2"
         )
+
         vf = _apply_video_effects(slot, base_vf)
 
         cmd = [
@@ -298,6 +335,7 @@ def render_preview(
     width: int = 360,
     height: int = 640,
     duration_cap: float = 15.0,
+    style_tier: str = "full_remix",
 ) -> str:
     """Render a fast 360p preview."""
     config = RenderConfig(
@@ -318,4 +356,4 @@ def render_preview(
         total += slot.duration_s
     preview_cutlist.slots = preview_slots
 
-    return compile_timeline(preview_cutlist, clip_paths, output_path, config)
+    return compile_timeline(preview_cutlist, clip_paths, output_path, config, style_tier=style_tier)
