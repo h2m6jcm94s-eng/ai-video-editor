@@ -2,11 +2,11 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
+import { Film, ImageIcon, Music, Upload, Video } from "lucide-react";
 import { useCallback, useState } from "react";
-import { Upload, Film, Music, Video, ImageIcon } from "lucide-react";
-import { useUpload } from "@/hooks/useUpload";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useUpload } from "@/hooks/useUpload";
 import type { Asset } from "@/types/api";
 
 interface MediaPanelProps {
@@ -93,9 +93,7 @@ export function MediaPanel({ projectId, assets, onAssetsChange }: MediaPanelProp
           {filtered.map((asset) => (
             <AssetItem key={asset.id} asset={asset} />
           ))}
-          {filtered.length === 0 && (
-            <p className="text-xs text-zinc-600 text-center py-8">No assets yet</p>
-          )}
+          {filtered.length === 0 && <p className="text-xs text-zinc-600 text-center py-8">No assets yet</p>}
         </div>
       </ScrollArea>
 
@@ -135,3 +133,23 @@ export function MediaPanel({ projectId, assets, onAssetsChange }: MediaPanelProp
         </label>
 
         <input
+          ref={fileInputRef}
+          type="file"
+          accept="video/*"
+          className="hidden"
+          id="upload-clip"
+          data-testid="upload-clip"
+          onChange={(e) => handleFileChange(e, "clip")}
+        />
+        <label htmlFor="upload-clip">
+          <Button variant="outline" className="w-full gap-2 text-xs" size="sm" disabled={uploading} asChild>
+            <span>
+              <Upload className="w-3 h-3" />
+              {uploading ? "Uploading..." : "Upload Clip"}
+            </span>
+          </Button>
+        </label>
+      </div>
+    </div>
+  );
+}
