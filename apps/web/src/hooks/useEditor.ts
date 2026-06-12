@@ -2,7 +2,7 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import { useCallback, useReducer } from "react";
+import { useCallback, useMemo, useReducer } from "react";
 import type { Asset, AudioTrack, CutList, Effect, Overlay, Slot } from "@/types/api";
 
 const MAX_UNDO_DEPTH = 50;
@@ -256,9 +256,8 @@ export function useEditor(initial: Partial<EditorState> = {}) {
   const undo = useCallback(() => dispatch({ type: "UNDO" }), []);
   const redo = useCallback(() => dispatch({ type: "REDO" }), []);
 
-  return {
-    state,
-    actions: {
+  const actions = useMemo(
+    () => ({
       setCutList,
       updateSlot,
       addSlot,
@@ -280,6 +279,34 @@ export function useEditor(initial: Partial<EditorState> = {}) {
       promptApply,
       undo,
       redo,
-    },
+    }),
+    [
+      setCutList,
+      updateSlot,
+      addSlot,
+      removeSlot,
+      reorderSlots,
+      addOverlay,
+      updateOverlay,
+      removeOverlay,
+      addEffect,
+      removeEffect,
+      addAudioTrack,
+      removeAudioTrack,
+      selectSlot,
+      selectOverlay,
+      setPlaying,
+      setCurrentTime,
+      setZoom,
+      setAssets,
+      promptApply,
+      undo,
+      redo,
+    ],
+  );
+
+  return {
+    state,
+    actions,
   };
 }

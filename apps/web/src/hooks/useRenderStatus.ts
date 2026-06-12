@@ -38,7 +38,9 @@ export function useRenderStatus(projectId: string): RenderStatus {
     } finally {
       setIsLoading(false);
     }
-  }, [projectId, api]);
+    // api is kept stable by useApi(); projectId is the only real dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
 
   useEffect(() => {
     let mounted = true;

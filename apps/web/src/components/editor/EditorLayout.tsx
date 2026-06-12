@@ -84,7 +84,8 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
   };
   useEffect(() => {
     actions.setAssets(assets);
-  }, [assets, actions]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assets]);
 
   const handleRollback = useCallback(
     (cl: CutList) => {
