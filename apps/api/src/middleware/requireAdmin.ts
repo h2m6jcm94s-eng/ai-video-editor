@@ -21,8 +21,12 @@ export async function requireAdmin(request: FastifyRequest, reply: FastifyReply)
 
   try {
     // Fetch fresh role from Clerk — don't trust cached session token
-    const clerkUserId = (request as any).auth?.userId as string | undefined;
-    const clerkUser = await clerkClient.users.getUser(clerkUserId || "");
+    const clerkUserId = request.auth?.userId;
+    if (!clerkUserId) {
+      await logAdminAttempt(request, "access_denied_no_clerk_user", userId);
+      return sendError(reply, 401, "Sign in required", "UNAUTHORIZED");
+    }
+    const clerkUser = await clerkClient.users.getUser(clerkUserId);
     const role = clerkUser?.publicMetadata?.role as string | undefined;
 
     if (role !== "admin") {

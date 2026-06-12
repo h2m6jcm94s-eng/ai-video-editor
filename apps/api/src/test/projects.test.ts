@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
 import { db } from "../db";
 
@@ -142,5 +142,28 @@ describe("Project Routes", () => {
     const app = await buildApp();
     const res = await app.inject({ method: "DELETE", url: "/api/projects/proj-1" });
     expect(res.statusCode).toBe(403);
+  });
+
+  it("POST /api/projects defaults styleTier to a valid enum value", async () => {
+    const capture: { styleTier?: string } = {};
+    vi.mocked(db.insert).mockReturnValueOnce({
+      values: vi.fn().mockImplementation((values) => {
+        capture.styleTier = values.styleTier;
+        return {
+          returning: vi.fn().mockResolvedValueOnce([{ ...mockProject, styleTier: values.styleTier }]),
+        };
+      }),
+    } as any);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/projects",
+      payload: { name: "Test Project" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(capture.styleTier).toBe("with_effects");
+    const validTiers = ["cuts_only", "color_grade", "with_text", "with_effects", "full_remix"];
+    expect(validTiers).toContain(capture.styleTier);
   });
 });

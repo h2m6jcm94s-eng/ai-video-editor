@@ -175,7 +175,11 @@ describe("Multipart Upload Routes", () => {
     ]);
   });
 
-  it("DELETE /api/uploads/multipart/abort calls abortMultipartUpload", async () => {
+  it("DELETE /api/uploads/multipart/abort calls abortMultipartUpload for owned asset", async () => {
+    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce({
+      ...mockAsset,
+      project: mockProject,
+    } as any);
     vi.mocked(abortMultipartUpload).mockResolvedValueOnce({});
 
     const app = await buildApp();
@@ -184,14 +188,53 @@ describe("Multipart Upload Routes", () => {
       url: "/api/uploads/multipart/abort",
       payload: {
         uploadId: "upload-id-123",
-        key: "projects/test/key",
+        key: mockAsset.storageKey,
       },
     });
 
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(body.ok).toBe(true);
-    expect(abortMultipartUpload).toHaveBeenCalledWith("projects/test/key", "upload-id-123");
+    expect(abortMultipartUpload).toHaveBeenCalledWith(mockAsset.storageKey, "upload-id-123");
+  });
+
+  it("DELETE /api/uploads/multipart/abort returns 404 for non-existent key", async () => {
+    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce(undefined);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/api/uploads/multipart/abort",
+      payload: {
+        uploadId: "upload-id-123",
+        key: "projects/other/key",
+      },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.body).code).toBe("NOT_FOUND");
+    expect(abortMultipartUpload).not.toHaveBeenCalled();
+  });
+
+  it("DELETE /api/uploads/multipart/abort returns 403 for another user's asset", async () => {
+    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce({
+      ...mockAsset,
+      project: { ...mockProject, userId: "other-user-id" },
+    } as any);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/api/uploads/multipart/abort",
+      payload: {
+        uploadId: "upload-id-123",
+        key: mockAsset.storageKey,
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(JSON.parse(res.body).code).toBe("FORBIDDEN");
+    expect(abortMultipartUpload).not.toHaveBeenCalled();
   });
 
   it("POST /api/uploads/:assetId/complete skips etag check for multipart uploads", async () => {

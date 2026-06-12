@@ -111,10 +111,8 @@ export async function renderRoutes(app: FastifyInstance) {
         });
       } catch (e) {
         // Mark render as failed and return 500 without crashing
-        await db
-          .update(renders)
-          .set({ status: "failed", errorMessage: "Temporal workflow failed" })
-          .where(eq(renders.id, job.id));
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        await db.update(renders).set({ status: "failed", errorMessage }).where(eq(renders.id, job.id));
         return sendError(reply, 500, "Render engine unavailable", "TEMPORAL_ERROR");
       }
 

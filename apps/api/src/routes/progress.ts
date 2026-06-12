@@ -58,6 +58,7 @@ export async function progressRoutes(app: FastifyInstance) {
       subscriber = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
       subscriber.on("error", (err) => {
         request.log.error({ err, channel }, "Redis subscriber error");
+        cleanup();
       });
       await subscriber.subscribe(channel);
       subscriberMap.set(channel, subscriber);
