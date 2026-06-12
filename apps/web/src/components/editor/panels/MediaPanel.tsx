@@ -107,7 +107,7 @@ export function MediaPanel({ projectId, assets, onAssetsChange }: MediaPanelProp
           className="hidden"
           id="upload-reference"
           data-testid="upload-reference"
-          onChange={(e) => handleFileChange(e, "reference")}
+          onChange={(e) => handleFileChange(e, "reference_video")}
         />
         <label htmlFor="upload-reference">
           <Button variant="outline" className="w-full gap-2 text-xs" size="sm" disabled={uploading} asChild>

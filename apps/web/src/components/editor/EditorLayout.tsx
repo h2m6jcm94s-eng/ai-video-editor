@@ -285,7 +285,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
           </button>
           <button
             onClick={async () => {
-              const refAsset = assets.find((a) => a.type === "reference");
+              const refAsset = assets.find((a) => a.type === "reference_video");
               if (!refAsset) {
                 toast.error("Upload a reference video first");
                 return;
