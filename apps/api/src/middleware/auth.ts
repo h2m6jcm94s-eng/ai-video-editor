@@ -43,16 +43,23 @@ export async function requireAuth(
   try {
     let localUser = await getUserByClerkId(auth.userId);
     if (!localUser) {
-      let email = `${auth.userId}@placeholder.local`;
-      let name = "User";
+      let email: string | undefined;
+      let name: string | undefined;
       try {
         const clerkUser = await clerkClient.users.getUser(auth.userId);
-        email = clerkUser.emailAddresses[0]?.emailAddress ?? email;
-        name = clerkUser.fullName ?? name;
+        email = clerkUser.emailAddresses[0]?.emailAddress ?? undefined;
+        name = clerkUser.fullName ?? undefined;
       } catch (clerkErr) {
-        request.log.warn({ err: clerkErr }, "Clerk API user lookup failed (using placeholder)");
+        const err = clerkErr as { status?: number; code?: string };
+        const isTransient = err.status === 503 || err.status === 504 || err.code === "timeout";
+        if (isTransient) {
+          request.log.warn({ err: clerkErr }, "Clerk API transient failure; refusing request");
+          return sendError(reply, 503, "Auth service temporarily unavailable", "USER_RESOLUTION_ERROR");
+        }
+        request.log.error({ err: clerkErr }, "Clerk API user lookup failed; refusing request");
+        return sendError(reply, 503, "Failed to resolve user identity", "USER_RESOLUTION_ERROR");
       }
-      localUser = await upsertUser(auth.userId, email, name);
+      localUser = await upsertUser(auth.userId, email ?? `${auth.userId}@placeholder.local`, name ?? "User");
     }
     request.userId = localUser.id;
   } catch (err) {

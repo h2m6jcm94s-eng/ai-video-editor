@@ -27,6 +27,20 @@ async function getProviderKey(
   return undefined;
 }
 
+async function resolveProviderKey(
+  userId: string,
+  provider: "anthropic" | "openai" | "kimi" | "openrouter" | "groq",
+  ...envKeys: string[]
+): Promise<string | undefined> {
+  const dbValue = await getProviderKey(userId, provider);
+  if (dbValue?.trim()) return dbValue.trim();
+  for (const key of envKeys) {
+    const envValue = process.env[key]?.trim();
+    if (envValue) return envValue;
+  }
+  return undefined;
+}
+
 export interface PromptEditContext {
   userId: string;
   prompt: string;
@@ -107,8 +121,7 @@ async function callClaudeOnce(
   hint: string,
 ): Promise<{ text: string; durationMs: number }> {
   const start = performance.now();
-  const anthropicKey =
-    (await getProviderKey(context.userId, "anthropic")) || process.env.ANTHROPIC_API_KEY || "";
+  const anthropicKey = (await resolveProviderKey(context.userId, "anthropic", "ANTHROPIC_API_KEY")) ?? "";
   if (!anthropicKey) {
     aiCallsTotal.inc({ provider: "claude", status: "missing_key" });
     const err: Error & { code?: string } = new Error("ANTHROPIC_API_KEY not configured");
@@ -239,8 +252,7 @@ async function callKimiOnce(
   hint: string,
 ): Promise<{ text: string; durationMs: number }> {
   const start = performance.now();
-  const kimiKey =
-    (await getProviderKey(context.userId, "kimi")) || process.env.KIMI_API_KEY || process.env.KIMI_KEY || "";
+  const kimiKey = (await resolveProviderKey(context.userId, "kimi", "KIMI_API_KEY", "KIMI_KEY")) ?? "";
   if (!kimiKey) {
     aiCallsTotal.inc({ provider: "kimi", status: "missing_key" });
     const err: Error & { code?: string } = new Error("KIMI_API_KEY not configured");
@@ -298,7 +310,7 @@ async function callOpenRouterOnce(
   hint: string,
 ): Promise<{ text: string; durationMs: number }> {
   const start = performance.now();
-  const orKey = (await getProviderKey(context.userId, "openrouter")) || process.env.OPENROUTER_API_KEY || "";
+  const orKey = (await resolveProviderKey(context.userId, "openrouter", "OPENROUTER_API_KEY")) ?? "";
   if (!orKey) {
     aiCallsTotal.inc({ provider: "openrouter", status: "missing_key" });
     const err: Error & { code?: string } = new Error("OPENROUTER_API_KEY not configured");
@@ -358,7 +370,7 @@ async function callGroqOnce(
   hint: string,
 ): Promise<{ text: string; durationMs: number }> {
   const start = performance.now();
-  const groqKey = (await getProviderKey(context.userId, "groq")) || process.env.GROQ_API_KEY || "";
+  const groqKey = (await resolveProviderKey(context.userId, "groq", "GROQ_API_KEY")) ?? "";
   if (!groqKey) {
     aiCallsTotal.inc({ provider: "groq", status: "missing_key" });
     const err: Error & { code?: string } = new Error("GROQ_API_KEY not configured");
@@ -626,7 +638,7 @@ async function callOpenAIOnce(
   hint: string,
 ): Promise<{ text: string; durationMs: number }> {
   const start = performance.now();
-  const openaiKey = (await getProviderKey(context.userId, "openai")) || process.env.OPENAI_API_KEY || "";
+  const openaiKey = (await resolveProviderKey(context.userId, "openai", "OPENAI_API_KEY")) ?? "";
   if (!openaiKey) {
     aiCallsTotal.inc({ provider: "openai", status: "missing_key" });
     const err: Error & { code?: string } = new Error("OPENAI_API_KEY not configured");
@@ -884,7 +896,7 @@ export async function transcribeAudio(
   filename: string,
 ): Promise<Array<{ text: string; start: number; end: number }>> {
   const start = performance.now();
-  const openaiKey = (await getProviderKey(userId, "openai")) || process.env.OPENAI_API_KEY || "";
+  const openaiKey = (await resolveProviderKey(userId, "openai", "OPENAI_API_KEY")) ?? "";
   if (!openaiKey) {
     aiCallsTotal.inc({ provider: "openai", status: "missing_key" });
     const err: Error & { code?: string } = new Error("OPENAI_API_KEY not configured");
@@ -902,7 +914,7 @@ export async function transcribeAudio(
   const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST",
     headers: { authorization: `Bearer ${openaiKey}` },
-    body: formData as unknown as string,
+    body: formData,
     signal: AbortSignal.timeout(120_000),
   });
 

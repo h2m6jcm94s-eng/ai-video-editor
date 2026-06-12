@@ -7,6 +7,7 @@
 
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { sendError } from "../lib/errors";
 import { recordUserEvent } from "../lib/userEvents";
 import { requireInternalToken } from "../middleware/requireInternalToken";
 
@@ -24,8 +25,11 @@ export async function internalRoutes(app: FastifyInstance) {
   app.addHook("preHandler", requireInternalToken);
 
   app.post("/api/internal/user-events", async (request, reply) => {
-    const body = userEventSchema.parse(request.body);
-    await recordUserEvent(body);
+    const parsed = userEventSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return sendError(reply, 422, "Invalid user event payload", "VALIDATION_ERROR", parsed.error.format());
+    }
+    await recordUserEvent(parsed.data);
     return { ok: true };
   });
 }
