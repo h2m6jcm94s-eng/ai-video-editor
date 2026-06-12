@@ -19,6 +19,10 @@
     "fixtures": "bash scripts/download-fixtures.sh",
     "e2e": "playwright test --config e2e/playwright.config.ts",
     "e2e:headed": "playwright test --headed --config e2e/playwright.config.ts",
+    "e2e:smoke": "playwright test --config e2e/playwright.config.ts e2e/specs/smoke/",
+    "e2e:pipeline": "playwright test --headed --config e2e/playwright.config.ts e2e/specs/pipeline.spec.ts",
+    "e2e:smoke:headed": "playwright test --headed --config e2e/playwright.config.ts e2e/specs/smoke/",
+    "e2e:pipeline:headless": "playwright test --config e2e/playwright.config.ts e2e/specs/pipeline.spec.ts",
     "prepare": "husky"
   },
   "devDependencies": {

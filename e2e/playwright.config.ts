@@ -4,7 +4,9 @@ import { config } from "dotenv";
 import { existsSync } from "fs";
 import path from "path";
 
-config({ path: existsSync(".env.local") ? ".env.local" : ".env" });
+config({
+  path: existsSync("e2e/.env.e2e") ? "e2e/.env.e2e" : existsSync(".env.local") ? ".env.local" : ".env",
+});
 
 export default defineConfig({
   testDir: path.join(__dirname, "specs"),
@@ -22,9 +24,12 @@ export default defineConfig({
     headless: process.env.E2E_HEADED !== "1",
   },
   projects: [
+    { name: "setup", testMatch: /auth\.setup\.ts$/ },
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      testIgnore: /auth\.setup\.ts$/,
+      use: { ...devices["Desktop Chrome"], storageState: "e2e/.auth/user.json" },
+      dependencies: ["setup"],
     },
   ],
   webServer: {
@@ -32,5 +37,8 @@ export default defineConfig({
     url: "http://localhost:3000",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    env: {
+      E2E: "1",
+    },
   },
 });
