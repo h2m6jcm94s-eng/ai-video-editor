@@ -46,7 +46,7 @@ import { useTimeline } from "@/hooks/useTimeline";
 import { useApi } from "@/lib/api/client";
 import { APIError } from "@/lib/api/error";
 import { useAutosave } from "@/lib/hooks/useAutosave";
-import type { Asset, CutList, Project } from "@/types/api";
+import type { Asset, CutList, Project, Slot } from "@/types/api";
 import { SaveStatusBadge } from "./SaveStatusBadge";
 import { TemplateLoadDialog } from "./TemplateLoadDialog";
 import { TemplateSaveDialog } from "./TemplateSaveDialog";
@@ -69,6 +69,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
   const [showSubtitles, setShowSubtitles] = useState(true);
   const [selectedSubtitleId, setSelectedSubtitleId] = useState<string | null>(null);
   const [transcribing, setTranscribing] = useState(false);
+  const [generatingRef, setGeneratingRef] = useState(false);
   const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
   const [loadTemplateOpen, setLoadTemplateOpen] = useState(false);
   const [cmdkOpen, setCmdkOpen] = useState(false);
@@ -348,5 +349,135 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
           >
             {generatingRef ? "Generating..." : "Generate from reference"}
           </button>
-          <button
-            onClick={async () => {
+          {/* Aspect ratio dropdown */}
+          <div className="relative group">
+            <button className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition flex items-center gap-1.5">
+              <Smartphone className="w-3.5 h-3.5" />
+              {aspectRatio}
+            </button>
+            <div className="absolute right-0 top-full mt-1 hidden group-hover:flex flex-col bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden z-50 min-w-[100px]">
+              {["9:16", "4:5", "1:1", "16:9"].map((ratio) => (
+                <button
+                  key={ratio}
+                  onClick={() => setAspectRatio(ratio)}
+                  className={`px-3 py-2 text-xs text-left hover:bg-zinc-800 transition ${
+                    aspectRatio === ratio ? "text-cyan-400 bg-zinc-800/50" : "text-zinc-300"
+                  }`}
+                >
+                  {ratio}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Template save/load */}
+          <div className="relative group">
+            <button className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition flex items-center gap-1.5">
+              <Save className="w-3.5 h-3.5" />
+              Template
+            </button>
+            <div className="absolute right-0 top-full mt-1 hidden group-hover:flex flex-col bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden z-50 min-w-[140px]">
+              <button
+                onClick={() => state.cutList && setSaveTemplateOpen(true)}
+                className="px-3 py-2 text-xs text-left hover:bg-zinc-800 transition text-zinc-300 flex items-center gap-1.5"
+              >
+                <Save className="w-3 h-3" /> Save as Template
+              </button>
+              <button
+                onClick={() => setLoadTemplateOpen(true)}
+                className="px-3 py-2 text-xs text-left hover:bg-zinc-800 transition text-zinc-300 flex items-center gap-1.5"
+              >
+                <FolderOpen className="w-3 h-3" /> Load Template
+              </button>
+            </div>
+          </div>
+
+          <RenderButton projectId={project.id} onJobStart={setActiveJobId} />
+        </div>
+      </div>
+
+      {/* Main Workspace */}
+      <div className="flex-1 flex overflow-hidden">
+        <MediaPanel projectId={project.id} assets={state.assets} onAssetsChange={actions.setAssets} />
+
+        <div className="flex-1 flex flex-col min-w-0">
+          <PreviewPanel
+            assets={state.assets}
+            currentTime={timeline.currentTime}
+            isPlaying={timeline.isPlaying}
+            onTimeUpdate={timeline.seek}
+            overlays={state.cutList?.overlays || []}
+            subtitles={state.cutList?.subtitles}
+            showSubtitles={showSubtitles}
+            aspectRatio={aspectRatio}
+            effects={state.cutList?.globals?.effects}
+          />
+
+          <TimelinePanel
+            cutList={state.cutList}
+            currentTime={timeline.currentTime}
+            duration={timeline.duration}
+            zoomLevel={timeline.zoomLevel}
+            isPlaying={timeline.isPlaying}
+            onSeek={timeline.seek}
+            onTogglePlay={timeline.togglePlay}
+            onZoomIn={timeline.zoomIn}
+            onZoomOut={timeline.zoomOut}
+            selectedSlotIndex={state.selectedSlotIndex}
+            onSelectSlot={actions.selectSlot}
+            onUpdateSlot={actions.updateSlot}
+            onReorderSlots={actions.reorderSlots}
+            selectedSubtitleId={selectedSubtitleId}
+            onSelectSubtitle={setSelectedSubtitleId}
+          />
+        </div>
+
+        <InspectorPanel
+          selectedSlot={selectedSlot}
+          selectedSlotIndex={state.selectedSlotIndex}
+          selectedOverlayId={state.selectedOverlayId}
+          overlays={state.cutList?.overlays || []}
+          cutList={state.cutList}
+          onUpdateSlot={actions.updateSlot}
+          onUpdateOverlay={actions.updateOverlay}
+          onSelectOverlay={actions.selectOverlay}
+          onUpdateEffects={(effects) => {
+            if (!state.cutList) return;
+            actions.setCutList({
+              ...state.cutList,
+              globals: { ...state.cutList.globals, effects },
+            });
+          }}
+        />
+      </div>
+
+      {promptOpen && (
+        <div className="absolute bottom-[220px] right-[300px] w-96 z-50">
+          <PromptPanel
+            projectId={project.id}
+            cutList={state.cutList}
+            onPromptApply={actions.promptApply}
+            onUndo={actions.undo}
+            onClose={() => setPromptOpen(false)}
+          />
+        </div>
+      )}
+
+      {state.cutList && (
+        <TemplateSaveDialog
+          open={saveTemplateOpen}
+          onOpenChange={setSaveTemplateOpen}
+          cutList={state.cutList}
+        />
+      )}
+      <TemplateLoadDialog
+        open={loadTemplateOpen}
+        onOpenChange={setLoadTemplateOpen}
+        onApply={(cutList) => actions.setCutList(cutList)}
+      />
+
+      <CommandPalette open={cmdkOpen} onOpenChange={setCmdkOpen} actions={commandActions} />
+      <ProgressBar jobId={activeJobId} />
+    </div>
+  );
+}
