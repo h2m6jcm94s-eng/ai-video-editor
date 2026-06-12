@@ -39,6 +39,7 @@ export function useNotifications(): UseNotificationsReturn {
     if (!isSignedIn) return;
     setIsLoading(true);
     try {
+      // Pull token inside the callback; Clerk's getToken reference is unstable.
       const token = await getToken();
       const res = await fetch("/api/notifications", {
         headers: { Authorization: `Bearer ${token}` },
@@ -53,7 +54,7 @@ export function useNotifications(): UseNotificationsReturn {
     } finally {
       setIsLoading(false);
     }
-  }, [getToken, isSignedIn]);
+  }, [isSignedIn]);
 
   useEffect(() => {
     fetchNotifications();
@@ -90,17 +91,14 @@ export function useNotifications(): UseNotificationsReturn {
     };
   }, [isSignedIn]);
 
-  const ack = useCallback(
-    async (id: string) => {
-      const token = await getToken();
-      await fetch(`/api/notifications/${id}/ack`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setItems((prev) => prev.filter((i) => i.id !== id));
-    },
-    [getToken],
-  );
+  const ack = useCallback(async (id: string) => {
+    const token = await getToken();
+    await fetch(`/api/notifications/${id}/ack`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    setItems((prev) => prev.filter((i) => i.id !== id));
+  }, []);
 
   const ackAll = useCallback(async () => {
     const token = await getToken();
@@ -109,7 +107,7 @@ export function useNotifications(): UseNotificationsReturn {
       headers: { Authorization: `Bearer ${token}` },
     });
     setItems([]);
-  }, [getToken]);
+  }, []);
 
   const unreadCount = items.filter((i) => !i.acknowledged).length;
 

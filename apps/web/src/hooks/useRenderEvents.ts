@@ -3,7 +3,7 @@
 // Commercial SaaS use is prohibited without written permission.
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { useApi } from "@/lib/api/client";
 import type { RenderJob } from "@/types/api";
 import { useSSE } from "./useSSE";
@@ -20,11 +20,10 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
 export function useRenderEvents(jobId: string | null) {
   const api = useApi();
   const [events, setEvents] = useState<RenderEvent[]>([]);
-  const eventsRef = useRef<RenderEvent[]>([]);
 
   const push = useCallback((e: RenderEvent) => {
-    eventsRef.current = [...eventsRef.current, e];
-    setEvents(eventsRef.current);
+    // Functional update avoids stale ref reads during React batching.
+    setEvents((prev) => [...prev, e]);
   }, []);
 
   const fallbackPoll = useCallback(async () => {
