@@ -41,6 +41,7 @@ const PromptPanel = dynamic(() => import("./panels/PromptPanel").then((m) => m.P
 
 import { toast } from "sonner";
 import { type CommandAction, CommandPalette, useCommandPalette } from "@/components/cmdk/CommandPalette";
+import { useAssetPoller } from "@/hooks/useAssetPoller";
 import { useEditor } from "@/hooks/useEditor";
 import { useRenderStatus } from "@/hooks/useRenderStatus";
 import { useTimeline } from "@/hooks/useTimeline";
@@ -66,6 +67,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
   });
   const timeline = useTimeline();
   const renderStatus = useRenderStatus(project.id);
+  useAssetPoller(project.id, state.assets, actions.setAssets);
   const [promptOpen, setPromptOpen] = useState(false);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [showSubtitles, setShowSubtitles] = useState(true);
@@ -244,7 +246,10 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
     <div className="h-screen bg-zinc-950 text-zinc-100 flex flex-col overflow-hidden relative">
       <PresenceCursors projectId={project.id} userName={user?.firstName || "User"} />
       {/* Top Bar */}
-      <div className="h-14 border-b border-zinc-800 flex items-center px-4 gap-4 shrink-0 bg-zinc-950/80 backdrop-blur-sm">
+      <div
+        data-testid="editor-topbar"
+        className="h-14 border-b border-zinc-800 flex items-center px-4 gap-4 shrink-0 bg-zinc-950/80 backdrop-blur-sm"
+      >
         <button
           onClick={() => router.push("/dashboard")}
           className="p-2 hover:bg-zinc-800 rounded-lg transition"
@@ -285,7 +290,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
           </button>
           <button
             onClick={async () => {
-              const refAsset = assets.find((a) => a.type === "reference_video");
+              const refAsset = state.assets.find((a) => a.type === "reference_video");
               if (!refAsset) {
                 toast.error("Upload a reference video first");
                 return;
@@ -294,28 +299,35 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
               try {
                 // Create a basic cutlist if none exists
                 if (!state.cutList) {
-                  const clips = assets.filter((a) => a.type === "clip");
-                  const song = assets.find((a) => a.type === "song");
-                  const totalDuration =
-                    song?.durationSec || clips.reduce((s, c) => s + (c.durationSec || 5), 0) || 30;
+                  const clips = state.assets.filter((a) => a.type === "clip");
+                  const song = state.assets.find((a) => a.type === "song");
+                  const totalDuration = Math.min(
+                    song?.durationSec || clips.reduce((s, c) => s + (c.durationSec || 5), 0) || 30,
+                    30,
+                  );
                   const slotCount = Math.max(1, clips.length || 1);
                   const slotDuration = totalDuration / slotCount;
-                  const basicSlots: Slot[] = Array.from({ length: slotCount }).map((_, i) => ({
-                    index: i,
-                    startS: i * slotDuration,
-                    durationS: slotDuration,
-                    beatIndex: i,
-                    section: i === 0 ? "intro" : i === slotCount - 1 ? "outro" : "verse",
-                    transitionIn: i === 0 ? "hard_cut" : "dissolve",
-                    transitionOut: i === slotCount - 1 ? "hard_cut" : "dissolve",
-                    targetShotType: ["wide", "medium", "close_up"][i % 3],
-                    subjectHint: "person",
-                    motionHint: "static",
-                    energyLevel: 0.5,
-                    requiredTags: [],
-                    avoidTags: [],
-                    effects: [],
-                  }));
+                  const basicSlots: Slot[] = Array.from({ length: slotCount }).map((_, i) => {
+                    const clip = clips[i % clips.length];
+                    return {
+                      index: i,
+                      startS: i * slotDuration,
+                      durationS: slotDuration,
+                      beatIndex: i,
+                      section: i === 0 ? "intro" : i === slotCount - 1 ? "outro" : "verse",
+                      transitionIn: i === 0 ? "hard_cut" : "dissolve",
+                      transitionOut: i === slotCount - 1 ? "hard_cut" : "dissolve",
+                      targetShotType: ["wide", "medium", "close_up"][i % 3],
+                      subjectHint: "person",
+                      motionHint: "static",
+                      energyLevel: 0.5,
+                      requiredTags: [],
+                      avoidTags: [],
+                      selectedClipId: clip?.id,
+                      rankedClipIds: clip ? [clip.id] : undefined,
+                      effects: [],
+                    };
+                  });
                   const basicCutList: CutList = {
                     globals: {
                       totalDurationS: totalDuration,
@@ -327,6 +339,18 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
                     },
                     slots: basicSlots,
                     overlays: [],
+                    audioTracks: song
+                      ? [
+                          {
+                            assetId: song.id,
+                            startS: 0,
+                            endS: totalDuration,
+                            gainDb: 0,
+                            fadeInS: 0,
+                            fadeOutS: 0,
+                          },
+                        ]
+                      : [],
                   };
                   await api.projects.updateCutlist(project.id, basicCutList);
                   actions.setCutList(basicCutList);
@@ -334,6 +358,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
                 const result = await api.projects.prompt(
                   project.id,
                   "Generate a cutlist that matches the reference video's editing style, shot types, transitions, and pacing. Analyze the reference and replicate its visual rhythm.",
+                  { signal: AbortSignal.timeout(180_000) },
                 );
                 if (result.project.cutList) {
                   actions.promptApply(result.project.cutList as CutList);
@@ -353,8 +378,8 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
           </button>
           <button
             onClick={async () => {
-              const songAsset = assets.find((a) => a.type === "song");
-              const clipAsset = assets.find((a) => a.type === "clip");
+              const songAsset = state.assets.find((a) => a.type === "song");
+              const clipAsset = state.assets.find((a) => a.type === "clip");
               const targetAsset = songAsset || clipAsset;
               if (!targetAsset) {
                 toast.error("Upload a song or clip to transcribe");
