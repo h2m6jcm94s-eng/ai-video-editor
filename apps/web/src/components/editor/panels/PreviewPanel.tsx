@@ -2,10 +2,10 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import { useRef, useEffect } from "react";
+import { useEffect, useRef } from "react";
 import ReactPlayer from "react-player";
+import type { Asset, Overlay, PreviewEffects, Subtitle } from "@/types/api";
 import { OverlayCanvas } from "../canvas/OverlayCanvas";
-import type { Asset, Overlay, Subtitle, PreviewEffects } from "@/types/api";
 
 interface PreviewPanelProps {
   assets: Asset[];
@@ -26,9 +26,19 @@ const RATIO_MAP: Record<string, string> = {
   "16:9": "16 / 9",
 };
 
-export function PreviewPanel({ assets, currentTime, isPlaying, onTimeUpdate, overlays, subtitles, showSubtitles = true, aspectRatio = "9:16", effects }: PreviewPanelProps) {
+export function PreviewPanel({
+  assets,
+  currentTime,
+  isPlaying,
+  onTimeUpdate,
+  overlays,
+  subtitles,
+  showSubtitles = true,
+  aspectRatio = "9:16",
+  effects,
+}: PreviewPanelProps) {
   const playerRef = useRef<ReactPlayer>(null);
-  const referenceAsset = assets.find((a) => a.type === "reference");
+  const referenceAsset = assets.find((a) => a.type === "reference_video");
   const seekingRef = useRef(false);
 
   useEffect(() => {
@@ -37,18 +47,17 @@ export function PreviewPanel({ assets, currentTime, isPlaying, onTimeUpdate, ove
       if (internal && Math.abs(internal.currentTime - currentTime) > 0.5) {
         seekingRef.current = true;
         playerRef.current.seekTo(currentTime, "seconds");
-        setTimeout(() => { seekingRef.current = false; }, 150);
+        setTimeout(() => {
+          seekingRef.current = false;
+        }, 150);
       }
     }
   }, [currentTime]);
 
-  const activeOverlays = overlays.filter(
-    (o) => currentTime >= o.startS && currentTime <= o.endS
-  );
+  const activeOverlays = overlays.filter((o) => currentTime >= o.startS && currentTime <= o.endS);
 
-  const activeSubtitle = showSubtitles && subtitles?.find(
-    (s) => currentTime >= s.startS && currentTime <= s.endS
-  );
+  const activeSubtitle =
+    showSubtitles && subtitles?.find((s) => currentTime >= s.startS && currentTime <= s.endS);
 
   const ratioStyle = RATIO_MAP[aspectRatio] || "9 / 16";
 
@@ -59,10 +68,7 @@ export function PreviewPanel({ assets, currentTime, isPlaying, onTimeUpdate, ove
   return (
     <div className="flex-1 bg-black relative flex items-center justify-center overflow-hidden">
       {referenceAsset?.storageUrl ? (
-        <div
-          className="relative h-full max-h-full"
-          style={{ aspectRatio: ratioStyle }}
-        >
+        <div className="relative h-full max-h-full" style={{ aspectRatio: ratioStyle }}>
           <ReactPlayer
             ref={playerRef}
             url={referenceAsset.storageUrl}
@@ -101,6 +107,7 @@ function formatTime(sec: number): string {
   const m = Math.floor((sec % 3600) / 60);
   const s = Math.floor(sec % 60);
   const ms = Math.floor((sec % 1) * 100);
-  if (h > 0) return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}:${ms.toString().padStart(2, "0")}`;
+  if (h > 0)
+    return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}:${ms.toString().padStart(2, "0")}`;
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}:${ms.toString().padStart(2, "0")}`;
 }

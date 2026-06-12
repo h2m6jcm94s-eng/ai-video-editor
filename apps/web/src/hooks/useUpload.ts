@@ -6,7 +6,7 @@ import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useApi } from "@/lib/api/client";
 import { APIError } from "@/lib/api/error";
-import type { Asset } from "@/types/api";
+import type { Asset, AssetType } from "@/types/api";
 
 interface UploadState {
   uploading: boolean;
@@ -38,7 +38,7 @@ export function useUpload(projectId: string) {
   const multipartRef = useRef<{ uploadId: string; key: string } | null>(null);
 
   const uploadFile = useCallback(
-    async (file: File, type: "reference" | "song" | "clip"): Promise<Asset | null> => {
+    async (file: File, type: AssetType): Promise<Asset | null> => {
       if (!ALLOWED_TYPES.includes(file.type)) {
         const msg = `Unsupported file type: ${file.type}. Allowed: MP4, MOV, WEBM, MP3, WAV, AAC, OGG.`;
         setState({ uploading: false, progress: 0, error: msg });
@@ -95,7 +95,7 @@ export function useUpload(projectId: string) {
 async function uploadSimple(
   file: File,
   projectId: string,
-  type: "reference" | "song" | "clip",
+  type: AssetType,
   api: ReturnType<typeof useApi>,
   setState: (s: UploadState) => void,
   signal: AbortSignal,
@@ -122,7 +122,7 @@ async function uploadSimple(
 async function uploadMultipart(
   file: File,
   projectId: string,
-  type: "reference" | "song" | "clip",
+  type: AssetType,
   api: ReturnType<typeof useApi>,
   setState: (s: UploadState) => void,
   signal: AbortSignal,

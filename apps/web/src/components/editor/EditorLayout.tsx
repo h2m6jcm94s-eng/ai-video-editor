@@ -282,165 +282,71 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
           </button>
           <button
             onClick={async () => {
-              const songAsset = assets.find((a) => a.type === "song");
-              const clipAsset = assets.find((a) => a.type === "clip");
-              const targetAsset = songAsset || clipAsset;
-              if (!targetAsset) {
-                toast.error("Upload a song or clip to transcribe");
+              const refAsset = assets.find((a) => a.type === "reference_video");
+              if (!refAsset) {
+                toast.error("Upload a reference video first");
                 return;
               }
-              setTranscribing(true);
+              setGeneratingRef(true);
               try {
-                const result = await api.projects.transcribe(project.id, targetAsset.id);
-                if (result.subtitles.length > 0 && state.cutList) {
-                  actions.setCutList({ ...state.cutList, subtitles: result.subtitles });
-                  toast.success(`Generated ${result.subtitles.length} subtitles`);
-                } else {
-                  toast.info("No speech detected");
+                // Create a basic cutlist if none exists
+                if (!state.cutList) {
+                  const clips = assets.filter((a) => a.type === "clip");
+                  const song = assets.find((a) => a.type === "song");
+                  const totalDuration =
+                    song?.durationSec || clips.reduce((s, c) => s + (c.durationSec || 5), 0) || 30;
+                  const slotCount = Math.max(1, clips.length || 1);
+                  const slotDuration = totalDuration / slotCount;
+                  const basicSlots: Slot[] = Array.from({ length: slotCount }).map((_, i) => ({
+                    index: i,
+                    startS: i * slotDuration,
+                    durationS: slotDuration,
+                    beatIndex: i,
+                    section: i === 0 ? "intro" : i === slotCount - 1 ? "outro" : "verse",
+                    transitionIn: i === 0 ? "hard_cut" : "dissolve",
+                    transitionOut: i === slotCount - 1 ? "hard_cut" : "dissolve",
+                    targetShotType: ["wide", "medium", "close_up"][i % 3],
+                    subjectHint: "person",
+                    motionHint: "static",
+                    energyLevel: 0.5,
+                    requiredTags: [],
+                    avoidTags: [],
+                    effects: [],
+                  }));
+                  const basicCutList: CutList = {
+                    globals: {
+                      totalDurationS: totalDuration,
+                      tempoBpm: 120,
+                      timeSignature: "4/4",
+                      energyCurve: [0.5],
+                      sectionMarkers: [{ name: "full", startS: 0, endS: totalDuration }],
+                      aspectRatio: "9:16",
+                    },
+                    slots: basicSlots,
+                    overlays: [],
+                  };
+                  await api.projects.updateCutlist(project.id, basicCutList);
+                  actions.setCutList(basicCutList);
+                }
+                const result = await api.projects.prompt(
+                  project.id,
+                  "Generate a cutlist that matches the reference video's editing style, shot types, transitions, and pacing. Analyze the reference and replicate its visual rhythm.",
+                );
+                if (result.project.cutList) {
+                  actions.promptApply(result.project.cutList as CutList);
+                  toast.success("Cut-list ready — generated from reference");
                 }
               } catch (err) {
-                toast.error(err instanceof Error ? err.message : "Transcription failed");
+                toast.error(err instanceof Error ? err.message : "Reference generation failed");
               } finally {
-                setTranscribing(false);
+                setGeneratingRef(false);
               }
             }}
-            disabled={transcribing}
-            className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition disabled:opacity-50 flex items-center gap-1.5"
-            title="Generate subtitles from audio"
+            disabled={generatingRef}
+            className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition disabled:opacity-50"
+            data-testid="generate-from-reference"
           >
-            <Subtitles className="w-3.5 h-3.5" />
-            {transcribing ? "..." : "Subtitles"}
+            {generatingRef ? "Generating..." : "Generate from reference"}
           </button>
-
-          {/* Aspect ratio dropdown */}
-          <div className="relative group">
-            <button className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition flex items-center gap-1.5">
-              <Smartphone className="w-3.5 h-3.5" />
-              {aspectRatio}
-            </button>
-            <div className="absolute right-0 top-full mt-1 hidden group-hover:flex flex-col bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden z-50 min-w-[100px]">
-              {["9:16", "4:5", "1:1", "16:9"].map((ratio) => (
-                <button
-                  key={ratio}
-                  onClick={() => setAspectRatio(ratio)}
-                  className={`px-3 py-2 text-xs text-left hover:bg-zinc-800 transition ${
-                    aspectRatio === ratio ? "text-cyan-400 bg-zinc-800/50" : "text-zinc-300"
-                  }`}
-                >
-                  {ratio}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Template save/load */}
-          <div className="relative group">
-            <button className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition flex items-center gap-1.5">
-              <Save className="w-3.5 h-3.5" />
-              Template
-            </button>
-            <div className="absolute right-0 top-full mt-1 hidden group-hover:flex flex-col bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden z-50 min-w-[140px]">
-              <button
-                onClick={() => state.cutList && setSaveTemplateOpen(true)}
-                className="px-3 py-2 text-xs text-left hover:bg-zinc-800 transition text-zinc-300 flex items-center gap-1.5"
-              >
-                <Save className="w-3 h-3" /> Save as Template
-              </button>
-              <button
-                onClick={() => setLoadTemplateOpen(true)}
-                className="px-3 py-2 text-xs text-left hover:bg-zinc-800 transition text-zinc-300 flex items-center gap-1.5"
-              >
-                <FolderOpen className="w-3 h-3" /> Load Template
-              </button>
-            </div>
-          </div>
-
-          <RenderButton projectId={project.id} onJobStart={setActiveJobId} />
-        </div>
-      </div>
-
-      {/* Main Workspace */}
-      <div className="flex-1 flex overflow-hidden">
-        <MediaPanel projectId={project.id} assets={state.assets} onAssetsChange={actions.setAssets} />
-
-        <div className="flex-1 flex flex-col min-w-0">
-          <PreviewPanel
-            assets={state.assets}
-            currentTime={timeline.currentTime}
-            isPlaying={timeline.isPlaying}
-            onTimeUpdate={timeline.seek}
-            overlays={state.cutList?.overlays || []}
-            subtitles={state.cutList?.subtitles}
-            showSubtitles={showSubtitles}
-            aspectRatio={aspectRatio}
-            effects={state.cutList?.globals?.effects}
-          />
-
-          <TimelinePanel
-            cutList={state.cutList}
-            currentTime={timeline.currentTime}
-            duration={timeline.duration}
-            zoomLevel={timeline.zoomLevel}
-            isPlaying={timeline.isPlaying}
-            onSeek={timeline.seek}
-            onTogglePlay={timeline.togglePlay}
-            onZoomIn={timeline.zoomIn}
-            onZoomOut={timeline.zoomOut}
-            selectedSlotIndex={state.selectedSlotIndex}
-            onSelectSlot={actions.selectSlot}
-            onUpdateSlot={actions.updateSlot}
-            onReorderSlots={actions.reorderSlots}
-            selectedSubtitleId={selectedSubtitleId}
-            onSelectSubtitle={setSelectedSubtitleId}
-          />
-        </div>
-
-        <InspectorPanel
-          selectedSlot={selectedSlot}
-          selectedSlotIndex={state.selectedSlotIndex}
-          selectedOverlayId={state.selectedOverlayId}
-          overlays={state.cutList?.overlays || []}
-          cutList={state.cutList}
-          onUpdateSlot={actions.updateSlot}
-          onUpdateOverlay={actions.updateOverlay}
-          onSelectOverlay={actions.selectOverlay}
-          onUpdateEffects={(effects) => {
-            if (!state.cutList) return;
-            actions.setCutList({
-              ...state.cutList,
-              globals: { ...state.cutList.globals, effects },
-            });
-          }}
-        />
-      </div>
-
-      {promptOpen && (
-        <div className="absolute bottom-[220px] right-[300px] w-96 z-50">
-          <PromptPanel
-            projectId={project.id}
-            cutList={state.cutList}
-            onPromptApply={actions.promptApply}
-            onUndo={actions.undo}
-            onClose={() => setPromptOpen(false)}
-          />
-        </div>
-      )}
-
-      {state.cutList && (
-        <TemplateSaveDialog
-          open={saveTemplateOpen}
-          onOpenChange={setSaveTemplateOpen}
-          cutList={state.cutList}
-        />
-      )}
-      <TemplateLoadDialog
-        open={loadTemplateOpen}
-        onOpenChange={setLoadTemplateOpen}
-        onApply={(cutList) => actions.setCutList(cutList)}
-      />
-
-      <CommandPalette open={cmdkOpen} onOpenChange={setCmdkOpen} actions={commandActions} />
-      <ProgressBar jobId={activeJobId} />
-    </div>
-  );
-}
+          <button
+            onClick={async () => {
