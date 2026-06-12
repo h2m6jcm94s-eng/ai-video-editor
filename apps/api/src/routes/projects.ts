@@ -63,7 +63,7 @@ export async function projectRoutes(app: FastifyInstance) {
         name: body.name || "Untitled Project",
         status: "uploading",
         userId,
-        styleTier: body.styleTier || "full_style",
+        styleTier: body.styleTier || "with_effects",
         mode: body.mode || "auto",
         clipAssetIds: [],
       })
@@ -299,7 +299,7 @@ export async function projectRoutes(app: FastifyInstance) {
         });
 
         // Track token usage
-        const provider = process.env.AI_PROVIDER?.split(",")[0]?.trim() || "claude";
+        const provider = (process.env.AI_PROVIDER ?? "claude").split(",")[0]?.trim() || "claude";
         await incrementTokenUsage(userId, result.usage.totalTokens, provider, "/api/projects/:id/prompt");
 
         // Save the new cutlist

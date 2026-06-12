@@ -299,6 +299,20 @@ export async function uploadRoutes(app: FastifyInstance) {
     { preHandler: validateBody(multipartAbortSchema) },
     async (request, reply) => {
       const body = request.validatedBody as z.infer<typeof multipartAbortSchema>;
+
+      // Ownership check: aborting an upload modifies S3 state for this asset
+      const assetRow = await db.query.assets.findFirst({
+        where: eq(assets.storageKey, body.key),
+        with: { project: true },
+      });
+      if (!assetRow) {
+        return sendError(reply, 404, "Asset not found", "NOT_FOUND");
+      }
+      const userId = request.userId;
+      if (!assetRow.project || assetRow.project.userId !== userId) {
+        return sendError(reply, 403, "Forbidden", "FORBIDDEN");
+      }
+
       await abortMultipartUpload(body.key, body.uploadId);
       return { ok: true };
     },
