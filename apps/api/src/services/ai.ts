@@ -12,6 +12,7 @@ import { db } from "../db";
 import { providerKeys } from "../db/schema";
 import { type SafeFallback, safeFallbackFor } from "../lib/aiFallbacks";
 import { decrypt as aesDecrypt } from "../lib/crypto";
+import { normalizeCutList } from "../lib/cutlist";
 import { aiCallDurationSeconds, aiCallsTotal, guardrailsOutputBlocksTotal } from "../lib/metrics";
 import { countTokens } from "../lib/tokens";
 import { validateAIResponse } from "../middleware/guardrails";
@@ -1065,7 +1066,13 @@ export async function applyPromptEdit(context: PromptEditContext): Promise<
     };
   }
 
-  const newCutList = applyJsonPatch(context.cutList, result.diff);
+  let newCutList = applyJsonPatch(context.cutList, result.diff);
+  newCutList = normalizeCutList(
+    newCutList as Record<string, unknown>,
+    context.assets as
+      | { id: string; type: string; durationSec?: number | null; filename?: string | null }[]
+      | undefined,
+  );
 
   const parseResult = cutListSchema.safeParse(newCutList);
   if (!parseResult.success) {

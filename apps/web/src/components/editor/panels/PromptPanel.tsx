@@ -40,26 +40,23 @@ function PromptPanelInner({ projectId, cutList, onPromptApply, onUndo, onClose }
   });
 
   const onSubmit = async (values: PromptForm) => {
-    if (!cutList) {
-      toast.error("No cut list to edit");
-      return;
-    }
-
     try {
-      const result = await api.projects.prompt(projectId, values.prompt.trim());
+      const result = await api.projects.prompt(projectId, values.prompt.trim(), {
+        signal: AbortSignal.timeout(120_000),
+      });
       if (result.project.cutList) {
         const newCutList = result.project.cutList as CutList;
-        const ops = diffCutLists(cutList, newCutList);
+        const ops = cutList ? diffCutLists(cutList, newCutList) : [];
         onPromptApply(newCutList);
         const entry: PromptHistoryEntry = {
           id: crypto.randomUUID(),
           prompt: values.prompt,
-          summary: summarizeOps(ops),
+          summary: cutList ? summarizeOps(ops) : "new cutlist",
           ops,
           timestamp: new Date(),
         };
         setEntries((prev) => [...prev, entry]);
-        toast.success(`Applied ${entry.summary}`, {
+        toast.success(cutList ? `Applied ${entry.summary}` : "Applied cutlist", {
           action: { label: "Undo", onClick: onUndo },
           duration: 8000,
         });

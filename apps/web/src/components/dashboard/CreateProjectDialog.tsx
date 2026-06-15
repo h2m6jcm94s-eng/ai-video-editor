@@ -2,12 +2,13 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import { useRouter } from "next/navigation";
-import { Plus } from "lucide-react";
-import { useForm } from "react-hook-form";
+import { createProjectSchema, EDIT_MODE, STYLE_TIER } from "@ai-video-editor/shared-types";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useForm } from "react-hook-form";
+import { toast } from "sonner";
 import { z } from "zod";
-import { createProjectSchema, STYLE_TIER, EDIT_MODE } from "@ai-video-editor/shared-types";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -19,17 +20,10 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useApi } from "@/lib/api/client";
 import { APIError } from "@/lib/api/error";
 import { mapApiValidationErrors } from "@/lib/api/formErrors";
-import { toast } from "sonner";
 
 type FormData = z.infer<typeof createProjectSchema>;
 
@@ -109,9 +103,7 @@ export function CreateProjectDialog() {
               className="bg-zinc-950 border-zinc-800"
               {...register("name")}
             />
-            {errors.name && (
-              <p className="text-xs text-red-400">{errors.name.message}</p>
-            )}
+            {errors.name && <p className="text-xs text-red-400">{errors.name.message}</p>}
           </div>
 
           <div className="space-y-2">
@@ -120,7 +112,7 @@ export function CreateProjectDialog() {
               value={styleTier}
               onValueChange={(v) => setValue("styleTier", v as FormData["styleTier"])}
             >
-              <SelectTrigger className="bg-zinc-950 border-zinc-800">
+              <SelectTrigger className="bg-zinc-950 border-zinc-800" data-testid="style-tier-select">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -131,17 +123,12 @@ export function CreateProjectDialog() {
                 ))}
               </SelectContent>
             </Select>
-            {errors.styleTier && (
-              <p className="text-xs text-red-400">{errors.styleTier.message}</p>
-            )}
+            {errors.styleTier && <p className="text-xs text-red-400">{errors.styleTier.message}</p>}
           </div>
 
           <div className="space-y-2">
             <Label>Edit Mode</Label>
-            <Select
-              value={mode}
-              onValueChange={(v) => setValue("mode", v as FormData["mode"])}
-            >
+            <Select value={mode} onValueChange={(v) => setValue("mode", v as FormData["mode"])}>
               <SelectTrigger className="bg-zinc-950 border-zinc-800">
                 <SelectValue />
               </SelectTrigger>
@@ -153,9 +140,7 @@ export function CreateProjectDialog() {
                 ))}
               </SelectContent>
             </Select>
-            {errors.mode && (
-              <p className="text-xs text-red-400">{errors.mode.message}</p>
-            )}
+            {errors.mode && <p className="text-xs text-red-400">{errors.mode.message}</p>}
           </div>
 
           <div className="flex justify-end gap-3">
@@ -164,7 +149,7 @@ export function CreateProjectDialog() {
                 Cancel
               </Button>
             </DialogTrigger>
-            <Button type="submit" disabled={!isValid || isSubmitting}>
+            <Button type="submit" disabled={!isValid || isSubmitting} data-testid="create-project-submit">
               {isSubmitting ? "Creating..." : "Create"}
             </Button>
           </div>

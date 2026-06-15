@@ -49,8 +49,8 @@ export async function renderRoutes(app: FastifyInstance) {
       }
 
       // Validate project has required assets
-      if (!project.referenceAssetId || !project.songAssetId) {
-        return sendError(reply, 422, "Project missing reference asset or song", "MISSING_ASSETS");
+      if (!project.songAssetId) {
+        return sendError(reply, 422, "Project missing song asset", "MISSING_ASSETS");
       }
 
       // Idempotency: prevent duplicate in-progress renders
@@ -79,7 +79,7 @@ export async function renderRoutes(app: FastifyInstance) {
         project.referenceAssetId,
         project.songAssetId,
         ...((project.clipAssetIds as string[]) || []),
-      ].filter(Boolean) as string[];
+      ].filter((id): id is string => Boolean(id));
 
       const assetRows = assetIds.length
         ? await db.query.assets.findMany({
@@ -100,7 +100,7 @@ export async function renderRoutes(app: FastifyInstance) {
       try {
         workflowId = await startRenderWorkflow({
           projectId: project.id,
-          referenceAssetId: project.referenceAssetId,
+          referenceAssetId: project.referenceAssetId ?? undefined,
           songAssetId: project.songAssetId,
           clipAssetIds: (project.clipAssetIds as string[]) || [],
           styleTier: project.styleTier,

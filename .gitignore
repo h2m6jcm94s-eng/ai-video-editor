@@ -69,3 +69,13 @@ e2e/fixtures/*
 !e2e/fixtures/manifest.json
 e2e/reports/*
 !e2e/reports/.gitkeep
+
+# Playwright auth state, artifacts, and reports
+e2e/.auth/
+e2e/e2e/
+e2e/report.json
+e2e/wedge-report.json
+e2e/output-*.mp4
+e2e/ffmpeg-stderr.log
+test-results/
+playwright-report/

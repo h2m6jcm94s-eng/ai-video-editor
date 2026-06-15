@@ -45,6 +45,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Upload no longer sends POST to a PUT presigned URL.
 - Render route returns 409 when a render is already in progress.
 
+## [0.4.0] — 2026-06-12
+
+### Fixed
+- Editor "Maximum update depth exceeded" render loop caused by unstable form-reset dependencies in `InspectorPanel`.
+- `InspectorPanel` now memoizes fallback effect / slot / overlay defaults and only calls `react-hook-form` `reset` when the underlying data actually changes.
+
+### Known limitations (deferred to Phase F / post-v0.4.0)
+- M2 style-tier pipeline gating in `workflows.py` remains blocked until `feat/temporal-worker-entry-points` lands on `main`.
+- CodeQL log-injection sanitization in `guardrails/main.py:97`.
+- Dismiss 2 HIGH + 2 MEDIUM false-positive CodeQL alerts with documented reasoning.
+- 97 code-quality CodeQL warnings (unused imports, etc.).
+- PR #164 Clerk SDK upgrade (4 remaining CI failures).
+- Any deeper hook rewrite (e.g. `PresenceCursors` → `useSyncExternalStore`) will be PR'd standalone for review after the v0.4.0 tag.
+
 ## [0.1.0] — 2025-06-01
 
 ### Added

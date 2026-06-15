@@ -68,16 +68,18 @@ export async function buildApp() {
     },
   });
 
-  await app.register(rateLimit, {
-    max: process.env.NODE_ENV === "test" ? 10000 : 60,
-    timeWindow: "1 minute",
-    keyGenerator: (req) => req.userId ?? req.ip,
-    onExceeded: async (req) => {
-      const route = normalizeRoutePath(req.url);
-      rateLimitHitsTotal.inc({ route });
-      req.log.warn({ route }, "Rate limit exceeded");
-    },
-  });
+  if (process.env.E2E !== "1") {
+    await app.register(rateLimit, {
+      max: process.env.NODE_ENV === "test" ? 10000 : 60,
+      timeWindow: "1 minute",
+      keyGenerator: (req) => req.userId ?? req.ip,
+      onExceeded: async (req) => {
+        const route = normalizeRoutePath(req.url);
+        rateLimitHitsTotal.inc({ route });
+        req.log.warn({ route }, "Rate limit exceeded");
+      },
+    });
+  }
 
   // Request timing: track slow endpoints
   const SLOW_REQUEST_MS = 500;
@@ -136,6 +138,9 @@ export async function buildApp() {
       return;
     }
     if (request.url === "/api/metrics" || request.url.startsWith("/api/metrics/")) {
+      return;
+    }
+    if (request.url === "/api/internal" || request.url.startsWith("/api/internal/")) {
       return;
     }
     await requireAuth(request, reply);

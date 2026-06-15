@@ -17,6 +17,7 @@ import path from "path";
 import { db } from "../db";
 import { assets, projects, renders } from "../db/schema";
 import { cacheDel, cacheGet, cacheSet } from "../lib/cache";
+import { buildInitialCutList } from "../lib/cutlist";
 import { sendError } from "../lib/errors";
 import { slidingWindowCheck } from "../lib/rateLimit";
 import { validatePromptGuardrails } from "../middleware/guardrails";
@@ -238,6 +239,7 @@ export async function projectRoutes(app: FastifyInstance) {
         validatePromptGuardrails,
         enforceTokenBudget,
         async (request, reply) => {
+          if (process.env.E2E === "1") return;
           const userId = request.userId;
           const rl = await slidingWindowCheck({
             key: `rl:prompt:${userId}`,
@@ -276,20 +278,26 @@ export async function projectRoutes(app: FastifyInstance) {
       }
 
       const body = request.validatedBody as { prompt: string };
-      if (!project.cutList) {
-        return sendError(reply, 400, "No cutlist to edit", "NO_CUTLIST");
-      }
 
       // Gather assets for context
       const projectAssets = await db.query.assets.findMany({
         where: eq(assets.projectId, id),
       });
 
+      let currentCutList = project.cutList;
+      if (!currentCutList) {
+        currentCutList = buildInitialCutList(projectAssets || []);
+        await db
+          .update(projects)
+          .set({ cutList: currentCutList, updatedAt: new Date() })
+          .where(eq(projects.id, id));
+      }
+
       try {
         const result = await applyPromptEdit({
           userId,
           prompt: body.prompt,
-          cutList: project.cutList,
+          cutList: currentCutList,
           assets: (projectAssets || []).map((a) => ({
             id: a.id,
             type: a.type,

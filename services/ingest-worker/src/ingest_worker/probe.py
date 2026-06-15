@@ -27,7 +27,7 @@ def probe_video(video_path: str) -> Dict[str, Any]:
                 raise RuntimeError(f"Video has no duration metadata: {video_path}")
 
             info = {
-                "duration_sec": float(container.duration) * av.time_base,
+                "duration_sec": float(container.duration) / av.time_base,
                 "format": container.format.name if container.format else None,
                 "streams": [],
             }
@@ -55,7 +55,7 @@ def probe_video(video_path: str) -> Dict[str, Any]:
                 info["streams"].append(stream_info)
 
             return info
-    except av.AVError as e:
+    except av.error.FFmpegError as e:
         raise RuntimeError(f"Cannot open video '{video_path}': {e}") from e
 
 
@@ -90,12 +90,14 @@ def probe_asset_remote(asset_id: str, storage_key: str) -> Dict[str, Any]:
     headers = {"x-internal-token": internal_token} if internal_token else {}
 
     try:
-        resp = httpx.post(
+        resp = httpx.patch(
             f"{settings.api_base}/internal/assets/{asset_id}/probe",
             json=payload,
             headers=headers,
             timeout=30,
         )
+        if resp.status_code >= 400:
+            logger.error(f"Probe report failed body: {resp.text}")
         resp.raise_for_status()
     except httpx.HTTPError as e:
         logger.error(f"Failed to report probe for {asset_id}: {e}")

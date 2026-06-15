@@ -10,6 +10,11 @@ export async function signIn(page: Page): Promise<void> {
 
   await page.goto("/sign-in");
 
+  // If already signed in, the dashboard will load directly.
+  if (page.url().includes("/dashboard")) {
+    return;
+  }
+
   // Clerk SignIn component — Playwright pierces open shadow DOM
   const emailInput = page.locator('input[name="identifier"]').first();
   await emailInput.waitFor({ state: "visible", timeout: 10_000 });
@@ -27,6 +32,15 @@ export async function signIn(page: Page): Promise<void> {
   // Click Continue (second step — sign in)
   await continueBtn.click();
 
-  // Wait for navigation to dashboard
-  await page.waitForURL("/dashboard", { timeout: 15_000 });
+  // Wait for the sign-in route to be left, then explicitly navigate to the
+  // dashboard. This avoids depending on Clerk's exact post-sign-in redirect.
+  await page.waitForURL((url) => !url.pathname.startsWith("/sign-in"), {
+    timeout: 15_000,
+  });
+  await page.goto("/dashboard");
+
+  await page.locator('button:has-text("New Project")').first().waitFor({
+    state: "visible",
+    timeout: 15_000,
+  });
 }

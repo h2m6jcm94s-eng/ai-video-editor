@@ -122,20 +122,43 @@ describe("Project Prompt Route", () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it("POST returns 400 when project has no cutlist", async () => {
+  it("POST auto-creates a cutlist when project has none", async () => {
     vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce({
       ...mockProject,
       cutList: null,
     });
+    vi.mocked(db.query.assets.findMany).mockResolvedValueOnce([]);
+    vi.mocked(db.update).mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([mockProject]),
+        }),
+      }),
+    } as any);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ diff: [], explanation: "Created" }) } }],
+        }),
+        ok: true,
+        status: 200,
+      } as any),
+    );
+    vi.stubEnv("GROQ_API_KEY", "sk-groq-test");
+    vi.stubEnv("AI_PROVIDER", "groq");
 
     const app = await buildApp();
     const res = await app.inject({
       method: "POST",
       url: "/api/projects/proj-1/prompt",
-      payload: { prompt: "test" },
+      payload: { prompt: "make a 30 second reel" },
     });
-    expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.body).code).toBe("NO_CUTLIST");
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.explanation).toBe("Created");
+    expect(body.project.cutList.slots.length).toBeGreaterThan(0);
   });
 
   it("POST returns 503 when all AI providers fail", async () => {

@@ -4,7 +4,8 @@
 """Temporal workflow definitions for the render worker."""
 
 from dataclasses import dataclass
-from typing import Dict, List
+from datetime import timedelta
+from typing import Dict, List, Optional
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -13,13 +14,13 @@ from temporalio.common import RetryPolicy
 @dataclass
 class VideoRenderInput:
     project_id: str
-    reference_asset_id: str
     song_asset_id: str
     clip_asset_ids: List[str]
     style_tier: str
     mode: str
     user_id: str
     asset_key_map: Dict[str, str]
+    reference_asset_id: Optional[str] = None
 
 
 @workflow.defn
@@ -32,7 +33,7 @@ class VideoRenderWorkflow:
         project_info = await workflow.execute_activity(
             "fetch_project",
             args=(input.project_id,),
-            start_to_close_timeout=30,
+            start_to_close_timeout=timedelta(seconds=30),
             retry_policy=RetryPolicy(maximum_attempts=5),
         )
 
@@ -66,7 +67,7 @@ class VideoRenderWorkflow:
         download_result = await workflow.execute_activity(
             "download_render_assets",
             args=(required_asset_ids, asset_key_map),
-            start_to_close_timeout=120,
+            start_to_close_timeout=timedelta(seconds=120),
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
 
@@ -79,7 +80,7 @@ class VideoRenderWorkflow:
                 input.song_asset_id,
                 input.reference_asset_id,
             ),
-            start_to_close_timeout=600,
+            start_to_close_timeout=timedelta(seconds=600),
             retry_policy=RetryPolicy(maximum_attempts=2),
         )
 
@@ -87,7 +88,7 @@ class VideoRenderWorkflow:
         upload_result = await workflow.execute_activity(
             "upload_render",
             args=(output_path, input.project_id, render_id),
-            start_to_close_timeout=120,
+            start_to_close_timeout=timedelta(seconds=120),
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
 
@@ -95,7 +96,7 @@ class VideoRenderWorkflow:
         await workflow.execute_activity(
             "complete_render",
             args=(render_id, upload_result["asset_id"]),
-            start_to_close_timeout=30,
+            start_to_close_timeout=timedelta(seconds=30),
             retry_policy=RetryPolicy(maximum_attempts=5),
         )
 

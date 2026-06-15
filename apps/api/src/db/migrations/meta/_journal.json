@@ -36,6 +36,20 @@
       "when": 1781170361503,
       "tag": "0004_user_events_admin_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1781170361504,
+      "tag": "0005_fix_full_style_default",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1781170361505,
+      "tag": "0006_allow_rendering_status",
+      "breakpoints": true
     }
   ]
 }

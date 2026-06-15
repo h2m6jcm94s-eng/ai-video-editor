@@ -44,7 +44,7 @@ async function withTemporalReconnect<T>(call: (client: Client) => Promise<T>): P
 
 export interface StartRenderOptions {
   projectId: string;
-  referenceAssetId: string;
+  referenceAssetId?: string | null;
   songAssetId: string;
   clipAssetIds: string[];
   styleTier: string;

@@ -21,12 +21,6 @@ export function useRenderStatus(projectId: string): RenderStatus {
   const [latestRender, setLatestRender] = useState<RenderJob | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const activeRenderRef = useRef(activeRender);
-
-  // Keep ref in sync with state so callbacks see latest value
-  useEffect(() => {
-    activeRenderRef.current = activeRender;
-  }, [activeRender]);
 
   const poll = useCallback(async () => {
     try {
@@ -57,19 +51,12 @@ export function useRenderStatus(projectId: string): RenderStatus {
     const doPoll = async () => {
       if (!mounted) return;
       await poll();
-      if (!mounted) return;
-      const hasActive = activeRenderRef.current !== null;
-      if (hasActive && !intervalRef.current) {
-        intervalRef.current = setInterval(() => {
-          if (mounted) poll();
-        }, 3000);
-      } else if (!hasActive && intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
     };
 
     doPoll();
+    intervalRef.current = setInterval(() => {
+      if (mounted) poll();
+    }, 3000);
 
     return () => {
       mounted = false;

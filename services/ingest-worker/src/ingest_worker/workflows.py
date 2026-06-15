@@ -4,6 +4,7 @@
 """Temporal workflow definitions for the ingest worker."""
 
 from dataclasses import dataclass
+from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -24,6 +25,6 @@ class ProbeAssetWorkflow:
         return await workflow.execute_activity(
             "probe_asset",
             args=(input.asset_id, input.storage_key),
-            start_to_close_timeout=120,
+            start_to_close_timeout=timedelta(seconds=120),
             retry_policy=RetryPolicy(maximum_attempts=3),
         )

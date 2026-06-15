@@ -54,11 +54,19 @@ def _run_ffmpeg(cmd: List[str], context: str) -> None:
     try:
         subprocess.run(cmd, check=True, capture_output=True)
     except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode("utf-8", errors="replace")[:2000] if e.stderr else ""
+        stderr = e.stderr.decode("utf-8", errors="replace") if e.stderr else ""
+        try:
+            with open("e2e/ffmpeg-stderr.log", "a", encoding="utf-8") as f:
+                f.write(f"\n--- {context} ---\n")
+                f.write(f"Command: {' '.join(cmd)}\n")
+                f.write(f"Return code: {e.returncode}\n")
+                f.write(f"Stderr:\n{stderr}\n")
+        except Exception:
+            pass
         raise RuntimeError(
             f"FFmpeg failed during {context}: {e.returncode}\n"
             f"Command: {' '.join(cmd[:20])}...\n"
-            f"Stderr: {stderr}"
+            f"Stderr: {stderr[:2000]}"
         ) from e
 
 
@@ -136,11 +144,6 @@ def _build_audio_filter(audio_tracks: List[AudioTrack], base_input_count: int, s
     for track in audio_tracks:
         parts.append(f"[{idx}:a]afade=t=in:ss=0:d={track.fade_in_s},afade=t=out:st={max(0, track.end_s - track.start_s - track.fade_out_s)}:d={track.fade_out_s},volume={track.gain_db}dB[a{idx}]")
         inputs.append(f"[a{idx}]")
-        idx += 1
-
-    if song_path:
-        parts.append(f"[{idx}:a]anull[asong]")
-        inputs.append("[asong]")
         idx += 1
 
     if len(inputs) > 1:
@@ -230,17 +233,20 @@ def compile_timeline(
         filter_parts.append(f"[{i}:v]setpts=PTS-STARTPTS[v{i}]")
 
     current_label = "v0"
+    current_duration = slot_segments[0]["slot"].duration_s
     for i in range(len(slot_segments) - 1):
         slot = slot_segments[i]["slot"]
+        next_slot = slot_segments[i + 1]["slot"]
         transition = XFADE_MAP.get(slot.transition_out, "fade")
-        xfade_duration = min(0.3, slot.duration_s * 0.5)
-        offset = max(0.0, slot.duration_s - xfade_duration)
+        xfade_duration = min(0.3, slot.duration_s * 0.5, next_slot.duration_s * 0.5)
+        offset = max(0.0, current_duration - xfade_duration)
 
         out_label = f"vx{i}"
         filter_parts.append(
             f"[{current_label}][v{i+1}]xfade=transition={transition}:duration={xfade_duration}:offset={offset}[{out_label}]"
         )
         current_label = out_label
+        current_duration = current_duration + next_slot.duration_s - xfade_duration
 
     # LUT application if available
     if config.lut_path and os.path.exists(config.lut_path):

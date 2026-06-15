@@ -2,26 +2,20 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import { useRouter } from "next/navigation";
+import { createProjectSchema, EDIT_MODE, STYLE_TIER } from "@ai-video-editor/shared-types";
 import { useAuth } from "@clerk/nextjs";
-import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useRouter } from "next/navigation";
+import { useForm } from "react-hook-form";
+import { toast } from "sonner";
 import { z } from "zod";
-import { createProjectSchema, STYLE_TIER, EDIT_MODE } from "@ai-video-editor/shared-types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useApi } from "@/lib/api/client";
 import { APIError } from "@/lib/api/error";
 import { mapApiValidationErrors } from "@/lib/api/formErrors";
-import { toast } from "sonner";
 
 type FormData = z.infer<typeof createProjectSchema>;
 
@@ -63,8 +57,9 @@ export default function NewProjectPage() {
   const styleTier = watch("styleTier");
   const mode = watch("mode");
 
+  const isAuthDisabled = process.env.NEXT_PUBLIC_DISABLE_CLERK_AUTH === "1";
   if (!isLoaded) return null;
-  if (!isSignedIn) {
+  if (!isAuthDisabled && !isSignedIn) {
     router.push("/sign-in");
     return null;
   }
@@ -99,9 +94,7 @@ export default function NewProjectPage() {
               className="bg-zinc-950 border-zinc-800"
               {...register("name")}
             />
-            {errors.name && (
-              <p className="text-xs text-red-400">{errors.name.message}</p>
-            )}
+            {errors.name && <p className="text-xs text-red-400">{errors.name.message}</p>}
           </div>
 
           <div className="space-y-2">
@@ -121,17 +114,12 @@ export default function NewProjectPage() {
                 ))}
               </SelectContent>
             </Select>
-            {errors.styleTier && (
-              <p className="text-xs text-red-400">{errors.styleTier.message}</p>
-            )}
+            {errors.styleTier && <p className="text-xs text-red-400">{errors.styleTier.message}</p>}
           </div>
 
           <div className="space-y-2">
             <Label>Edit Mode</Label>
-            <Select
-              value={mode}
-              onValueChange={(v) => setValue("mode", v as FormData["mode"])}
-            >
+            <Select value={mode} onValueChange={(v) => setValue("mode", v as FormData["mode"])}>
               <SelectTrigger className="bg-zinc-950 border-zinc-800">
                 <SelectValue />
               </SelectTrigger>
@@ -143,13 +131,16 @@ export default function NewProjectPage() {
                 ))}
               </SelectContent>
             </Select>
-            {errors.mode && (
-              <p className="text-xs text-red-400">{errors.mode.message}</p>
-            )}
+            {errors.mode && <p className="text-xs text-red-400">{errors.mode.message}</p>}
           </div>
 
           <div className="flex gap-3">
-            <Button type="button" variant="outline" className="flex-1" onClick={() => router.push("/dashboard")}>
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              onClick={() => router.push("/dashboard")}
+            >
               Cancel
             </Button>
             <Button type="submit" className="flex-1" disabled={!isValid || isSubmitting}>

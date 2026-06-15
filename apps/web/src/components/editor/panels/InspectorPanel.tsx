@@ -2,29 +2,16 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import { useEffect, memo } from "react";
-import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { memo, useEffect, useMemo } from "react";
+import { useForm } from "react-hook-form";
 import { z } from "zod";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
-import type { Slot, Overlay, CutList, PreviewEffects } from "@/types/api";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { CutList, Overlay, PreviewEffects, Slot } from "@/types/api";
 
 const TRANSITIONS = ["hard_cut", "dissolve", "fade", "wipe_right", "wipe_left", "whip"] as const;
 
@@ -110,14 +97,18 @@ function InspectorPanelInner({
   onUpdateEffects,
 }: InspectorPanelProps) {
   const selectedOverlay = overlays.find((o) => o.id === selectedOverlayId);
-  const effects: PreviewEffects = cutList?.globals?.effects ?? {
-    brightness: 1,
-    contrast: 1,
-    saturation: 1,
-    blur: 0,
-    sepia: 0,
-    hueRotate: 0,
-  };
+  const effects: PreviewEffects = useMemo(
+    () =>
+      cutList?.globals?.effects ?? {
+        brightness: 1,
+        contrast: 1,
+        saturation: 1,
+        blur: 0,
+        sepia: 0,
+        hueRotate: 0,
+      },
+    [cutList?.globals?.effects],
+  );
 
   const effectsForm = useForm<z.infer<typeof previewEffectsSchema>>({
     resolver: zodResolver(previewEffectsSchema),
@@ -126,52 +117,76 @@ function InspectorPanelInner({
   });
 
   useEffect(() => {
-    effectsForm.reset(effects);
-  }, [effectsForm, effects]);
+    const current = effectsForm.getValues();
+    if (JSON.stringify(current) !== JSON.stringify(effects)) {
+      effectsForm.reset(effects);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effects]);
+
+  const slotDefaults = useMemo(
+    () => ({
+      startS: selectedSlot?.startS ?? 0,
+      durationS: selectedSlot?.durationS ?? 0,
+      transitionIn: (selectedSlot?.transitionIn as (typeof TRANSITIONS)[number]) ?? "hard_cut",
+      transitionOut: (selectedSlot?.transitionOut as (typeof TRANSITIONS)[number]) ?? "hard_cut",
+      targetShotType: selectedSlot?.targetShotType ?? "",
+    }),
+    [selectedSlot],
+  );
 
   const slotForm = useForm<z.infer<typeof slotSchema>>({
     resolver: zodResolver(slotSchema),
-    defaultValues: {
-      startS: selectedSlot?.startS ?? 0,
-      durationS: selectedSlot?.durationS ?? 0,
-      transitionIn: (selectedSlot?.transitionIn as typeof TRANSITIONS[number]) ?? "hard_cut",
-      transitionOut: (selectedSlot?.transitionOut as typeof TRANSITIONS[number]) ?? "hard_cut",
-      targetShotType: selectedSlot?.targetShotType ?? "",
-    },
+    defaultValues: slotDefaults,
     mode: "onChange",
   });
 
   useEffect(() => {
     if (selectedSlot && selectedSlotIndex !== null) {
-      slotForm.reset({
+      const current = slotForm.getValues();
+      const next = {
         startS: selectedSlot.startS,
         durationS: selectedSlot.durationS,
-        transitionIn: (selectedSlot.transitionIn as typeof TRANSITIONS[number]) ?? "hard_cut",
-        transitionOut: (selectedSlot.transitionOut as typeof TRANSITIONS[number]) ?? "hard_cut",
+        transitionIn: (selectedSlot.transitionIn as (typeof TRANSITIONS)[number]) ?? "hard_cut",
+        transitionOut: (selectedSlot.transitionOut as (typeof TRANSITIONS)[number]) ?? "hard_cut",
         targetShotType: selectedSlot.targetShotType ?? "",
-      });
+      };
+      if (JSON.stringify(current) !== JSON.stringify(next)) {
+        slotForm.reset(next);
+      }
     }
-  }, [selectedSlot, selectedSlotIndex, slotForm]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSlot, selectedSlotIndex]);
 
-  const overlayForm = useForm<z.infer<typeof overlaySchema>>({
-    resolver: zodResolver(overlaySchema),
-    defaultValues: {
+  const overlayDefaults = useMemo(
+    () => ({
       text: selectedOverlay?.text ?? "",
       x: selectedOverlay?.x ?? 0,
       y: selectedOverlay?.y ?? 0,
-    },
+    }),
+    [selectedOverlay],
+  );
+
+  const overlayForm = useForm<z.infer<typeof overlaySchema>>({
+    resolver: zodResolver(overlaySchema),
+    defaultValues: overlayDefaults,
     mode: "onChange",
   });
 
   useEffect(() => {
     if (selectedOverlay) {
-      overlayForm.reset({
+      const current = overlayForm.getValues();
+      const next = {
         text: selectedOverlay.text ?? "",
         x: selectedOverlay.x ?? 0,
         y: selectedOverlay.y ?? 0,
-      });
+      };
+      if (JSON.stringify(current) !== JSON.stringify(next)) {
+        overlayForm.reset(next);
+      }
     }
-  }, [selectedOverlay, overlayForm]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedOverlay]);
 
   const updateEffect = (patch: Partial<PreviewEffects>) => {
     const next = { ...effects, ...patch };
@@ -181,7 +196,7 @@ function InspectorPanelInner({
 
   const updateSlotField = <K extends keyof z.infer<typeof slotSchema>>(
     field: K,
-    value: z.infer<typeof slotSchema>[K]
+    value: z.infer<typeof slotSchema>[K],
   ) => {
     if (selectedSlotIndex === null) return;
     const current = slotForm.getValues();
@@ -192,7 +207,7 @@ function InspectorPanelInner({
 
   const updateOverlayField = <K extends keyof z.infer<typeof overlaySchema>>(
     field: K,
-    value: z.infer<typeof overlaySchema>[K]
+    value: z.infer<typeof overlaySchema>[K],
   ) => {
     if (!selectedOverlay) return;
     const current = overlayForm.getValues();
@@ -210,14 +225,58 @@ function InspectorPanelInner({
         {onUpdateEffects && (
           <div className="space-y-3 mb-4 pb-4 border-b border-zinc-800">
             <h3 className="text-sm font-medium">Effects</h3>
-            <EffectSlider label="Brightness" value={effects.brightness} min={0} max={2} step={0.05} onChange={(v) => updateEffect({ brightness: v })} />
-            <EffectSlider label="Contrast" value={effects.contrast} min={0} max={2} step={0.05} onChange={(v) => updateEffect({ contrast: v })} />
-            <EffectSlider label="Saturation" value={effects.saturation} min={0} max={2} step={0.05} onChange={(v) => updateEffect({ saturation: v })} />
-            <EffectSlider label="Blur" value={effects.blur} min={0} max={10} step={0.5} onChange={(v) => updateEffect({ blur: v })} />
-            <EffectSlider label="Sepia" value={effects.sepia} min={0} max={1} step={0.05} onChange={(v) => updateEffect({ sepia: v })} />
-            <EffectSlider label="Hue Rotate" value={effects.hueRotate} min={0} max={360} step={5} onChange={(v) => updateEffect({ hueRotate: v })} />
+            <EffectSlider
+              label="Brightness"
+              value={effects.brightness}
+              min={0}
+              max={2}
+              step={0.05}
+              onChange={(v) => updateEffect({ brightness: v })}
+            />
+            <EffectSlider
+              label="Contrast"
+              value={effects.contrast}
+              min={0}
+              max={2}
+              step={0.05}
+              onChange={(v) => updateEffect({ contrast: v })}
+            />
+            <EffectSlider
+              label="Saturation"
+              value={effects.saturation}
+              min={0}
+              max={2}
+              step={0.05}
+              onChange={(v) => updateEffect({ saturation: v })}
+            />
+            <EffectSlider
+              label="Blur"
+              value={effects.blur}
+              min={0}
+              max={10}
+              step={0.5}
+              onChange={(v) => updateEffect({ blur: v })}
+            />
+            <EffectSlider
+              label="Sepia"
+              value={effects.sepia}
+              min={0}
+              max={1}
+              step={0.05}
+              onChange={(v) => updateEffect({ sepia: v })}
+            />
+            <EffectSlider
+              label="Hue Rotate"
+              value={effects.hueRotate}
+              min={0}
+              max={360}
+              step={5}
+              onChange={(v) => updateEffect({ hueRotate: v })}
+            />
             <button
-              onClick={() => updateEffect({ brightness: 1, contrast: 1, saturation: 1, blur: 0, sepia: 0, hueRotate: 0 })}
+              onClick={() =>
+                updateEffect({ brightness: 1, contrast: 1, saturation: 1, blur: 0, sepia: 0, hueRotate: 0 })
+              }
               className="w-full py-1 text-[10px] bg-zinc-800 hover:bg-zinc-700 rounded transition text-zinc-400"
             >
               Reset
@@ -285,7 +344,7 @@ function InspectorPanelInner({
                       value={field.value}
                       onValueChange={(v) => {
                         field.onChange(v);
-                        updateSlotField("transitionIn", v as typeof TRANSITIONS[number]);
+                        updateSlotField("transitionIn", v as (typeof TRANSITIONS)[number]);
                       }}
                     >
                       <FormControl>
@@ -315,7 +374,7 @@ function InspectorPanelInner({
                       value={field.value}
                       onValueChange={(v) => {
                         field.onChange(v);
-                        updateSlotField("transitionOut", v as typeof TRANSITIONS[number]);
+                        updateSlotField("transitionOut", v as (typeof TRANSITIONS)[number]);
                       }}
                     >
                       <FormControl>
@@ -357,7 +416,13 @@ function InspectorPanelInner({
               />
               <div className="space-y-2">
                 <Label className="text-xs">Speed</Label>
-                <Input type="number" step={0.1} value={1} readOnly className="bg-zinc-900 border-zinc-800 h-8 text-xs opacity-50" />
+                <Input
+                  type="number"
+                  step={0.1}
+                  value={1}
+                  readOnly
+                  className="bg-zinc-900 border-zinc-800 h-8 text-xs opacity-50"
+                />
               </div>
             </div>
           </Form>
@@ -438,7 +503,9 @@ function InspectorPanelInner({
         )}
 
         {!selectedSlot && !selectedOverlay && (
-          <p className="text-xs text-zinc-600 text-center py-8">Select a clip or overlay to edit properties</p>
+          <p className="text-xs text-zinc-600 text-center py-8">
+            Select a clip or overlay to edit properties
+          </p>
         )}
       </ScrollArea>
     </div>

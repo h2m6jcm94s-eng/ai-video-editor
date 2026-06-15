@@ -32,7 +32,7 @@ async function fetchWithRetry(
         ...init,
         credentials: "include",
         headers,
-        signal: AbortSignal.timeout(15_000),
+        signal: init.signal ?? AbortSignal.timeout(15_000),
       });
 
       if (res.status >= 500 && i < attempts - 1) {
@@ -76,8 +76,13 @@ export function createAPI(getToken: TokenGetter) {
       prompt: (
         id: string,
         prompt: string,
+        init?: RequestInit,
       ): Promise<{ project: Project; diff: unknown[]; explanation: string }> =>
-        fetchJSON(`/projects/${id}/prompt`, { method: "POST", body: JSON.stringify({ prompt }) }),
+        fetchJSON(`/projects/${id}/prompt`, {
+          method: "POST",
+          body: JSON.stringify({ prompt }),
+          ...init,
+        }),
       transcribe: (id: string, assetId: string): Promise<{ subtitles: Subtitle[] }> =>
         fetchJSON(`/projects/${id}/transcribe`, { method: "POST", body: JSON.stringify({ assetId }) }),
     },

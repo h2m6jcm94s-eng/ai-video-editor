@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { db } from "../db";
+import type { Asset } from "../db/schema";
 import { assets, projects } from "../db/schema";
 import { sendError } from "../lib/errors";
 import { presignedUploadSchema, validateBody } from "../middleware/validate";
@@ -21,6 +22,48 @@ import {
   s3,
 } from "../services/storage";
 import { startProbeWorkflow } from "../services/temporal";
+
+function normalizeClipAssetIds(value: unknown): string[] {
+  if (Array.isArray(value)) return value as string[];
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed as string[];
+    } catch {
+      // fall through
+    }
+  }
+  return [];
+}
+
+async function attachAssetToProject(asset: Asset) {
+  if (asset.type === "reference_video") {
+    await db
+      .update(projects)
+      .set({ referenceAssetId: asset.id, updatedAt: new Date() })
+      .where(eq(projects.id, asset.projectId));
+  } else if (asset.type === "song") {
+    await db
+      .update(projects)
+      .set({ songAssetId: asset.id, updatedAt: new Date() })
+      .where(eq(projects.id, asset.projectId));
+  } else if (asset.type === "clip") {
+    const project = await db.query.projects.findFirst({
+      where: eq(projects.id, asset.projectId),
+      columns: { clipAssetIds: true },
+    });
+    const current = normalizeClipAssetIds(project?.clipAssetIds);
+    if (!current.includes(asset.id)) {
+      await db
+        .update(projects)
+        .set({
+          clipAssetIds: [...current, asset.id],
+          updatedAt: new Date(),
+        })
+        .where(eq(projects.id, asset.projectId));
+    }
+  }
+}
 
 export async function uploadRoutes(app: FastifyInstance) {
   // Get presigned upload URL for simple (single-PUT) upload
@@ -129,12 +172,14 @@ export async function uploadRoutes(app: FastifyInstance) {
       return sendError(reply, 404, "Asset not found", "NOT_FOUND");
     }
 
-    // Trigger probe workflow for video assets (fire-and-forget)
-    if (["reference_video", "clip", "render"].includes(asset.type)) {
+    // Trigger probe workflow for video/audio assets (fire-and-forget)
+    if (["reference_video", "clip", "render", "song"].includes(asset.type)) {
       startProbeWorkflow(asset.id, asset.storageKey).catch((e) =>
         request.log.error({ err: e, assetId }, "probe trigger failed"),
       );
     }
+
+    await attachAssetToProject(asset);
 
     return { asset };
   });
@@ -282,6 +327,8 @@ export async function uploadRoutes(app: FastifyInstance) {
           request.log.error({ err: e, assetId: asset.id }, "probe trigger failed"),
         );
       }
+
+      await attachAssetToProject(asset);
 
       return { asset };
     },
