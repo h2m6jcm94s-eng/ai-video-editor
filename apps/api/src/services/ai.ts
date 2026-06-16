@@ -1066,9 +1066,23 @@ export async function applyPromptEdit(context: PromptEditContext): Promise<
     };
   }
 
-  let newCutList = applyJsonPatch(context.cutList, result.diff);
-  newCutList = normalizeCutList(
-    newCutList as Record<string, unknown>,
+  const patchedCutList = applyJsonPatch(context.cutList, result.diff);
+
+  // Validate the raw patched cut list strictly before normalization so that
+  // invalid AI output (missing required fields, extra keys, wrong types) is
+  // reported as schema drift instead of silently repaired.
+  const strictParseResult = cutListSchema.safeParse(patchedCutList);
+  if (!strictParseResult.success) {
+    const err: Error & { code?: string; details?: unknown } = new Error(
+      `Generated cut list does not match schema: ${strictParseResult.error.issues.map((i) => i.message).join(", ")}`,
+    );
+    err.code = "CUTLIST_SCHEMA_DRIFT";
+    err.details = strictParseResult.error.issues;
+    throw err;
+  }
+
+  const newCutList = normalizeCutList(
+    strictParseResult.data as Record<string, unknown>,
     context.assets as
       | { id: string; type: string; durationSec?: number | null; filename?: string | null }[]
       | undefined,

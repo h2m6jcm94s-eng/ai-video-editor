@@ -100,7 +100,7 @@ describe("Render Routes", () => {
   it("POST /api/renders returns 422 when missing assets", async () => {
     vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce({
       ...mockProject,
-      referenceAssetId: null,
+      songAssetId: null,
     } as any);
 
     const app = await buildApp();

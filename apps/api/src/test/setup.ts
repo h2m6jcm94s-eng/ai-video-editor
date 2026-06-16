@@ -1,5 +1,11 @@
 import { vi } from "vitest";
 
+// Prevent local dev flags from leaking into unit tests.
+// These are set in .env/.env.local for Clerk-free E2E runs but would break
+// auth/rate-limit tests if they persist in the Vitest process.
+delete process.env.DISABLE_CLERK_AUTH;
+delete process.env.E2E;
+
 // Mock Clerk
 vi.mock("@clerk/fastify", () => ({
   createClerkClient: () => ({

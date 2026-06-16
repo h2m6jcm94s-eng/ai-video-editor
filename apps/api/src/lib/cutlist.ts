@@ -1,6 +1,6 @@
 // Copyright (c) 2025 Devayan Dewri. All rights reserved.
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
-import type { CutList, Slot } from "@ai-video-editor/shared-types";
+import type { CutList, Effect, Slot } from "@ai-video-editor/shared-types";
 import { audioTrackSchema, effectSchema, overlaySchema } from "@ai-video-editor/shared-types";
 
 interface AssetLike {
@@ -31,9 +31,9 @@ function normalizeSlot(slot: Record<string, unknown>, index: number, clipIds: st
   const rawEffects = Array.isArray(slot.effects) ? slot.effects : [];
   const effects = rawEffects
     .map((e) => normalizeEffect((e as Record<string, unknown>) || {}, durationS))
-    .filter(Boolean);
+    .filter((e): e is Effect => e !== null);
 
-  return {
+  const normalized: Slot = {
     index: typeof slot.index === "number" ? slot.index : index,
     startS,
     durationS,
@@ -48,14 +48,19 @@ function normalizeSlot(slot: Record<string, unknown>, index: number, clipIds: st
     energyLevel: typeof slot.energyLevel === "number" ? slot.energyLevel : 0.5,
     requiredTags: Array.isArray(slot.requiredTags) ? slot.requiredTags : [],
     avoidTags: Array.isArray(slot.avoidTags) ? slot.avoidTags : [],
-    selectedClipId,
-    rankedClipIds: Array.isArray(slot.rankedClipIds)
-      ? slot.rankedClipIds
-      : selectedClipId
-        ? [selectedClipId]
-        : undefined,
     effects,
-  } as Slot;
+  };
+
+  if (selectedClipId) {
+    normalized.selectedClipId = selectedClipId;
+    normalized.rankedClipIds = Array.isArray(slot.rankedClipIds)
+      ? (slot.rankedClipIds as string[])
+      : [selectedClipId];
+  } else if (Array.isArray(slot.rankedClipIds)) {
+    normalized.rankedClipIds = slot.rankedClipIds as string[];
+  }
+
+  return normalized;
 }
 
 function normalizeOverlay(overlay: Record<string, unknown>) {

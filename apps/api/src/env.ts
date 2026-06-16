@@ -19,6 +19,9 @@ if (isTest) {
   delete process.env.AI_PROVIDER_TOOLCALL;
   // Force test internal worker token so webhook auth tests pass regardless of .env.local
   process.env.INTERNAL_WORKER_TOKEN = "test-internal-token-1234567890abcdef";
+  // Prevent Clerk-free E2E flags from leaking into unit tests.
+  delete process.env.DISABLE_CLERK_AUTH;
+  delete process.env.E2E;
 }
 
 const schema = z.object({
