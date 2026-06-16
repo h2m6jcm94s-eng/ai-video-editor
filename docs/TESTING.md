@@ -168,6 +168,10 @@ E2E tests live in `e2e/` and are driven by Playwright. They cover the full user 
 
 ### Local Runbook
 
+For the full Clerk-free setup used to replicate the `output-A.mp4` / `output-B.mp4` pipeline, see [`docs/runbooks/e2e-clerk-bypass.md`](./runbooks/e2e-clerk-bypass.md).
+
+Quick version:
+
 ```bash
 # 1. Start infrastructure
 pnpm infra:up
