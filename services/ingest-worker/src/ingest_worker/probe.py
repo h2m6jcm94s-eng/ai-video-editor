@@ -12,25 +12,46 @@ from shared_py.logging_config import StructuredLogger
 from shared_py.storage import download_asset
 from shared_py.config import settings
 from typing import Dict, Any
+from types import SimpleNamespace
 
 logger = StructuredLogger("ingest_worker.probe")
 
 
-def probe_video(video_path: str) -> Dict[str, Any]:
+class ProbeInfo(SimpleNamespace):
+    """Dict-like namespace for video probe results.
+
+    Supports both attribute access (info.width) and dict-like access
+    (info['width']) for backward compatibility.
+    """
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
+
+    def __contains__(self, key: str) -> bool:
+        return hasattr(self, key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+
+VideoProbeResult = ProbeInfo  # alias for clarity
+
+
+def probe_video(video_path: str) -> VideoProbeResult:
     """Probe video metadata using PyAV."""
     if av is None:
         logger.warning("av not available, cannot probe video")
-        return {"duration_sec": 0.0, "format": None, "streams": []}
+        return ProbeInfo(duration_sec=0.0, format=None, streams=[])
     try:
         with av.open(video_path) as container:
             if not container.duration:
                 raise RuntimeError(f"Video has no duration metadata: {video_path}")
 
-            info = {
-                "duration_sec": float(container.duration) / av.time_base,
-                "format": container.format.name if container.format else None,
-                "streams": [],
-            }
+            info = ProbeInfo(
+                duration_sec=float(container.duration) / av.time_base,
+                format=container.format.name if container.format else None,
+                streams=[],
+            )
 
             for stream in container.streams:
                 stream_info = {
@@ -52,7 +73,14 @@ def probe_video(video_path: str) -> Dict[str, Any]:
                         "sample_rate": stream.sample_rate,
                         "channels": stream.channels if hasattr(stream, "channels") else None,
                     })
-                info["streams"].append(stream_info)
+                info.streams.append(stream_info)
+
+            # Convenience attributes from first video stream
+            video_stream = next((s for s in info.streams if s.get("type") == "video"), None)
+            if video_stream:
+                info.width = video_stream.get("width")
+                info.height = video_stream.get("height")
+                info.fps = video_stream.get("fps")
 
             return info
     except av.error.FFmpegError as e:
@@ -75,9 +103,9 @@ def probe_asset_remote(asset_id: str, storage_key: str) -> Dict[str, Any]:
         except OSError:
             pass
 
-    video_stream = next((s for s in info["streams"] if s.get("type") == "video"), None)
+    video_stream = next((s for s in info.streams if s.get("type") == "video"), None)
     payload = {
-        "durationSec": info["duration_sec"],
+        "durationSec": info.duration_sec,
         "width": video_stream["width"] if video_stream else None,
         "height": video_stream["height"] if video_stream else None,
         "fps": video_stream["fps"] if video_stream else None,

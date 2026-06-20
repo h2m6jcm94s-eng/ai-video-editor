@@ -66,29 +66,56 @@ def detect_beats_allin1(audio_path: str) -> Optional[BeatGrid]:
 def detect_beats_librosa(audio_path: str) -> BeatGrid:
     """Fallback beat detection using librosa."""
     y, sr = librosa.load(audio_path, sr=44100, mono=True)
+    duration = librosa.get_duration(y=y, sr=sr)
 
     # Tempo and beat frames
     tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
     beat_times = librosa.frames_to_time(beat_frames, sr=sr)
 
+    # Fallback: librosa often returns zero or near-zero beats for synthetic/
+    # ambient audio (e.g. pure sine tones). Synthesize a regular grid from a
+    # reliable tempo estimate so downstream cutlist generation always has
+    # usable beat anchors.
+    def _bpm_from_result(value):
+        if isinstance(value, np.ndarray):
+            value = value.item() if value.size == 1 else value[0]
+        return float(value)
+
+    estimated_bpm = _bpm_from_result(tempo)
+    if estimated_bpm <= 0:
+        onset_env = librosa.onset.onset_strength(y=y, sr=sr)
+        onset_tempo = librosa.beat.tempo(onset_envelope=onset_env, sr=sr)
+        estimated_bpm = _bpm_from_result(onset_tempo)
+    if estimated_bpm <= 0 or not np.isfinite(estimated_bpm):
+        estimated_bpm = 120.0
+
+    if len(beat_times) < 2:
+        beat_period = 60.0 / estimated_bpm
+        beat_times = np.arange(0.0, duration, beat_period)
+        tempo = estimated_bpm
+
     # Downbeats: assume first beat is downbeat, then every 4th
     downbeats = beat_times[::4].tolist() if len(beat_times) > 0 else []
 
     # Simple section detection using onset strength clustering
-    onset_env = librosa.onset.onset_strength(y=y, sr=sr)
     # Divide into 4 roughly equal segments as a naive approach
-    duration = librosa.get_duration(y=y, sr=sr)
     segment_len = duration / 4
     segments = [
         BeatSegment(start=i * segment_len, end=min((i + 1) * segment_len, duration), label=label)
         for i, label in enumerate(["intro", "verse", "chorus", "outro"])
     ]
 
+    bpm_value = _bpm_from_result(tempo)
+    if bpm_value <= 0 or not np.isfinite(bpm_value):
+        bpm_value = estimated_bpm
+
+    beat_positions = ([1, 2, 3, 4] * (len(beat_times) // 4 + 1))[:len(beat_times)]
+
     return BeatGrid(
-        bpm=float(tempo) if isinstance(tempo, (int, float, np.number)) else float(tempo[0]),
+        bpm=bpm_value,
         beats=beat_times.tolist(),
         downbeats=downbeats,
-        beat_positions=[1, 2, 3, 4] * (len(beat_times) // 4 + 1),
+        beat_positions=beat_positions,
         segments=segments,
     )
 

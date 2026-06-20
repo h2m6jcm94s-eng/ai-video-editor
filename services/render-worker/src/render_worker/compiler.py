@@ -190,11 +190,14 @@ def compile_timeline(
         if not clip_id or clip_id not in clip_paths:
             continue
 
+        if slot.start_s < 0:
+            raise ValueError(f"Slot {slot.index} has negative start_s: {slot.start_s}")
+
         clip_path = clip_paths[clip_id]
         segment_path = os.path.join(temp_dir, f"slot_{slot.index:03d}.mp4")
 
         duration = slot.duration_s
-        start = 0.0
+        start = float(slot.start_s)
 
         base_vf = (
             f"fps={config.fps},"

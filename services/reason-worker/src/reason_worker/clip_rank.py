@@ -105,8 +105,9 @@ def compute_confidence(rankings: Dict[int, List[ClipScore]]) -> Dict[int, float]
     confidences = {}
     for slot_idx, scores in rankings.items():
         if len(scores) >= 4:
+            # Compare top choice against 4th choice for a more conservative gap
             gap = scores[0].total_score - scores[3].total_score
-            confidences[slot_idx] = min(1.0, gap * 2.0)
+            confidences[slot_idx] = min(0.99, gap * 1.5)
         elif len(scores) > 1:
             gap = scores[0].total_score - scores[-1].total_score
             confidences[slot_idx] = min(1.0, gap * 2.0)

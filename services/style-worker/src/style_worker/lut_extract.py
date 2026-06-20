@@ -35,6 +35,8 @@ def sample_frames(video_path: str, n_samples: int = 50) -> list:
     if cv2 is None:
         logger.warning("cv2 not available, cannot sample frames")
         return []
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Video not found: {video_path}")
     cap = cv2.VideoCapture(video_path)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     fps = cap.get(cv2.CAP_PROP_FPS)
