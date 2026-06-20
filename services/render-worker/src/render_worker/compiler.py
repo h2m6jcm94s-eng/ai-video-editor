@@ -4,6 +4,7 @@
 """FFmpeg-based timeline compiler for beat-synced video rendering."""
 
 import os
+import shutil
 import tempfile
 import subprocess
 import warnings
@@ -49,10 +50,10 @@ def _find_font() -> str:
     return ""
 
 
-def _run_ffmpeg(cmd: List[str], context: str) -> None:
+def _run_ffmpeg(cmd: List[str], context: str, cwd: Optional[str] = None) -> None:
     """Run FFmpeg with rich error context on failure."""
     try:
-        subprocess.run(cmd, check=True, capture_output=True)
+        subprocess.run(cmd, check=True, capture_output=True, cwd=cwd)
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode("utf-8", errors="replace") if e.stderr else ""
         try:
@@ -261,9 +262,23 @@ def compile_timeline(
         )
         current_label = lut_label
 
-    # Text overlays
+    # Text overlays (clamp to final rendered duration with small buffer).
+    # Copy the system font into the temp dir so we can reference it with a
+    # relative, colon-free path that FFmpeg's drawtext parser accepts on Windows.
+    fontfile = _find_font()
+    relative_font = ""
+    if fontfile and os.path.exists(fontfile):
+        local_font = os.path.join(temp_dir, "font.ttf")
+        shutil.copy2(fontfile, local_font)
+        relative_font = "font.ttf"
+
     for overlay in cutlist.overlays:
-        text_label = f"text_{overlay.start_s}"
+        start_s = round(max(0.0, overlay.start_s), 3)
+        end_s = round(min(overlay.end_s, current_duration - 0.05), 3)
+        if start_s >= current_duration or end_s <= start_s:
+            continue
+
+        text_label = f"text_{start_s}"
         x_expr = "(w-text_w)/2"
         y_expr = "(h-text_h)/2"
         if overlay.position == "top":
@@ -271,15 +286,14 @@ def compile_timeline(
         elif overlay.position == "bottom":
             y_expr = "h*0.9"
 
-        fontfile = _find_font()
-        enable_expr = f"between(t\\,{overlay.start_s}\\,{overlay.end_s})"
+        enable_expr = f"between(t\\,{start_s}\\,{end_s})"
 
         filter_parts.append(
             f"[{current_label}]drawtext=text='{_esc_text(overlay.text)}':"
             f"x={x_expr}:y={y_expr}:"
             f"fontsize={overlay.font_size_px}:"
             f"fontcolor={overlay.color}:"
-            f"{'fontfile=' + fontfile + ':' if fontfile else ''}"
+            f"{'fontfile=' + relative_font + ':' if relative_font else ''}"
             f"borderw=2:bordercolor={overlay.stroke or 'black'}:"
             f"enable='{enable_expr}'[{text_label}]"
         )
@@ -328,7 +342,7 @@ def compile_timeline(
 
     cmd.extend(["-movflags", "+faststart", output_path])
 
-    _run_ffmpeg(cmd, "final render")
+    _run_ffmpeg(cmd, "final render", cwd=temp_dir)
 
     # Cleanup temp files
     for f in temp_files:
