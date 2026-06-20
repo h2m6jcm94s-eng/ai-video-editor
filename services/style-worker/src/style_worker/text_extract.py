@@ -13,7 +13,7 @@ except ImportError:
 
 try:
     from paddleocr import PaddleOCR
-except ImportError:
+except Exception:
     PaddleOCR = None
 
 from shared_py.logging_config import StructuredLogger
