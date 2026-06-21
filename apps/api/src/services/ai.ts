@@ -88,6 +88,29 @@ const promptEditResponseSchema = z
   })
   .strict();
 
+const jsonPatchOpSchema = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("add"), path: z.string().min(1), value: z.unknown() }),
+  z.object({ op: z.literal("remove"), path: z.string().min(1) }),
+  z.object({ op: z.literal("replace"), path: z.string().min(1), value: z.unknown() }),
+  z.object({ op: z.literal("move"), path: z.string().min(1), from: z.string().min(1) }),
+  z.object({ op: z.literal("copy"), path: z.string().min(1), from: z.string().min(1) }),
+]);
+
+const MAX_PROMPT_TOKENS = 8_000;
+const MAX_CONTEXT_SLOTS = 128;
+const MAX_CONTEXT_ASSETS = 64;
+
+function isRetryableNetworkError(err: unknown): boolean {
+  if (err instanceof TypeError) return true;
+  if (err instanceof DOMException) {
+    return err.name === "AbortError" || err.name === "TimeoutError";
+  }
+  if (err && typeof err === "object" && "name" in err && (err as { name: string }).name === "AbortError") {
+    return true;
+  }
+  return false;
+}
+
 async function fetchWithRetry(url: string, init: RequestInit & { maxRetries?: number }): Promise<Response> {
   const maxRetries = init.maxRetries ?? 3;
 
@@ -101,7 +124,7 @@ async function fetchWithRetry(url: string, init: RequestInit & { maxRetries?: nu
         return res;
       }
     } catch (err) {
-      if (!(err instanceof TypeError) || attempt === maxRetries) {
+      if (!isRetryableNetworkError(err) || attempt === maxRetries) {
         throw err;
       }
     }
@@ -141,7 +164,7 @@ async function callClaudeOnce(
       model: "claude-3-5-sonnet-20241022",
       max_tokens: 4096,
       system: SYSTEM_PROMPT + hint,
-      messages: [{ role: "user", content: buildPrompt(context) }],
+      messages: [{ role: "user", content: await buildPrompt(context) }],
     }),
     signal: AbortSignal.timeout(60_000),
   });
@@ -239,7 +262,7 @@ async function callClaude(context: PromptEditContext): Promise<PromptEditResult>
     text = retry.text;
   }
 
-  const promptText = buildPrompt(context);
+  const promptText = await buildPrompt(context);
   parsed.usage = {
     promptTokens: await countTokens(promptText),
     completionTokens: await countTokens(text),
@@ -271,7 +294,7 @@ async function callKimiOnce(
       model: "moonshot-v1-8k",
       messages: [
         { role: "system", content: SYSTEM_PROMPT + hint },
-        { role: "user", content: buildPrompt(context) },
+        { role: "user", content: await buildPrompt(context) },
       ],
       response_format: { type: "json_object" },
       max_tokens: 4096,
@@ -331,7 +354,7 @@ async function callOpenRouterOnce(
       model: "anthropic/claude-3.5-haiku",
       messages: [
         { role: "system", content: SYSTEM_PROMPT + hint },
-        { role: "user", content: buildPrompt(context) },
+        { role: "user", content: await buildPrompt(context) },
       ],
       response_format: { type: "json_object" },
       max_tokens: 4096,
@@ -389,7 +412,7 @@ async function callGroqOnce(
       model: "llama-3.3-70b-versatile",
       messages: [
         { role: "system", content: SYSTEM_PROMPT + hint },
-        { role: "user", content: buildPrompt(context) },
+        { role: "user", content: await buildPrompt(context) },
       ],
       response_format: { type: "json_object" },
       max_tokens: 4096,
@@ -485,7 +508,7 @@ async function callGroq(context: PromptEditContext): Promise<PromptEditResult> {
     text = retry.text;
   }
 
-  const promptText = buildPrompt(context);
+  const promptText = await buildPrompt(context);
   parsed.usage = {
     promptTokens: await countTokens(promptText),
     completionTokens: await countTokens(text),
@@ -555,7 +578,7 @@ async function callOpenRouter(context: PromptEditContext): Promise<PromptEditRes
     text = retry.text;
   }
 
-  const promptText = buildPrompt(context);
+  const promptText = await buildPrompt(context);
   parsed.usage = {
     promptTokens: await countTokens(promptText),
     completionTokens: await countTokens(text),
@@ -625,7 +648,7 @@ async function callKimi(context: PromptEditContext): Promise<PromptEditResult> {
     text = retry.text;
   }
 
-  const promptText = buildPrompt(context);
+  const promptText = await buildPrompt(context);
   parsed.usage = {
     promptTokens: await countTokens(promptText),
     completionTokens: await countTokens(text),
@@ -657,7 +680,7 @@ async function callOpenAIOnce(
       model: "gpt-4o",
       messages: [
         { role: "system", content: SYSTEM_PROMPT + hint },
-        { role: "user", content: buildPrompt(context) },
+        { role: "user", content: await buildPrompt(context) },
       ],
       response_format: { type: "json_object" },
       max_tokens: 4096,
@@ -757,7 +780,7 @@ async function callOpenAI(context: PromptEditContext): Promise<PromptEditResult>
     text = retry.text;
   }
 
-  const promptText = buildPrompt(context);
+  const promptText = await buildPrompt(context);
   parsed.usage = {
     promptTokens: await countTokens(promptText),
     completionTokens: await countTokens(text),
@@ -766,20 +789,94 @@ async function callOpenAI(context: PromptEditContext): Promise<PromptEditResult>
   return parsed;
 }
 
-function buildPrompt(context: PromptEditContext): string {
+function deepClone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function compactAssets(assets: unknown[]): unknown[] {
+  return assets.map((asset) => {
+    if (asset && typeof asset === "object") {
+      const a = asset as Record<string, unknown>;
+      return {
+        id: a.id,
+        type: a.type,
+        filename: a.filename,
+        durationSec: a.durationSec,
+      };
+    }
+    return asset;
+  });
+}
+
+function limitSlots(cutList: Record<string, unknown>, maxSlots: number): Record<string, unknown> {
+  if (!Array.isArray(cutList.slots) || cutList.slots.length <= maxSlots) {
+    return cutList;
+  }
+  return {
+    ...cutList,
+    slots: cutList.slots.slice(0, maxSlots),
+    _truncated: true,
+  };
+}
+
+function renderPrompt(
+  prompt: string,
+  cutList: unknown,
+  assets: unknown[] | undefined,
+  beatGrid: unknown,
+  truncated = false,
+): string {
   return [
-    `# User Request\n${context.prompt}`,
+    `# User Request\n${prompt}`,
     ``,
-    `# Current CutList\n${JSON.stringify(context.cutList, null, 2)}`,
-    context.beatGrid ? `# Beat Grid\n${JSON.stringify(context.beatGrid, null, 2)}` : "",
-    context.assets && context.assets.length > 0
-      ? `# Available Assets\n${JSON.stringify(context.assets, null, 2)}`
-      : "",
+    `# Current CutList\n${JSON.stringify(cutList, null, 2)}`,
+    beatGrid ? `# Beat Grid\n${JSON.stringify(beatGrid, null, 2)}` : "",
+    assets && assets.length > 0 ? `# Available Assets\n${JSON.stringify(assets, null, 2)}` : "",
+    truncated ? `(context truncated due to token budget)` : "",
     ``,
     `Return the JSON Patch diff and explanation.`,
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+async function buildPrompt(context: PromptEditContext): Promise<string> {
+  let cutList = limitSlots(deepClone(context.cutList) as Record<string, unknown>, MAX_CONTEXT_SLOTS);
+  let maxAssets = MAX_CONTEXT_ASSETS;
+  let assets =
+    context.assets && context.assets.length > 0
+      ? compactAssets(context.assets).slice(0, maxAssets)
+      : undefined;
+  let beatGrid = context.beatGrid;
+
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const prompt = renderPrompt(context.prompt, cutList, assets, beatGrid);
+    const tokens = await countTokens(prompt);
+    if (tokens <= MAX_PROMPT_TOKENS) {
+      return prompt;
+    }
+
+    // Progressive truncation, largest consumers first.
+    if (beatGrid) {
+      beatGrid = undefined;
+      continue;
+    }
+    if (assets && assets.length > 0) {
+      maxAssets = Math.max(0, Math.floor(maxAssets / 2));
+      assets = assets.slice(0, maxAssets);
+      continue;
+    }
+    if ((cutList.slots as unknown[] | undefined)?.length && (cutList.slots as unknown[]).length > 1) {
+      const nextSlots = Math.max(1, Math.floor((cutList.slots as unknown[]).length / 2));
+      cutList = limitSlots(deepClone(context.cutList) as Record<string, unknown>, nextSlots);
+      continue;
+    }
+    break;
+  }
+
+  // Last resort: keep only globals and the user prompt.
+  const globals = cutList.globals;
+  return renderPrompt(context.prompt, globals ? { globals } : {}, undefined, undefined, true);
 }
 
 function parseResponse(text: string): PromptEditResult | null {
@@ -810,25 +907,33 @@ function parseResponse(text: string): PromptEditResult | null {
 function applyJsonPatch(target: unknown, patch: unknown[]): unknown {
   const obj = JSON.parse(JSON.stringify(target));
 
-  for (const op of patch) {
-    if (typeof op !== "object" || op === null) continue;
-    const { op: operation, path, value, from } = op as Record<string, unknown>;
-    if (typeof path !== "string") continue;
+  for (const [index, op] of patch.entries()) {
+    const parsed = jsonPatchOpSchema.safeParse(op);
+    if (!parsed.success) {
+      const err: Error & { code?: string; details?: unknown } = new Error(
+        `Invalid JSON Patch operation at index ${index}`,
+      );
+      err.code = "INVALID_PATCH";
+      err.details = { index, op, issues: parsed.error.issues };
+      throw err;
+    }
 
+    const { op: operation, path } = parsed.data;
     const keys = path.split("/").filter((k) => k !== "");
+
     if (operation === "add") {
-      setValue(obj, keys, value, true);
+      setValue(obj, keys, parsed.data.value, true);
     } else if (operation === "remove") {
       removeValue(obj, keys);
     } else if (operation === "replace") {
-      setValue(obj, keys, value, false);
-    } else if (operation === "move" && typeof from === "string") {
-      const fromKeys = from.split("/").filter((k) => k !== "");
+      setValue(obj, keys, parsed.data.value, false);
+    } else if (operation === "move") {
+      const fromKeys = parsed.data.from.split("/").filter((k) => k !== "");
       const val = getValue(obj, fromKeys);
       removeValue(obj, fromKeys);
       setValue(obj, keys, val, true);
-    } else if (operation === "copy" && typeof from === "string") {
-      const fromKeys = from.split("/").filter((k) => k !== "");
+    } else if (operation === "copy") {
+      const fromKeys = parsed.data.from.split("/").filter((k) => k !== "");
       const val = getValue(obj, fromKeys);
       setValue(obj, keys, val, true);
     }
@@ -1051,7 +1156,7 @@ export async function applyPromptEdit(context: PromptEditContext): Promise<
 
   // If the AI returned a fallback (refusal / invalid JSON after retry), preserve the original cut list
   if (result.fallback) {
-    const promptText = buildPrompt(context);
+    const promptText = await buildPrompt(context);
     const usage = result.usage || {
       promptTokens: await countTokens(promptText),
       completionTokens: 0,
@@ -1098,7 +1203,7 @@ export async function applyPromptEdit(context: PromptEditContext): Promise<
     throw err;
   }
 
-  const promptText = buildPrompt(context);
+  const promptText = await buildPrompt(context);
   const usage = result.usage || {
     promptTokens: await countTokens(promptText),
     completionTokens:

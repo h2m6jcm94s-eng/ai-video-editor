@@ -37,6 +37,13 @@ export function useSSE<T>({
     mountedRef.current = true;
     attemptsRef.current = 0;
 
+    const clearReconnectTimeout = () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
+
     const startPolling = () => {
       if (pollRef.current || !fallbackPoll) return;
       pollRef.current = setInterval(async () => {
@@ -58,6 +65,8 @@ export function useSSE<T>({
     };
 
     const connect = () => {
+      clearReconnectTimeout();
+
       if (attemptsRef.current >= maxReconnectAttempts) {
         startPolling();
         return;
@@ -94,6 +103,7 @@ export function useSSE<T>({
         setConnected(false);
         attemptsRef.current += 1;
         const delay = Math.min(2 ** attemptsRef.current * 1000, 30000);
+        clearReconnectTimeout();
         timeoutRef.current = setTimeout(connect, delay);
       };
     };
@@ -103,6 +113,7 @@ export function useSSE<T>({
         esRef.current?.close();
         setConnected(false);
       } else if (!esRef.current || esRef.current.readyState === EventSource.CLOSED) {
+        clearReconnectTimeout();
         attemptsRef.current = 0;
         connect();
       }
@@ -114,7 +125,7 @@ export function useSSE<T>({
     return () => {
       mountedRef.current = false;
       document.removeEventListener("visibilitychange", handleVis);
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      clearReconnectTimeout();
       stopPolling();
       esRef.current?.close();
     };

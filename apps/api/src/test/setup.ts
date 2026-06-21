@@ -66,6 +66,7 @@ const createChainableDelete = () =>
 vi.mock("../db", () => ({
   db: {
     query: {
+      users: { findFirst: vi.fn(), findMany: vi.fn() },
       projects: { findFirst: vi.fn(), findMany: vi.fn() },
       assets: { findFirst: vi.fn(), findMany: vi.fn() },
       renders: { findFirst: vi.fn(), findMany: vi.fn() },
@@ -144,6 +145,7 @@ vi.mock("ioredis", () => ({
     setex = vi.fn().mockResolvedValue("OK");
     del = vi.fn().mockResolvedValue(1);
     keys = vi.fn().mockResolvedValue([]);
+    scanStream = vi.fn();
     incrby = vi.fn().mockResolvedValue(1);
     expire = vi.fn().mockResolvedValue(1);
     pexpire = vi.fn().mockResolvedValue(1);

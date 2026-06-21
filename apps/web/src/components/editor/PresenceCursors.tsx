@@ -19,11 +19,14 @@ interface PresenceCursorsProps {
   userName: string;
 }
 
+const REPORT_DEBOUNCE_MS = 75;
+
 export function PresenceCursors({ projectId, userName }: PresenceCursorsProps) {
   const [users, setUsers] = useState<CursorUser[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
-  const lastReportRef = useRef(0);
   const mousePosRef = useRef({ x: 0, y: 0 });
+  const reportTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inFlightControllerRef = useRef<AbortController | null>(null);
   const api = useApi();
 
   useEffect(() => {
@@ -35,19 +38,46 @@ export function PresenceCursors({ projectId, userName }: PresenceCursorsProps) {
       const y = ((e.clientY - rect.top) / rect.height) * 100;
       mousePosRef.current = { x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) };
 
-      const now = Date.now();
-      if (now - lastReportRef.current > 500) {
-        lastReportRef.current = now;
-        api.presence
-          .report(projectId, { x: mousePosRef.current.x, y: mousePosRef.current.y, name: userName })
-          .catch((err) => {
-            console.error("Presence report failed:", err);
-          });
+      // Abort any in-flight report so we never queue stale positions.
+      inFlightControllerRef.current?.abort();
+      inFlightControllerRef.current = null;
+
+      if (reportTimeoutRef.current) {
+        clearTimeout(reportTimeoutRef.current);
       }
+
+      reportTimeoutRef.current = setTimeout(() => {
+        const controller = new AbortController();
+        inFlightControllerRef.current = controller;
+        api.presence
+          .report(
+            projectId,
+            { x: mousePosRef.current.x, y: mousePosRef.current.y, name: userName },
+            { signal: controller.signal },
+          )
+          .catch((err) => {
+            if (err instanceof Error && err.name === "AbortError") return;
+            // eslint-disable-next-line no-console
+            console.error("Presence report failed:", err);
+          })
+          .finally(() => {
+            if (inFlightControllerRef.current === controller) {
+              inFlightControllerRef.current = null;
+            }
+          });
+      }, REPORT_DEBOUNCE_MS);
     };
 
     window.addEventListener("mousemove", handleMouseMove);
-    return () => window.removeEventListener("mousemove", handleMouseMove);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      if (reportTimeoutRef.current) {
+        clearTimeout(reportTimeoutRef.current);
+        reportTimeoutRef.current = null;
+      }
+      inFlightControllerRef.current?.abort();
+      inFlightControllerRef.current = null;
+    };
   }, [projectId, userName, api]);
 
   useEffect(() => {
@@ -57,6 +87,7 @@ export function PresenceCursors({ projectId, userName }: PresenceCursorsProps) {
         .get(projectId)
         .then((res) => setUsers(res.users))
         .catch((err) => {
+          // eslint-disable-next-line no-console
           console.error("Presence fetch failed:", err);
         });
     };

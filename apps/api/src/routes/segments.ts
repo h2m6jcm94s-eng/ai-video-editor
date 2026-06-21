@@ -66,7 +66,6 @@ export async function segmentRoutes(app: FastifyInstance) {
   // Query the result of a segmentation workflow
   app.get("/:workflowId", async (request, reply) => {
     const { workflowId } = request.params as { workflowId: string };
-    const userId = request.userId;
 
     try {
       const client = await getTemporalClient();

@@ -1,7 +1,12 @@
 // Copyright (c) 2025 Devayan Dewri. All rights reserved.
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 import type { CutList, Effect, Slot } from "@ai-video-editor/shared-types";
-import { audioTrackSchema, effectSchema, overlaySchema } from "@ai-video-editor/shared-types";
+import {
+  audioTrackSchema,
+  buildInitialCutList,
+  effectSchema,
+  overlaySchema,
+} from "@ai-video-editor/shared-types";
 
 interface AssetLike {
   id: string;
@@ -113,51 +118,4 @@ export function normalizeCutList(cutList: Record<string, unknown>, assets?: Asse
   } as CutList;
 }
 
-export function buildInitialCutList(assets: AssetLike[]): CutList {
-  const clips = assets.filter((a) => a.type === "clip");
-  const song = assets.find((a) => a.type === "song");
-  const totalDuration = Math.min(
-    song?.durationSec || clips.reduce((s, c) => s + (c.durationSec || 5), 0) || 30,
-    30,
-  );
-  const slotCount = Math.max(1, clips.length || 1);
-  const slotDuration = totalDuration / slotCount;
-
-  const slots = Array.from({ length: slotCount }).map((_, i) => {
-    const clip = clips[i % clips.length];
-    return {
-      index: i,
-      startS: i * slotDuration,
-      durationS: slotDuration,
-      beatIndex: i,
-      section: i === 0 ? "intro" : i === slotCount - 1 ? "outro" : "verse",
-      transitionIn: i === 0 ? "hard_cut" : "dissolve",
-      transitionOut: i === slotCount - 1 ? "hard_cut" : "dissolve",
-      targetShotType: ["wide", "medium", "close_up"][i % 3],
-      subjectHint: "person",
-      motionHint: "static",
-      energyLevel: 0.5,
-      requiredTags: [],
-      avoidTags: [],
-      selectedClipId: clip?.id,
-      rankedClipIds: clip ? [clip.id] : undefined,
-      effects: [],
-    };
-  });
-
-  return {
-    globals: {
-      totalDurationS: totalDuration,
-      tempoBpm: 120,
-      timeSignature: "4/4",
-      energyCurve: [0.5],
-      sectionMarkers: [{ name: "full", startS: 0, endS: totalDuration }],
-      aspectRatio: "9:16",
-    },
-    slots,
-    overlays: [],
-    audioTracks: song
-      ? [{ assetId: song.id, startS: 0, endS: totalDuration, gainDb: 0, fadeInS: 0, fadeOutS: 0 }]
-      : [],
-  } as CutList;
-}
+export { buildInitialCutList };

@@ -26,7 +26,13 @@ export const createProjectSchema = z
   })
   .strict();
 
-export const patchProjectSchema = createProjectSchema.partial().strict();
+export const patchProjectSchema = z
+  .object({
+    name: projectNameSchema.optional(),
+    styleTier: z.enum(STYLE_TIER).optional(),
+    mode: z.enum(EDIT_MODE).optional(),
+  })
+  .strict();
 
 export const presignedUploadSchema = z
   .object({
@@ -175,6 +181,12 @@ export const providerKeySchema = z
       .regex(/^[^\s]+$/, "Key cannot contain whitespace"),
   })
   .strict();
+
+export const providerEncryptedKeySchema = z
+  .string()
+  .min(16, "Encrypted key is too short")
+  .max(4096, "Encrypted key is too long")
+  .regex(/^[A-Za-z0-9+/=]+$/, "Encrypted key must be base64");
 
 export const testProviderKeySchema = z
   .object({

@@ -1,16 +1,19 @@
-import { describe, it, expect } from "vitest";
 import {
+  ASSET_TYPE,
   createProjectSchema,
-  patchProjectSchema,
-  promptEditSchema,
-  presignedUploadSchema,
   createRenderSchema,
   createTemplateSchema,
-  providerKeySchema,
-  testProviderKeySchema,
   cutListSchema,
+  EDIT_MODE,
+  patchProjectSchema,
+  presignedUploadSchema,
+  promptEditSchema,
+  providerEncryptedKeySchema,
+  providerKeySchema,
+  STYLE_TIER,
+  testProviderKeySchema,
 } from "@ai-video-editor/shared-types";
-import { STYLE_TIER, EDIT_MODE, ASSET_TYPE } from "@ai-video-editor/shared-types";
+import { describe, expect, it } from "vitest";
 
 describe("Contract tests — shared schemas match backend expectations", () => {
   it("createProjectSchema accepts valid project", () => {
@@ -27,13 +30,7 @@ describe("Contract tests — shared schemas match backend expectations", () => {
   });
 
   it("STYLE_TIER contains exactly the 5 ladder tiers", () => {
-    expect(STYLE_TIER).toEqual([
-      "cuts_only",
-      "color_grade",
-      "with_text",
-      "with_effects",
-      "full_remix",
-    ]);
+    expect(STYLE_TIER).toEqual(["cuts_only", "color_grade", "with_text", "with_effects", "full_remix"]);
   });
 
   it("EDIT_MODE contains auto and assisted", () => {
@@ -62,7 +59,7 @@ describe("Contract tests — shared schemas match backend expectations", () => {
         filename: "video.mp4",
         mimeType: "video/mp4",
         type: "clip",
-      }).success
+      }).success,
     ).toBe(true);
 
     expect(
@@ -71,7 +68,7 @@ describe("Contract tests — shared schemas match backend expectations", () => {
         filename: "video.mp4",
         mimeType: "application/exe",
         type: "clip",
-      }).success
+      }).success,
     ).toBe(false);
   });
 
@@ -79,7 +76,7 @@ describe("Contract tests — shared schemas match backend expectations", () => {
     expect(
       createRenderSchema.safeParse({
         projectId: "550e8400-e29b-41d4-a716-446655440000",
-      }).success
+      }).success,
     ).toBe(true);
 
     expect(createRenderSchema.safeParse({ projectId: "not-a-uuid" }).success).toBe(false);
@@ -88,7 +85,18 @@ describe("Contract tests — shared schemas match backend expectations", () => {
   it("createTemplateSchema requires trimmed name", () => {
     const validCutList = {
       globals: { totalDurationS: 30, tempoBpm: 120 },
-      slots: [{ index: 0, startS: 0, durationS: 5, beatIndex: 0, section: "intro", targetShotType: "medium", subjectHint: "person", motionHint: "static" }],
+      slots: [
+        {
+          index: 0,
+          startS: 0,
+          durationS: 5,
+          beatIndex: 0,
+          section: "intro",
+          targetShotType: "medium",
+          subjectHint: "person",
+          motionHint: "static",
+        },
+      ],
     };
     expect(createTemplateSchema.safeParse({ name: "Template A", cutList: validCutList }).success).toBe(true);
     expect(createTemplateSchema.safeParse({ name: "   ", cutList: validCutList }).success).toBe(false);
@@ -105,6 +113,22 @@ describe("Contract tests — shared schemas match backend expectations", () => {
     expect(patchProjectSchema.safeParse({}).success).toBe(true);
   });
 
+  it("patchProjectSchema rejects internal fields", () => {
+    expect(patchProjectSchema.safeParse({ status: "completed" }).success).toBe(false);
+    expect(patchProjectSchema.safeParse({ userId: "550e8400-e29b-41d4-a716-446655440000" }).success).toBe(
+      false,
+    );
+    expect(
+      patchProjectSchema.safeParse({ renderAssetId: "550e8400-e29b-41d4-a716-446655440000" }).success,
+    ).toBe(false);
+  });
+
+  it("providerEncryptedKeySchema validates base64 payload length", () => {
+    expect(providerEncryptedKeySchema.safeParse("dGVzdC1rZXktd2l0aC1tb3JlLWJ5dGVz").success).toBe(true);
+    expect(providerEncryptedKeySchema.safeParse("not base64!").success).toBe(false);
+    expect(providerEncryptedKeySchema.safeParse("a").success).toBe(false);
+  });
+
   it("testProviderKeySchema requires provider", () => {
     expect(testProviderKeySchema.safeParse({ provider: "openai" }).success).toBe(true);
     expect(testProviderKeySchema.safeParse({}).success).toBe(false);
@@ -119,7 +143,14 @@ describe("Contract tests — shared schemas match backend expectations", () => {
 describe("Contract tests — cutList camelCase invariant", () => {
   it("rejects snake_case keys", () => {
     const bad = {
-      globals: { totalDurationS: 10, tempoBpm: 120, timeSignature: "4/4", energyCurve: [], sectionMarkers: [], aspectRatio: "9:16" },
+      globals: {
+        totalDurationS: 10,
+        tempoBpm: 120,
+        timeSignature: "4/4",
+        energyCurve: [],
+        sectionMarkers: [],
+        aspectRatio: "9:16",
+      },
       slots: [{ start_s: 0, duration_s: 5 }],
     };
     expect(cutListSchema.safeParse(bad).success).toBe(false);
@@ -127,7 +158,14 @@ describe("Contract tests — cutList camelCase invariant", () => {
 
   it("accepts camelCase keys", () => {
     const good = {
-      globals: { totalDurationS: 10, tempoBpm: 120, timeSignature: "4/4", energyCurve: [], sectionMarkers: [], aspectRatio: "9:16" },
+      globals: {
+        totalDurationS: 10,
+        tempoBpm: 120,
+        timeSignature: "4/4",
+        energyCurve: [],
+        sectionMarkers: [],
+        aspectRatio: "9:16",
+      },
       slots: [
         {
           index: 0,
@@ -153,7 +191,14 @@ describe("Contract tests — cutList camelCase invariant", () => {
 
   it("rejects extra fields when .strict()", () => {
     const withExtra = {
-      globals: { totalDurationS: 10, tempoBpm: 120, timeSignature: "4/4", energyCurve: [], sectionMarkers: [], aspectRatio: "9:16" },
+      globals: {
+        totalDurationS: 10,
+        tempoBpm: 120,
+        timeSignature: "4/4",
+        energyCurve: [],
+        sectionMarkers: [],
+        aspectRatio: "9:16",
+      },
       slots: [
         {
           index: 0,

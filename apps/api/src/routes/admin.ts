@@ -6,7 +6,7 @@
  * All routes require admin role (requireAdmin middleware).
  */
 
-import { and, count, desc, eq, gte, lt, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, lt } from "drizzle-orm";
 import { FastifyInstance } from "fastify";
 import { db } from "../db";
 import { adminAudit, projects, renders, userEvents, users } from "../db/schema";
@@ -20,7 +20,6 @@ export async function adminRoutes(app: FastifyInstance) {
   app.get("/overview", async () => {
     const now = new Date();
     const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
     const [totalUsers] = await db.select({ count: count() }).from(users);
     const [activeUsers] = await db
@@ -93,7 +92,12 @@ export async function adminRoutes(app: FastifyInstance) {
     const [renderCount] = await db
       .select({ count: count() })
       .from(renders)
-      .where(eq(renders.projectId, sql`(SELECT id FROM projects WHERE user_id = ${userId})`));
+      .where(
+        inArray(
+          renders.projectId,
+          db.select({ id: projects.id }).from(projects).where(eq(projects.userId, userId)),
+        ),
+      );
 
     return {
       user,

@@ -2,7 +2,7 @@
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
 import "./env";
-import { API_ERROR_CODES, type ApiErrorCode, isApiErrorCode } from "@ai-video-editor/shared-types";
+import { type ApiErrorCode, isApiErrorCode } from "@ai-video-editor/shared-types";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";

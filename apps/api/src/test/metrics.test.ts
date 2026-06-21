@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
 
 afterEach(() => {
@@ -45,6 +45,21 @@ describe("Metrics Endpoint", () => {
       headers: { authorization: "Bearer secret-token-123" },
     });
     expect(res3.statusCode).toBe(200);
+  });
+
+  it("GET /api/metrics fails closed when METRICS_AUTH_TOKEN is empty", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("METRICS_AUTH_TOKEN", "");
+
+    vi.resetModules();
+    const { metricsRoutes } = await import("../routes/metrics");
+    const fastify = await import("fastify");
+    const testApp = fastify.default({ logger: false });
+    await testApp.register(metricsRoutes, { prefix: "/api/metrics" });
+
+    const res = await testApp.inject({ method: "GET", url: "/api/metrics" });
+    expect(res.statusCode).toBe(401);
+    expect(JSON.parse(res.body).code).toBe("UNAUTHORIZED");
   });
 });
 

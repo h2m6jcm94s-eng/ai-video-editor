@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
 import { db } from "../db";
+import * as cryptoLib from "../lib/crypto";
 
 describe("Settings Routes", () => {
   beforeEach(() => {
@@ -65,7 +66,9 @@ describe("Settings Routes", () => {
 
   it("DELETE /api/settings/provider-keys/:provider deletes a key", async () => {
     vi.mocked(db.delete).mockReturnValueOnce({
-      where: vi.fn().mockResolvedValueOnce(undefined),
+      where: vi.fn().mockReturnValueOnce({
+        returning: vi.fn().mockResolvedValueOnce([mockKeyRow]),
+      }),
     } as any);
 
     const app = await buildApp();
@@ -75,6 +78,22 @@ describe("Settings Routes", () => {
     });
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.body).success).toBe(true);
+  });
+
+  it("DELETE /api/settings/provider-keys/:provider returns 404 when key does not exist", async () => {
+    vi.mocked(db.delete).mockReturnValueOnce({
+      where: vi.fn().mockReturnValueOnce({
+        returning: vi.fn().mockResolvedValueOnce([]),
+      }),
+    } as any);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/api/settings/provider-keys/anthropic",
+    });
+    expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.body).code).toBe("NOT_FOUND");
   });
 
   it("POST /api/settings/provider-keys/test returns 404 when key not found", async () => {
@@ -105,7 +124,10 @@ describe("Settings Routes", () => {
 
   it("POST /api/settings/provider-keys/test succeeds for anthropic", async () => {
     vi.mocked(db.query.providerKeys.findFirst).mockResolvedValueOnce(mockKeyRow);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValueOnce("") }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValueOnce("") }),
+    );
 
     const app = await buildApp();
     const res = await app.inject({
@@ -122,7 +144,10 @@ describe("Settings Routes", () => {
       ...mockKeyRow,
       provider: "openai",
     });
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValueOnce("") }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({ ok: true, text: vi.fn().mockResolvedValueOnce("") }),
+    );
 
     const app = await buildApp();
     const res = await app.inject({
@@ -136,7 +161,10 @@ describe("Settings Routes", () => {
 
   it("POST /api/settings/provider-keys/test handles provider error response", async () => {
     vi.mocked(db.query.providerKeys.findFirst).mockResolvedValueOnce(mockKeyRow);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({ ok: false, text: vi.fn().mockResolvedValueOnce("invalid key") }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({ ok: false, text: vi.fn().mockResolvedValueOnce("invalid key") }),
+    );
 
     const app = await buildApp();
     const res = await app.inject({
@@ -146,5 +174,42 @@ describe("Settings Routes", () => {
     });
     expect(res.statusCode).toBe(400);
     expect(JSON.parse(res.body).code).toBe("PROVIDER_INVALID_RESPONSE");
+  });
+
+  it("POST /api/settings/provider-keys/test sanitizes upstream errors and does not echo the key", async () => {
+    vi.mocked(db.query.providerKeys.findFirst).mockResolvedValueOnce(mockKeyRow);
+    const leakedBody = JSON.stringify({ error: "sk-secret-key-leaked" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        text: vi.fn().mockResolvedValueOnce(leakedBody),
+      }),
+    );
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/settings/provider-keys/test",
+      payload: { provider: "anthropic" },
+    });
+    expect(res.statusCode).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.code).toBe("PROVIDER_INVALID_RESPONSE");
+    expect(body.error).not.toContain("sk-secret-key-leaked");
+  });
+
+  it("POST /api/settings/provider-keys rejects invalid encrypted key format", async () => {
+    vi.spyOn(cryptoLib, "encrypt").mockReturnValueOnce("not base64!");
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/settings/provider-keys",
+      payload: { provider: "anthropic", key: "sk-test-key" },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(JSON.parse(res.body).code).toBe("VALIDATION_ERROR");
   });
 });

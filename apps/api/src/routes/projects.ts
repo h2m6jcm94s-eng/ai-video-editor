@@ -1,12 +1,6 @@
 ﻿// Copyright (c) 2025 Devayan Dewri. All rights reserved.
-import type {
-  ApiErrorCode,
-  CutList,
-  EditMode,
-  ProjectStatus,
-  StyleTier,
-} from "@ai-video-editor/shared-types";
-import { API_ERROR_CODES, isApiErrorCode } from "@ai-video-editor/shared-types";
+import type { ApiErrorCode, CutList, EditMode, StyleTier } from "@ai-video-editor/shared-types";
+import { isApiErrorCode } from "@ai-video-editor/shared-types";
 import { and, desc, eq, inArray } from "drizzle-orm";
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
@@ -21,7 +15,7 @@ import { buildInitialCutList } from "../lib/cutlist";
 import { sendError } from "../lib/errors";
 import { slidingWindowCheck } from "../lib/rateLimit";
 import { validatePromptGuardrails } from "../middleware/guardrails";
-import { enforceTokenBudget, getUsageForUser, incrementTokenUsage } from "../middleware/tokenBudget";
+import { enforceTokenBudget, incrementTokenUsage } from "../middleware/tokenBudget";
 import {
   createProjectSchema,
   patchProjectSchema,
@@ -37,6 +31,9 @@ export async function projectRoutes(app: FastifyInstance) {
   // List projects for user
   app.get("/", async (request, reply) => {
     const userId = request.userId;
+    if (!userId) {
+      return sendError(reply, 401, "Unauthorized", "UNAUTHORIZED");
+    }
     const cacheKey = `projects:list:${userId}`;
     const cached = await cacheGet<typeof userProjects>(cacheKey);
     if (cached) {
@@ -57,6 +54,9 @@ export async function projectRoutes(app: FastifyInstance) {
   app.post("/", { preHandler: validateBody(createProjectSchema) }, async (request, reply) => {
     const body = request.validatedBody as { name: string; styleTier?: StyleTier; mode?: EditMode };
     const userId = request.userId;
+    if (!userId) {
+      return sendError(reply, 401, "Unauthorized", "UNAUTHORIZED");
+    }
 
     const [project] = await db
       .insert(projects)
@@ -158,6 +158,9 @@ export async function projectRoutes(app: FastifyInstance) {
   app.patch("/:id/cutlist", { preHandler: validateBody(updateCutlistSchema) }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = request.userId;
+    if (!userId) {
+      return sendError(reply, 401, "Unauthorized", "UNAUTHORIZED");
+    }
     const project = await db.query.projects.findFirst({
       where: eq(projects.id, id),
     });
@@ -186,6 +189,7 @@ export async function projectRoutes(app: FastifyInstance) {
       await sendCutlistApprovedSignal(activeRender.workflowId, body.cutList);
     }
 
+    await cacheDel(`projects:list:${userId}`);
     return { project: updated };
   });
 
@@ -279,10 +283,14 @@ export async function projectRoutes(app: FastifyInstance) {
         async (request, reply) => {
           if (process.env.E2E === "1") return;
           const userId = request.userId;
+          if (!userId) {
+            return sendError(reply, 401, "Unauthorized", "UNAUTHORIZED");
+          }
           const rl = await slidingWindowCheck({
             key: `rl:prompt:${userId}`,
             limit: 10,
             windowMs: 60_000,
+            failClosed: true,
           });
           if (!rl.allowed) {
             return sendError(
@@ -358,6 +366,8 @@ export async function projectRoutes(app: FastifyInstance) {
           .where(eq(projects.id, id))
           .returning();
 
+        await cacheDel(`projects:list:${userId}`);
+
         return {
           project: updated,
           diff: result.diff,
@@ -387,6 +397,9 @@ export async function projectRoutes(app: FastifyInstance) {
   app.delete("/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = request.userId;
+    if (!userId) {
+      return sendError(reply, 401, "Unauthorized", "UNAUTHORIZED");
+    }
     const project = await db.query.projects.findFirst({
       where: eq(projects.id, id),
     });

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as tokens from "../lib/tokens";
 import { validateAIResponse } from "../middleware/guardrails";
 import { applyPromptEdit, transcribeAudio } from "../services/ai";
 
@@ -748,6 +749,84 @@ describe("AI Service", () => {
       } catch (err: any) {
         expect(err.code).toBe("CUTLIST_SCHEMA_DRIFT");
       }
+    });
+
+    it("rejects invalid JSON Patch operations", async () => {
+      vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+      vi.stubEnv("OPENAI_API_KEY", "sk-openai-test");
+      vi.stubEnv("AI_PROVIDER", "claude");
+      vi.mocked(fetch).mockResolvedValueOnce(
+        makeClaudeResponse([{ op: "invalid", path: "/slots/0" }], "Bad op") as any,
+      );
+
+      await expect(
+        applyPromptEdit({ userId: "user-1", prompt: "test", cutList: mockCutList }),
+      ).rejects.toMatchObject({ code: "INVALID_PATCH" });
+    });
+
+    it("retries on network timeout (AbortError) and eventually succeeds", async () => {
+      vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+      vi.stubEnv("AI_PROVIDER", "claude");
+
+      await withInstantRetries(async () => {
+        vi.mocked(fetch)
+          .mockRejectedValueOnce(new DOMException("Timeout", "AbortError"))
+          .mockResolvedValueOnce(
+            makeClaudeResponse(
+              [{ op: "replace", path: "/slots/0/transitionIn", value: "fade" }],
+              "Added fade",
+            ) as any,
+          );
+
+        const result = await applyPromptEdit({ userId: "user-1", prompt: "fade", cutList: mockCutList });
+        expect(result.explanation).toBe("Added fade");
+        expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    it("truncates large cutlists and asset lists to fit token budget", async () => {
+      vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-test");
+      vi.stubEnv("AI_PROVIDER", "claude");
+
+      let tokenCallCount = 0;
+      const countTokensSpy = vi.spyOn(tokens, "countTokens").mockImplementation(async () => {
+        tokenCallCount++;
+        // First budget check exceeds the limit; after dropping the beat grid,
+        // subsequent checks fit.
+        return tokenCallCount === 1 ? 10_000 : 100;
+      });
+
+      const bigCutList = {
+        ...mockCutList,
+        slots: Array.from({ length: 200 }, (_, i) => ({ ...mockCutList.slots[0], index: i })),
+      };
+      const bigAssets = Array.from({ length: 100 }, (_, i) => ({
+        id: `asset-${i}`,
+        type: "clip",
+        filename: `clip${i}.mp4`,
+        durationSec: 10,
+      }));
+
+      vi.mocked(fetch).mockResolvedValueOnce(
+        makeClaudeResponse(
+          [{ op: "replace", path: "/slots/0/transitionIn", value: "fade" }],
+          "Added fade",
+        ) as any,
+      );
+
+      await applyPromptEdit({
+        userId: "user-1",
+        prompt: "fade first clip",
+        cutList: bigCutList,
+        assets: bigAssets,
+        beatGrid: { beats: Array.from({ length: 500 }, (_, i) => i) },
+      });
+
+      const body = JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string);
+      const userContent = body.messages[0].content as string;
+      expect(userContent).not.toContain("Beat Grid");
+      expect(userContent).toContain('"_truncated": true');
+      countTokensSpy.mockRestore();
     });
   });
 

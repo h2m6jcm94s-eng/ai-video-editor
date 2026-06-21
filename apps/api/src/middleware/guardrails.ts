@@ -11,7 +11,7 @@
 import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from "fastify";
 import { sendError } from "../lib/errors";
 import { logger as defaultLogger } from "../lib/logger";
-import { guardrailsBlocksTotal, guardrailsOutputBlocksTotal } from "../lib/metrics";
+import { guardrailsBlocksTotal } from "../lib/metrics";
 
 function getGuardrailsConfig() {
   return {

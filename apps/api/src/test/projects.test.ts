@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
 import { db } from "../db";
+import * as cache from "../lib/cache";
 import { getStyleAnalysisFromWorkflow } from "../services/temporal";
 
 describe("Project Routes", () => {
@@ -215,5 +216,36 @@ describe("Project Routes", () => {
     expect(capture.styleTier).toBe("with_effects");
     const validTiers = ["cuts_only", "color_grade", "with_text", "with_effects", "full_remix"];
     expect(validTiers).toContain(capture.styleTier);
+  });
+
+  it("invalidates the project list cache on create, update, and delete", async () => {
+    const cacheDelSpy = vi.spyOn(cache, "cacheDel").mockResolvedValue(undefined);
+
+    vi.mocked(db.insert).mockReturnValueOnce({
+      values: vi.fn().mockReturnValueOnce({
+        returning: vi.fn().mockResolvedValueOnce([mockProject]),
+      }),
+    } as any);
+
+    const app = await buildApp();
+    await app.inject({ method: "POST", url: "/api/projects", payload: { name: "Test" } });
+    expect(cacheDelSpy).toHaveBeenCalledWith("projects:list:test-user-id");
+
+    vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(mockProject);
+    vi.mocked(db.update).mockReturnValueOnce({
+      set: vi.fn().mockReturnValueOnce({
+        where: vi.fn().mockReturnValueOnce({
+          returning: vi.fn().mockResolvedValueOnce([{ ...mockProject, name: "Updated" }]),
+        }),
+      }),
+    } as any);
+    await app.inject({ method: "PATCH", url: "/api/projects/proj-1", payload: { name: "Updated" } });
+    expect(cacheDelSpy).toHaveBeenCalledWith("projects:list:test-user-id");
+
+    vi.mocked(db.delete).mockReturnValueOnce({
+      where: vi.fn().mockResolvedValueOnce(undefined),
+    } as any);
+    await app.inject({ method: "DELETE", url: "/api/projects/proj-1" });
+    expect(cacheDelSpy).toHaveBeenCalledWith("projects:list:test-user-id");
   });
 });

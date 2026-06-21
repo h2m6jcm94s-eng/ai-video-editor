@@ -18,6 +18,16 @@ interface UseAutosaveOptions {
   debounceMs?: number;
 }
 
+const CONFLICT_CODES = new Set(["CONFLICT", "CONCURRENT_EDIT", "PROJECT_LOCKED", "RENDER_ALREADY_RUNNING"]);
+
+function isConflict(error: APIError | Error): boolean {
+  if (error instanceof APIError) {
+    if (error.status === 409) return true;
+    if (CONFLICT_CODES.has(error.code)) return true;
+  }
+  return false;
+}
+
 export function useAutosave({ projectId, cutList, onRollback, debounceMs = 1500 }: UseAutosaveOptions) {
   const api = useApi();
   const [state, setState] = useState<SaveState>({ status: "idle" });
@@ -47,7 +57,7 @@ export function useAutosave({ projectId, cutList, onRollback, debounceMs = 1500 
       } catch (err) {
         const error = err instanceof APIError ? err : err instanceof Error ? err : new Error("Save failed");
         setState({ status: "error", err: error });
-        if (lastSavedRef.current) {
+        if (isConflict(error) && lastSavedRef.current) {
           onRollback(lastSavedRef.current);
         }
       }
@@ -72,7 +82,7 @@ export function useAutosave({ projectId, cutList, onRollback, debounceMs = 1500 
       .catch((err) => {
         const error = err instanceof APIError ? err : err instanceof Error ? err : new Error("Save failed");
         setState({ status: "error", err: error });
-        if (lastSavedRef.current) {
+        if (isConflict(error) && lastSavedRef.current) {
           onRollback(lastSavedRef.current);
         }
       });

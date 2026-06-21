@@ -32,7 +32,7 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply) 
     const existing = await getUserByClerkId(`e2e-${testUserId}`);
     const localUser = existing ?? (await upsertUser(`e2e-${testUserId}`, "e2e@test.local", "E2E Test User"));
     request.userId = localUser.id;
-    (request as any).auth = { userId: `e2e-${testUserId}` };
+    request.auth = { userId: `e2e-${testUserId}` } as FastifyRequest["auth"];
     return;
   }
   // ---- end bypass ----

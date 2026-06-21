@@ -172,8 +172,13 @@ export function createAPI(getToken: TokenGetter) {
       report: (
         projectId: string,
         data: { x: number; y: number; name: string },
+        init?: RequestInit,
       ): Promise<{ success: boolean }> =>
-        fetchJSON(`/presence/${projectId}/presence`, { method: "POST", body: JSON.stringify(data) }),
+        fetchJSON(`/presence/${projectId}/presence`, {
+          method: "POST",
+          body: JSON.stringify(data),
+          ...init,
+        }),
       get: (
         projectId: string,
       ): Promise<{ users: Array<{ userId: string; name: string; color: string; x: number; y: number }> }> =>

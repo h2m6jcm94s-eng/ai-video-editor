@@ -99,3 +99,18 @@ def report_user_event(
 ) -> bool:
     """Convenience function using default reporter."""
     return UserEventReporter().report(user_id, code, message, details, route)
+
+
+async def areport_user_event(
+    user_id: str,
+    code: str,
+    message: str,
+    details: Optional[dict] = None,
+    route: Optional[str] = None,
+) -> bool:
+    """Async convenience function using default reporter.
+
+    Use this from async worker contexts to avoid blocking the event loop with
+    the synchronous ``httpx.Client``.
+    """
+    return await UserEventReporter().areport(user_id, code, message, details, route)

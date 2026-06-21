@@ -55,6 +55,19 @@ const assetCompleteSchema = z
   })
   .strict();
 
+const metadataPatchSchema = z
+  .object({
+    metadata: z
+      .record(z.unknown())
+      .refine((val) => JSON.stringify(val).length <= 65536, {
+        message: "Metadata payload too large",
+      })
+      .refine((val) => Object.keys(val).length <= 100, {
+        message: "Metadata has too many keys",
+      }),
+  })
+  .strict();
+
 export async function internalRoutes(app: FastifyInstance) {
   app.addHook("preHandler", requireInternalToken);
 
@@ -196,10 +209,13 @@ export async function internalRoutes(app: FastifyInstance) {
   // Merge metadata into an existing asset (used by workers for segmentation, etc.)
   app.patch(
     "/api/internal/assets/:assetId/metadata",
-    { preHandler: requireInternalToken },
+    {
+      preHandler: [requireInternalToken, validateBody(metadataPatchSchema)],
+      bodyLimit: 256 * 1024,
+    },
     async (request, reply) => {
       const { assetId } = request.params as { assetId: string };
-      const body = request.body as { metadata?: Record<string, unknown> };
+      const body = request.validatedBody as z.infer<typeof metadataPatchSchema>;
 
       const asset = await db.query.assets.findFirst({
         where: eq(assets.id, assetId),

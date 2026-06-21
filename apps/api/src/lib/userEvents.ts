@@ -106,7 +106,7 @@ export async function recordUserEvent(input: RecordEventInput): Promise<void> {
         userId,
         code,
         message,
-        details: details ? JSON.stringify(details) : null,
+        details: details ?? null,
         route: route ?? null,
         dropped,
       })

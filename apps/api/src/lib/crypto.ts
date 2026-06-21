@@ -8,7 +8,7 @@
  * Key must be 32 bytes (256 bits) — hex-encoded in PROVIDER_KEK env var.
  */
 
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
 
 const KEK_HEX = process.env.PROVIDER_KEK;
 
@@ -18,9 +18,7 @@ function getKey(): Buffer {
   }
   const key = Buffer.from(KEK_HEX, "hex");
   if (key.length !== 32) {
-    throw new Error(
-      `PROVIDER_KEK must be exactly 32 bytes (64 hex chars), got ${key.length} bytes`
-    );
+    throw new Error(`PROVIDER_KEK must be exactly 32 bytes (64 hex chars), got ${key.length} bytes`);
   }
   return key;
 }

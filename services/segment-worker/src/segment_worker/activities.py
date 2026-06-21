@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import os
 import tempfile
 from typing import Any
@@ -107,6 +108,12 @@ def _patch_source_segment_metadata(
     resp.raise_for_status()
 
 
+# Guardrails for worker-supplied mask payloads.
+_MAX_MASK_COUNT = 100
+_MAX_MASK_B64_BYTES = 50 * 1024 * 1024
+_MAX_TOTAL_MASK_BYTES = 200 * 1024 * 1024
+
+
 def _persist_masks_as_assets(
     project_id: str,
     source_asset_id: str,
@@ -116,9 +123,26 @@ def _persist_masks_as_assets(
     scores: list[float] | None,
 ) -> list[str]:
     """Create asset rows for each mask, upload PNGs, complete them, and link back."""
+    # Guard against abuse / malformed worker payloads.
+    if len(b64_masks) > _MAX_MASK_COUNT:
+        raise ValueError(f"Too many masks: {len(b64_masks)}")
+
+    decoded_masks: list[bytes] = []
+    total_bytes = 0
+    for b64 in b64_masks:
+        if len(b64) > _MAX_MASK_B64_BYTES:
+            raise ValueError("Individual mask payload exceeds size limit")
+        try:
+            png_bytes = base64.b64decode(b64)
+        except binascii.Error as exc:
+            raise ValueError(f"Invalid base64 mask data: {exc}") from exc
+        total_bytes += len(png_bytes)
+        if total_bytes > _MAX_TOTAL_MASK_BYTES:
+            raise ValueError("Total mask payload exceeds size limit")
+        decoded_masks.append(png_bytes)
+
     mask_asset_ids: list[str] = []
-    for idx, b64 in enumerate(b64_masks):
-        png_bytes = base64.b64decode(b64)
+    for idx, png_bytes in enumerate(decoded_masks):
         info = _create_mask_asset(project_id, source_asset_id, idx)
         _complete_mask_asset(
             info["assetId"],

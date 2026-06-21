@@ -238,4 +238,22 @@ describe("useSSE", () => {
     await waitFor(() => expect(shouldClose).toHaveBeenCalledWith({ type: "complete" }));
     expect(es.readyState).toBe(FakeEventSource.CLOSED);
   });
+
+  it("clears reconnect timeout on cleanup", async () => {
+    vi.useFakeTimers();
+    const onEvent = vi.fn();
+    const { unmount } = renderHook(() =>
+      useSSE({
+        url: "http://localhost/api/progress/job-1/events",
+        onEvent,
+        maxReconnectAttempts: 3,
+      }),
+    );
+
+    instances[0].onerror?.call(instances[0], new Event("error"));
+    unmount();
+
+    await vi.advanceTimersByTimeAsync(100_000);
+    expect(instances.length).toBe(1);
+  });
 });

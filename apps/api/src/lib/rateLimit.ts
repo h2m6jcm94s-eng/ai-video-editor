@@ -8,11 +8,9 @@
  * request timestamp and evicts entries outside the window.
  */
 
-import Redis from "ioredis";
 import { logger } from "./logger";
 import { slidingWindowRejectsTotal } from "./metrics";
-
-const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
+import { redis } from "./redis";
 
 export interface RateLimitResult {
   allowed: boolean;
@@ -31,6 +29,11 @@ interface SlidingWindowOpts {
   key: string;
   /** Cost of this request (default 1) */
   cost?: number;
+  /**
+   * When true, Redis failures reject the request instead of allowing it.
+   * Use for expensive or mutating endpoints (AI prompts, uploads, etc.).
+   */
+  failClosed?: boolean;
 }
 
 /**
@@ -46,7 +49,7 @@ interface SlidingWindowOpts {
  *      return allowed=false with resetMs = oldest remaining entry + windowMs
  */
 export async function slidingWindowCheck(opts: SlidingWindowOpts): Promise<RateLimitResult> {
-  const { limit, windowMs, key, cost = 1 } = opts;
+  const { limit, windowMs, key, cost = 1, failClosed = false } = opts;
   const now = Date.now();
   const windowStart = now - windowMs;
 
@@ -86,9 +89,10 @@ export async function slidingWindowCheck(opts: SlidingWindowOpts): Promise<RateL
       windowMs,
     };
   } catch (e) {
-    logger.error({ err: e, key }, "Sliding window rate limit check failed");
-    // Fail-open: allow request if Redis is down
-    return { allowed: true, remaining: 0, resetMs: now, limit, windowMs };
+    logger.error({ err: e, key, failClosed }, "Sliding window rate limit check failed");
+    // Fail-open by default for read-only/cheap endpoints; fail-closed for
+    // expensive/mutating endpoints when requested.
+    return { allowed: !failClosed, remaining: 0, resetMs: now, limit, windowMs };
   }
 }
 

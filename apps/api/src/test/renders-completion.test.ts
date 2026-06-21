@@ -5,6 +5,7 @@ import { db } from "../db";
 describe("Render completion webhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(db.query.projects.findFirst).mockResolvedValue(mockProject as any);
   });
 
   const mockRender = {
@@ -15,6 +16,13 @@ describe("Render completion webhook", () => {
     previewAssetId: null,
     errorMessage: null,
     completedAt: null,
+  };
+
+  const mockProject = {
+    id: "proj-1",
+    userId: "test-user-id",
+    name: "Test",
+    status: "rendering",
   };
 
   it("POST /api/renders/:jobId/complete marks job and project complete", async () => {
@@ -79,6 +87,20 @@ describe("Render completion webhook", () => {
 
   it("POST /api/renders/:jobId/complete returns 404 for missing render", async () => {
     vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(undefined);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/renders/job-1/complete",
+      payload: { status: "complete" },
+      headers: { "x-internal-token": "test-internal-token-1234567890abcdef" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("POST /api/renders/:jobId/complete returns 404 when project is missing", async () => {
+    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(mockRender);
+    vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(undefined);
 
     const app = await buildApp();
     const res = await app.inject({

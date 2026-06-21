@@ -170,6 +170,12 @@ export const slidingWindowRejectsTotal = getOrCreateCounter({
   labelNames: ["route"],
 });
 
+export const userEventRecordFailuresTotal = getOrCreateCounter({
+  name: "ave_user_event_record_failures_total",
+  help: "Total failures to persist per-user error events",
+  labelNames: ["code"],
+});
+
 // ─── Startup / Health ───────────────────────────────────────────────────────
 
 export const startupTimestamp = getOrCreateGauge({

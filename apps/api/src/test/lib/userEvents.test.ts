@@ -7,27 +7,31 @@ describe("recordUserEvent", () => {
     vi.clearAllMocks();
   });
 
-  it("inserts a new user event", async () => {
+  it("inserts a new user event with raw details", async () => {
     vi.mocked(db.query.userEvents.findFirst).mockResolvedValueOnce(undefined);
     vi.mocked(db.select).mockReturnValueOnce({
       from: vi.fn().mockReturnValueOnce({
         where: vi.fn().mockReturnValueOnce([{ unackedCount: 0 }]),
       }),
     } as any);
-    vi.mocked(db.insert).mockReturnValueOnce({
-      values: vi.fn().mockReturnValueOnce({
-        returning: vi.fn().mockResolvedValueOnce([{ id: "evt-1" }]),
-      }),
-    } as any);
+    const valuesFn = vi.fn().mockReturnValueOnce({
+      returning: vi.fn().mockResolvedValueOnce([{ id: "evt-1" }]),
+    });
+    vi.mocked(db.insert).mockReturnValueOnce({ values: valuesFn } as any);
 
     await recordUserEvent({
       userId: "user-1",
       code: "INTERNAL_ERROR",
       message: "Something went wrong",
       route: "/api/projects",
+      details: { field: "value", nested: { count: 1 } },
     });
 
-    expect(db.insert).toHaveBeenCalled();
+    expect(valuesFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: { field: "value", nested: { count: 1 } },
+      }),
+    );
   });
 
   it("increments occurrence_count on duplicate within 5min", async () => {

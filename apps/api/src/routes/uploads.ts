@@ -12,14 +12,12 @@ import { sendError } from "../lib/errors";
 import { presignedUploadSchema, validateBody } from "../middleware/validate";
 import {
   abortMultipartUpload,
-  BUCKET,
   completeMultipartUpload,
   createMultipartUpload,
   createPresignedDownloadUrl,
   createPresignedUploadUrl,
   headObject,
   presignUploadPart,
-  s3,
 } from "../services/storage";
 import { startAnalyzeStyleWorkflow, startProbeWorkflow } from "../services/temporal";
 

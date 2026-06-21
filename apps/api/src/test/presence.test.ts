@@ -1,9 +1,18 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
+import { db } from "../db";
 
 describe("Presence Routes", () => {
+  const mockProject = {
+    id: "proj-1",
+    userId: "test-user-id",
+    name: "Test Project",
+    status: "uploading",
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(db.query.projects.findFirst).mockResolvedValue(mockProject as any);
   });
 
   it("POST /api/presence/:id/presence reports cursor position", async () => {
@@ -83,5 +92,31 @@ describe("Presence Routes", () => {
     });
     expect(res.statusCode).toBe(200);
     // Entries are not stale yet in fast unit tests, but the cleanup code path runs
+  });
+
+  it("POST returns 404 for missing project", async () => {
+    vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(undefined);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/presence/missing-proj/presence",
+      payload: { x: 5, y: 5, name: "Ghost" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("GET returns 403 for other user's project", async () => {
+    vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce({
+      ...mockProject,
+      userId: "other-user-id",
+    } as any);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/presence/proj-1/presence",
+    });
+    expect(res.statusCode).toBe(403);
   });
 });

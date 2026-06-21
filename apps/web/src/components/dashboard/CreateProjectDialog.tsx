@@ -6,6 +6,7 @@ import { createProjectSchema, EDIT_MODE, STYLE_TIER } from "@ai-video-editor/sha
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -43,6 +44,7 @@ const MODE_LABELS: Record<(typeof EDIT_MODE)[number], string> = {
 export function CreateProjectDialog() {
   const router = useRouter();
   const api = useApi();
+  const [open, setOpen] = useState(false);
 
   const {
     register,
@@ -69,6 +71,7 @@ export function CreateProjectDialog() {
     try {
       const res = await api.projects.create(data);
       reset();
+      setOpen(false);
       router.push(`/editor/${res.project.id}`);
     } catch (err: unknown) {
       if (err instanceof APIError && mapApiValidationErrors(err, setError)) {
@@ -80,7 +83,7 @@ export function CreateProjectDialog() {
   };
 
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button
           size="sm"
@@ -150,16 +153,15 @@ export function CreateProjectDialog() {
           </div>
 
           <div className="flex justify-end gap-3">
-            <DialogTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={isSubmitting}
-                className="border-glass-strong bg-glass hover:bg-glass-strong text-glass-muted"
-              >
-                Cancel
-              </Button>
-            </DialogTrigger>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isSubmitting}
+              onClick={() => setOpen(false)}
+              className="border-glass-strong bg-glass hover:bg-glass-strong text-glass-muted"
+            >
+              Cancel
+            </Button>
             <Button
               type="submit"
               disabled={!isValid || isSubmitting}

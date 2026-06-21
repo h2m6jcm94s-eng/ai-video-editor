@@ -9,7 +9,7 @@
  * - GET /api/notifications/events — SSE stream for live updates
  */
 
-import { and, count, desc, eq, lt } from "drizzle-orm";
+import { and, desc, eq, lt } from "drizzle-orm";
 import { FastifyInstance } from "fastify";
 import Redis from "ioredis";
 import { z } from "zod";
@@ -19,8 +19,6 @@ import { sendError } from "../lib/errors";
 import { requireInternalToken } from "../middleware/requireInternalToken";
 import { validateBody } from "../middleware/validate";
 import { publishNotification } from "../services/queue";
-
-const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
 
 export async function notificationRoutes(app: FastifyInstance) {
   // SSE endpoint for live notification updates
@@ -181,7 +179,7 @@ export async function notificationRoutes(app: FastifyInstance) {
       preHandler: [requireInternalToken, validateBody(internalEventSchema)],
       config: { rateLimit: { max: 60, timeWindow: "1 minute" } },
     },
-    async (request, reply) => {
+    async (request) => {
       const body = request.validatedBody as z.infer<typeof internalEventSchema>;
 
       await db.insert(userEvents).values({

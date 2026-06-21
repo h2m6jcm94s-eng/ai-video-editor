@@ -1,8 +1,11 @@
 // Copyright (c) 2025 Devayan Dewri. All rights reserved.
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
+import { eq } from "drizzle-orm";
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { db } from "../db";
+import { projects } from "../db/schema";
 import { sendError } from "../lib/errors";
 
 const presenceSchema = z
@@ -64,6 +67,17 @@ export async function presenceRoutes(app: FastifyInstance) {
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const userId = request.userId;
+      if (!userId) {
+        return sendError(reply, 401, "Sign in required", "UNAUTHORIZED");
+      }
+
+      const project = await db.query.projects.findFirst({ where: eq(projects.id, id) });
+      if (!project) {
+        return sendError(reply, 404, "Project not found", "NOT_FOUND");
+      }
+      if (project.userId !== userId) {
+        return sendError(reply, 403, "Forbidden", "FORBIDDEN");
+      }
 
       const parsed = presenceSchema.safeParse(request.body);
       if (!parsed.success) {
@@ -94,6 +108,18 @@ export async function presenceRoutes(app: FastifyInstance) {
   app.get("/:id/presence", async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = request.userId;
+    if (!userId) {
+      return sendError(reply, 401, "Sign in required", "UNAUTHORIZED");
+    }
+
+    const project = await db.query.projects.findFirst({ where: eq(projects.id, id) });
+    if (!project) {
+      return sendError(reply, 404, "Project not found", "NOT_FOUND");
+    }
+    if (project.userId !== userId) {
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
+    }
+
     cleanupPresence(id);
 
     const projectMap = presenceStore.get(id);

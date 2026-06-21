@@ -1,4 +1,5 @@
 ﻿// Copyright (c) 2025 Devayan Dewri. All rights reserved.
+import type { ApiErrorCode } from "@ai-video-editor/shared-types";
 import { and, desc, eq, inArray } from "drizzle-orm";
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
@@ -120,7 +121,7 @@ export async function renderRoutes(app: FastifyInstance) {
           reply,
           startResult.status,
           startResult.message,
-          startResult.code as any,
+          startResult.code as ApiErrorCode,
           startResult.extra,
         );
       }
@@ -274,6 +275,14 @@ export async function renderRoutes(app: FastifyInstance) {
       const job = await db.query.renders.findFirst({ where: eq(renders.id, jobId) });
       if (!job) {
         return sendError(reply, 404, "Job not found", "NOT_FOUND");
+      }
+
+      // Sanity-check that the render belongs to a real project before mutating status.
+      const project = await db.query.projects.findFirst({
+        where: eq(projects.id, job.projectId),
+      });
+      if (!project) {
+        return sendError(reply, 404, "Project not found", "NOT_FOUND");
       }
 
       const [updated] = await db

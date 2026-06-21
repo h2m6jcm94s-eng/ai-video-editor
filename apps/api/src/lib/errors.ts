@@ -4,6 +4,8 @@
 
 import type { ApiErrorCode } from "@ai-video-editor/shared-types";
 import type { FastifyReply } from "fastify";
+import { logger } from "./logger";
+import { userEventRecordFailuresTotal } from "./metrics";
 import { recordUserEvent } from "./userEvents";
 
 export interface ApiError {
@@ -39,8 +41,14 @@ export function sendError(
         message: error,
         details,
         route: req?.routeOptions?.url ?? req?.url,
-      }).catch(() => {
-        // Swallow — event recording must not break the response
+      }).catch((err) => {
+        // Event recording must not break the response, but failures must be observable.
+        userEventRecordFailuresTotal.inc({ code });
+        const log = req?.log ?? logger;
+        log.warn(
+          { err, userId, code, route: req?.routeOptions?.url ?? req?.url },
+          "Failed to record user error event",
+        );
       });
     }
   } catch {

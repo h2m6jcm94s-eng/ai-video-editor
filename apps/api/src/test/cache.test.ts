@@ -1,6 +1,19 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { cacheGet, cacheSet, cacheDel, cacheInvalidatePattern } from "../lib/cache";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cacheDel, cacheGet, cacheInvalidatePattern, cacheSet } from "../lib/cache";
 import { redis } from "../lib/redis";
+
+function makeStream(keys: string[]) {
+  const stream = {
+    on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+      if (event === "data") {
+        handler(keys);
+      } else if (event === "end") {
+        handler();
+      }
+    }),
+  };
+  return stream as unknown as ReturnType<typeof redis.scanStream>;
+}
 
 describe("Cache Helpers", () => {
   beforeEach(() => {
@@ -43,18 +56,31 @@ describe("Cache Helpers", () => {
     expect(redis.del).toHaveBeenCalledWith("my:key");
   });
 
-  it("cacheInvalidatePattern deletes matching keys", async () => {
-    vi.mocked(redis.keys).mockResolvedValueOnce(["a:1", "a:2"]);
+  it("cacheInvalidatePattern deletes matching keys via SCAN stream", async () => {
+    vi.mocked(redis.scanStream).mockReturnValueOnce(makeStream(["a:1", "a:2"]));
     vi.mocked(redis.del).mockResolvedValueOnce(2);
     await cacheInvalidatePattern("a:*");
-    expect(redis.keys).toHaveBeenCalledWith("a:*");
+    expect(redis.scanStream).toHaveBeenCalledWith({ match: "a:*", count: 100 });
     expect(redis.del).toHaveBeenCalledWith("a:1", "a:2");
   });
 
   it("cacheInvalidatePattern does nothing when no keys match", async () => {
-    vi.mocked(redis.keys).mockResolvedValueOnce([]);
+    vi.mocked(redis.scanStream).mockReturnValueOnce(makeStream([]));
     await cacheInvalidatePattern("b:*");
-    expect(redis.keys).toHaveBeenCalledWith("b:*");
+    expect(redis.scanStream).toHaveBeenCalledWith({ match: "b:*", count: 100 });
     expect(redis.del).not.toHaveBeenCalled();
+  });
+
+  it("cacheInvalidatePattern rejects when the SCAN stream errors", async () => {
+    const error = new Error("Redis scan failed");
+    vi.mocked(redis.scanStream).mockReturnValueOnce({
+      on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+        if (event === "error") {
+          handler(error);
+        }
+      }),
+    } as unknown as ReturnType<typeof redis.scanStream>);
+
+    await expect(cacheInvalidatePattern("c:*")).rejects.toThrow("Redis scan failed");
   });
 });

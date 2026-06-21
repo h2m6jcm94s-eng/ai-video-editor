@@ -9,7 +9,6 @@ import { renders } from "../db/schema";
 import { sendError } from "../lib/errors";
 import { getBufferedEvents } from "../services/queue";
 
-const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
 const subscriberMap = new Map<string, Redis>();
 const subscriberRefCount = new Map<string, number>();
 

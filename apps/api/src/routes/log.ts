@@ -3,6 +3,8 @@
 
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { sendError } from "../lib/errors";
+import { requireAuth } from "../middleware/auth";
 
 const logEventSchema = z
   .object({
@@ -21,24 +23,34 @@ const batchSchema = z
   .strict();
 
 export async function logRoutes(app: FastifyInstance) {
-  app.post("/api/log", async (request, reply) => {
-    const result = batchSchema.safeParse(request.body);
-    if (!result.success) {
-      return reply.status(422).send({ ok: false, error: "Validation failed", issues: result.error.issues });
-    }
-    const body = result.data;
-    for (const ev of body.events) {
-      request.log[ev.level](
-        {
-          source: "frontend",
-          userId: request.userId,
-          ...ev.context,
-          url: ev.url,
-          clientTs: ev.ts,
-        },
-        ev.message,
-      );
-    }
-    return { ok: true };
-  });
+  app.post(
+    "/api/log",
+    {
+      preHandler: [requireAuth],
+      bodyLimit: 256 * 1024,
+      config: {
+        rateLimit: { max: 60, timeWindow: "1 minute" },
+      },
+    },
+    async (request, reply) => {
+      const result = batchSchema.safeParse(request.body);
+      if (!result.success) {
+        return sendError(reply, 422, "Validation failed", "VALIDATION_ERROR", result.error.issues);
+      }
+      const body = result.data;
+      for (const ev of body.events) {
+        request.log[ev.level](
+          {
+            source: "frontend",
+            userId: request.userId,
+            ...ev.context,
+            url: ev.url,
+            clientTs: ev.ts,
+          },
+          ev.message,
+        );
+      }
+      return { ok: true };
+    },
+  );
 }

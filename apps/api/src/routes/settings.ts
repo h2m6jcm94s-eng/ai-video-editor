@@ -2,7 +2,11 @@
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
 
-import { providerKeySchema, testProviderKeySchema } from "@ai-video-editor/shared-types";
+import {
+  providerEncryptedKeySchema,
+  providerKeySchema,
+  testProviderKeySchema,
+} from "@ai-video-editor/shared-types";
 import { and, eq } from "drizzle-orm";
 import { FastifyInstance } from "fastify";
 import { db } from "../db";
@@ -21,7 +25,7 @@ export async function settingsRoutes(app: FastifyInstance) {
   });
 
   // List user's provider keys (masked)
-  app.get("/provider-keys", async (request, reply) => {
+  app.get("/provider-keys", async (request) => {
     const userId = request.userId;
     const rows = await db.query.providerKeys.findMany({
       where: eq(providerKeys.userId, userId),
@@ -40,7 +44,12 @@ export async function settingsRoutes(app: FastifyInstance) {
     const body = request.validatedBody as { provider: string; key: string };
     const userId = request.userId;
 
-    const encrypted = aesEncrypt(body.key);
+    let encrypted: string;
+    try {
+      encrypted = providerEncryptedKeySchema.parse(aesEncrypt(body.key));
+    } catch (err) {
+      return sendError(reply, 422, "Invalid encrypted key format", "VALIDATION_ERROR");
+    }
 
     await db
       .insert(providerKeys)
@@ -58,9 +67,14 @@ export async function settingsRoutes(app: FastifyInstance) {
     const { provider } = request.params as { provider: string };
     const userId = request.userId;
 
-    await db
+    const [deleted] = await db
       .delete(providerKeys)
-      .where(and(eq(providerKeys.userId, userId), eq(providerKeys.provider, provider)));
+      .where(and(eq(providerKeys.userId, userId), eq(providerKeys.provider, provider)))
+      .returning();
+
+    if (!deleted) {
+      return sendError(reply, 404, "Key not found", "NOT_FOUND");
+    }
 
     return { success: true };
   });
@@ -83,9 +97,19 @@ export async function settingsRoutes(app: FastifyInstance) {
 
       const key = aesDecrypt(row.encryptedKey);
 
+      async function probe(url: string, init: RequestInit) {
+        const res = await fetch(url, {
+          ...init,
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok) {
+          throw new Error("Provider rejected the key");
+        }
+      }
+
       try {
         if (body.provider === "anthropic") {
-          const res = await fetch("https://api.anthropic.com/v1/messages", {
+          await probe("https://api.anthropic.com/v1/messages", {
             method: "POST",
             headers: {
               "x-api-key": key,
@@ -98,9 +122,8 @@ export async function settingsRoutes(app: FastifyInstance) {
               messages: [{ role: "user", content: "hi" }],
             }),
           });
-          if (!res.ok) throw new Error(await res.text());
         } else if (body.provider === "openai") {
-          const res = await fetch("https://api.openai.com/v1/chat/completions", {
+          await probe("https://api.openai.com/v1/chat/completions", {
             method: "POST",
             headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -109,9 +132,8 @@ export async function settingsRoutes(app: FastifyInstance) {
               messages: [{ role: "user", content: "hi" }],
             }),
           });
-          if (!res.ok) throw new Error(await res.text());
         } else if (body.provider === "kimi") {
-          const res = await fetch("https://api.moonshot.cn/v1/chat/completions", {
+          await probe("https://api.moonshot.cn/v1/chat/completions", {
             method: "POST",
             headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -120,9 +142,8 @@ export async function settingsRoutes(app: FastifyInstance) {
               messages: [{ role: "user", content: "hi" }],
             }),
           });
-          if (!res.ok) throw new Error(await res.text());
         } else if (body.provider === "openrouter") {
-          const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          await probe("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
             headers: {
               Authorization: `Bearer ${key}`,
@@ -136,9 +157,8 @@ export async function settingsRoutes(app: FastifyInstance) {
               messages: [{ role: "user", content: "hi" }],
             }),
           });
-          if (!res.ok) throw new Error(await res.text());
         } else if (body.provider === "groq") {
-          const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          await probe("https://api.groq.com/openai/v1/chat/completions", {
             method: "POST",
             headers: {
               Authorization: `Bearer ${key}`,
@@ -150,18 +170,18 @@ export async function settingsRoutes(app: FastifyInstance) {
               messages: [{ role: "user", content: "hi" }],
             }),
           });
-          if (!res.ok) throw new Error(await res.text());
         } else {
           return sendError(reply, 400, "Unsupported provider", "VALIDATION_ERROR");
         }
         return { success: true };
       } catch (err: unknown) {
-        return sendError(
-          reply,
-          400,
-          err instanceof Error ? err.message : "Test failed",
-          "PROVIDER_INVALID_RESPONSE",
-        );
+        let message = "Provider test failed";
+        if (err instanceof Error) {
+          if (err.name === "AbortError" || err.message.toLowerCase().includes("timeout")) {
+            message = "Provider test timed out";
+          }
+        }
+        return sendError(reply, 400, message, "PROVIDER_INVALID_RESPONSE");
       }
     },
   );

@@ -1,17 +1,18 @@
 // Copyright (c) 2025 Devayan Dewri. All rights reserved.
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
+
+import { desc, eq, or } from "drizzle-orm";
 import { FastifyInstance } from "fastify";
-import { eq, desc, or } from "drizzle-orm";
 import { db } from "../db";
 import { templates } from "../db/schema";
-import { validateBody, createTemplateSchema } from "../middleware/validate";
+import { cacheDel, cacheGet, cacheSet } from "../lib/cache";
 import { sendError } from "../lib/errors";
-import { cacheGet, cacheSet, cacheDel } from "../lib/cache";
+import { createTemplateSchema, validateBody } from "../middleware/validate";
 
 export async function templateRoutes(app: FastifyInstance) {
   // List templates (user's own + public)
-  app.get("/", async (request, reply) => {
+  app.get("/", async (request, _reply) => {
     const userId = request.userId;
     const cacheKey = `templates:list:${userId}`;
     const cached = await cacheGet<typeof userTemplates>(cacheKey);
@@ -27,7 +28,7 @@ export async function templateRoutes(app: FastifyInstance) {
   });
 
   // Create template from current cutlist
-  app.post("/", { preHandler: validateBody(createTemplateSchema) }, async (request, reply) => {
+  app.post("/", { preHandler: validateBody(createTemplateSchema) }, async (request, _reply) => {
     const userId = request.userId;
     const body = request.validatedBody as {
       name: string;

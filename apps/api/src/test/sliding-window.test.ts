@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
 import { db } from "../db";
 import * as rateLimit from "../lib/rateLimit";
+import { redis } from "../lib/redis";
 
 describe("Sliding Window Rate Limit", () => {
   beforeEach(() => {
@@ -97,5 +98,32 @@ describe("Sliding Window Rate Limit", () => {
       payload: { prompt: "test" },
     });
     expect(res.statusCode).toBe(200);
+  });
+
+  describe("slidingWindowCheck Redis error handling", () => {
+    it("fails open by default when Redis throws", async () => {
+      vi.mocked(redis.zremrangebyscore).mockRejectedValueOnce(new Error("Redis down"));
+
+      const result = await rateLimit.slidingWindowCheck({
+        key: "rl:read:user-1",
+        limit: 10,
+        windowMs: 60_000,
+      });
+
+      expect(result.allowed).toBe(true);
+    });
+
+    it("fails closed for expensive/mutating endpoints when Redis throws", async () => {
+      vi.mocked(redis.zremrangebyscore).mockRejectedValueOnce(new Error("Redis down"));
+
+      const result = await rateLimit.slidingWindowCheck({
+        key: "rl:prompt:user-1",
+        limit: 10,
+        windowMs: 60_000,
+        failClosed: true,
+      });
+
+      expect(result.allowed).toBe(false);
+    });
   });
 });

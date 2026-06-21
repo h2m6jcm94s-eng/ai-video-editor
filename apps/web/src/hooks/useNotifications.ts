@@ -54,6 +54,8 @@ export function useNotifications(): UseNotificationsReturn {
     } finally {
       setIsLoading(false);
     }
+    // getToken reference is intentionally unstable; do not add to deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSignedIn]);
 
   useEffect(() => {
@@ -98,6 +100,7 @@ export function useNotifications(): UseNotificationsReturn {
       headers: { Authorization: `Bearer ${token}` },
     });
     setItems((prev) => prev.filter((i) => i.id !== id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const ackAll = useCallback(async () => {
@@ -107,6 +110,7 @@ export function useNotifications(): UseNotificationsReturn {
       headers: { Authorization: `Bearer ${token}` },
     });
     setItems([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const unreadCount = items.filter((i) => !i.acknowledged).length;

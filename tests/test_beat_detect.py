@@ -14,7 +14,10 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "services", "ingest-worker", "src"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "services", "shared-py", "src"))
 
-from ingest_worker.beat_detect import detect_beats_librosa, compute_energy_curve
+from unittest.mock import patch
+
+import ingest_worker.beat_detect as beat_detect_module
+from ingest_worker.beat_detect import decode_to_wav, detect_beats, detect_beats_librosa, compute_energy_curve
 from shared_py.models import BeatGrid
 
 
@@ -137,3 +140,64 @@ class TestBeatDetectEdgeCases:
                 detect_beats_librosa(path)
         finally:
             os.unlink(path)
+
+
+class TestDecodeToWav:
+    def test_cleans_up_temp_file_on_ffmpeg_failure(self, tmp_path):
+        fake_path = str(tmp_path / "failed.wav")
+        proc_err = subprocess.CalledProcessError(1, ["ffmpeg"])
+        proc_err.stderr = b"ffmpeg error"
+        with patch.object(beat_detect_module.subprocess, "run", side_effect=proc_err), \
+             patch.object(beat_detect_module.tempfile, "mkstemp", return_value=(0, fake_path)):
+            with pytest.raises(RuntimeError, match="FFmpeg decode_to_wav failed"):
+                beat_detect_module.decode_to_wav("input.mp3")
+        assert not os.path.exists(fake_path)
+
+    @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg not available")
+    def test_success_returns_existing_wav(self, tmp_path):
+        input_path = str(tmp_path / "input.wav")
+        create_sine_wave(input_path, duration=1.0)
+        wav_path = beat_detect_module.decode_to_wav(input_path)
+        try:
+            assert os.path.exists(wav_path)
+            assert wav_path.endswith(".wav")
+        finally:
+            if os.path.exists(wav_path):
+                os.unlink(wav_path)
+
+
+class TestDetectBeats:
+    def test_librosa_fallback_runs_on_decoded_wav(self, monkeypatch, tmp_path):
+        wav_path = str(tmp_path / "decoded.wav")
+        open(wav_path, "w").close()
+
+        calls = []
+        monkeypatch.setattr(
+            beat_detect_module, "decode_to_wav", lambda p: calls.append(("decode", p)) or wav_path
+        )
+        monkeypatch.setattr(
+            beat_detect_module, "detect_beats_allin1", lambda p: calls.append(("allin1", p)) or None
+        )
+
+        def fake_librosa(p):
+            calls.append(("librosa", p))
+            return BeatGrid(
+                bpm=100.0,
+                beats=[0.0, 0.5],
+                downbeats=[0.0],
+                beat_positions=[1],
+                segments=[],
+            )
+
+        monkeypatch.setattr(beat_detect_module, "detect_beats_librosa", fake_librosa)
+        result = beat_detect_module.detect_beats("song.mp3")
+        assert result.bpm == 100.0
+        assert ("librosa", wav_path) in calls
+        assert not os.path.exists(wav_path)
+
+
+class TestComputeEnergyCurveNoLibrosa:
+    def test_returns_default_curve_when_librosa_missing(self, monkeypatch):
+        monkeypatch.setattr(beat_detect_module, "_HAS_LIBROSA", False)
+        curve = beat_detect_module.compute_energy_curve("any.wav", n_points=7)
+        assert curve == [0.0] * 7

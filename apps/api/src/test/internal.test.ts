@@ -179,5 +179,32 @@ describe("Internal Routes", () => {
 
       expect(res.statusCode).toBe(404);
     });
+
+    it("PATCH /api/internal/assets/:assetId/metadata rejects invalid payload", async () => {
+      const app = await buildApp();
+      const res = await app.inject({
+        method: "PATCH",
+        url: `/api/internal/assets/${ASSET_ID}/metadata`,
+        payload: { extra: "not allowed" },
+        headers: { "x-internal-token": TOKEN },
+      });
+
+      expect(res.statusCode).toBe(422);
+      expect(JSON.parse(res.body).code).toBe("VALIDATION_ERROR");
+    });
+
+    it("PATCH /api/internal/assets/:assetId/metadata rejects oversized metadata", async () => {
+      const app = await buildApp();
+      const huge = { metadata: { blob: "x".repeat(65537) } };
+      const res = await app.inject({
+        method: "PATCH",
+        url: `/api/internal/assets/${ASSET_ID}/metadata`,
+        payload: huge,
+        headers: { "x-internal-token": TOKEN },
+      });
+
+      expect(res.statusCode).toBe(422);
+      expect(JSON.parse(res.body).code).toBe("VALIDATION_ERROR");
+    });
   });
 });

@@ -41,6 +41,7 @@ const PromptPanel = dynamic(() => import("./panels/PromptPanel").then((m) => m.P
   ),
 });
 
+import { buildInitialCutList } from "@ai-video-editor/shared-types";
 import { toast } from "sonner";
 import { type CommandAction, CommandPalette, useCommandPalette } from "@/components/cmdk/CommandPalette";
 import { useAssetPoller } from "@/hooks/useAssetPoller";
@@ -51,7 +52,7 @@ import { useTimeline } from "@/hooks/useTimeline";
 import { useApi } from "@/lib/api/client";
 import { APIError } from "@/lib/api/error";
 import { useAutosave } from "@/lib/hooks/useAutosave";
-import type { Asset, CutList, Project, Slot } from "@/types/api";
+import type { Asset, CutList, Project } from "@/types/api";
 import { SaveStatusBadge } from "./SaveStatusBadge";
 import { TemplateLoadDialog } from "./TemplateLoadDialog";
 import { TemplateSaveDialog } from "./TemplateSaveDialog";
@@ -311,59 +312,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
                 }
                 // Create a basic cutlist if none exists
                 if (!state.cutList) {
-                  const clips = state.assets.filter((a) => a.type === "clip");
-                  const song = state.assets.find((a) => a.type === "song");
-                  const totalDuration = Math.min(
-                    song?.durationSec || clips.reduce((s, c) => s + (c.durationSec || 5), 0) || 30,
-                    30,
-                  );
-                  const slotCount = Math.max(1, clips.length || 1);
-                  const slotDuration = totalDuration / slotCount;
-                  const basicSlots: Slot[] = Array.from({ length: slotCount }).map((_, i) => {
-                    const clip = clips[i % clips.length];
-                    return {
-                      index: i,
-                      startS: i * slotDuration,
-                      durationS: slotDuration,
-                      beatIndex: i,
-                      section: i === 0 ? "intro" : i === slotCount - 1 ? "outro" : "verse",
-                      transitionIn: i === 0 ? "hard_cut" : "dissolve",
-                      transitionOut: i === slotCount - 1 ? "hard_cut" : "dissolve",
-                      targetShotType: ["wide", "medium", "close_up"][i % 3],
-                      subjectHint: "person",
-                      motionHint: "static",
-                      energyLevel: 0.5,
-                      requiredTags: [],
-                      avoidTags: [],
-                      selectedClipId: clip?.id,
-                      rankedClipIds: clip ? [clip.id] : undefined,
-                      effects: [],
-                    };
-                  });
-                  const basicCutList: CutList = {
-                    globals: {
-                      totalDurationS: totalDuration,
-                      tempoBpm: 120,
-                      timeSignature: "4/4",
-                      energyCurve: [0.5],
-                      sectionMarkers: [{ name: "full", startS: 0, endS: totalDuration }],
-                      aspectRatio: "9:16",
-                    },
-                    slots: basicSlots,
-                    overlays: [],
-                    audioTracks: song
-                      ? [
-                          {
-                            assetId: song.id,
-                            startS: 0,
-                            endS: totalDuration,
-                            gainDb: 0,
-                            fadeInS: 0,
-                            fadeOutS: 0,
-                          },
-                        ]
-                      : [],
-                  };
+                  const basicCutList = buildInitialCutList(state.assets) as unknown as CutList;
                   await api.projects.updateCutlist(project.id, basicCutList);
                   actions.setCutList(basicCutList);
                 }

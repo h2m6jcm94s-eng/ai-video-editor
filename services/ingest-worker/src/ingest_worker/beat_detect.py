@@ -1,9 +1,10 @@
-﻿# Copyright (c) 2025 Devayan Dewri. All rights reserved.
+# Copyright (c) 2025 Devayan Dewri. All rights reserved.
 # Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 # Commercial SaaS use is prohibited without written permission.
 """Beat, downbeat, and section detection using allin1 + librosa fallback."""
 
 import os
+import subprocess
 import tempfile
 from typing import Optional
 import numpy as np
@@ -22,9 +23,14 @@ logger = StructuredLogger("ingest_worker.beat_detect")
 
 
 def decode_to_wav(input_path: str) -> str:
-    """Decode any audio to 44.1kHz WAV PCM."""
-    import subprocess
-    wav_path = os.path.join(tempfile.gettempdir(), f"{os.path.basename(input_path)}.wav")
+    """Decode any audio to 44.1kHz WAV PCM.
+
+    Creates a temporary WAV file that the caller is responsible for cleaning up.
+    The temp file is removed automatically if FFmpeg fails.
+    """
+    fd, wav_path = tempfile.mkstemp(suffix=".wav", prefix="ingest_beat_")
+    os.close(fd)
+
     cmd = [
         "ffmpeg", "-y", "-i", input_path,
         "-ar", "44100", "-ac", "2", "-c:a", "pcm_s16le",
@@ -34,6 +40,11 @@ def decode_to_wav(input_path: str) -> str:
         subprocess.run(cmd, check=True, capture_output=True)
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode("utf-8", errors="replace")[:1000] if e.stderr else ""
+        # Best-effort cleanup so failed decodes do not leak temp files.
+        try:
+            os.remove(wav_path)
+        except FileNotFoundError:
+            pass
         raise RuntimeError(
             f"FFmpeg decode_to_wav failed (exit {e.returncode}): {stderr}"
         ) from e
@@ -65,6 +76,9 @@ def detect_beats_allin1(audio_path: str) -> Optional[BeatGrid]:
 
 def detect_beats_librosa(audio_path: str) -> BeatGrid:
     """Fallback beat detection using librosa."""
+    if not _HAS_LIBROSA:
+        raise ImportError("librosa is required for the librosa beat-detection fallback")
+
     y, sr = librosa.load(audio_path, sr=44100, mono=True)
     duration = librosa.get_duration(y=y, sr=sr)
 
@@ -126,17 +140,28 @@ def detect_beats(audio_path: str) -> BeatGrid:
 
     try:
         result = detect_beats_allin1(wav_path)
-        if result is not None:
-            return result
+        if result is None:
+            if _HAS_LIBROSA:
+                result = detect_beats_librosa(wav_path)
+            else:
+                logger.warning("No beat detector available (allin1/librosa missing)")
+                raise RuntimeError("No beat detector available")
+        return result
     finally:
         if os.path.exists(wav_path) and wav_path != audio_path:
             os.remove(wav_path)
 
-    return detect_beats_librosa(audio_path)
-
 
 def compute_energy_curve(audio_path: str, n_points: int = 10) -> list:
-    """Compute normalized energy curve for the audio."""
+    """Compute normalized energy curve for the audio.
+
+    If librosa is not installed, returns a flat default curve so callers do not
+    crash with a ``NameError``.
+    """
+    if not _HAS_LIBROSA:
+        logger.warning("librosa unavailable; returning flat energy curve", n_points=n_points)
+        return [0.0] * n_points
+
     y, sr = librosa.load(audio_path, sr=22050, mono=True)
     rms = librosa.feature.rms(y=y, hop_length=512)[0]
 
