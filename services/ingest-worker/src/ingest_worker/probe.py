@@ -87,7 +87,7 @@ def probe_video(video_path: str) -> VideoProbeResult:
         raise RuntimeError(f"Cannot open video '{video_path}': {e}") from e
 
 
-def probe_asset_remote(asset_id: str, storage_key: str) -> Dict[str, Any]:
+async def probe_asset_remote(asset_id: str, storage_key: str) -> Dict[str, Any]:
     """Download from R2, probe, and PATCH metadata back to API."""
     import httpx
 
@@ -118,12 +118,13 @@ def probe_asset_remote(asset_id: str, storage_key: str) -> Dict[str, Any]:
     headers = {"x-internal-token": internal_token} if internal_token else {}
 
     try:
-        resp = httpx.patch(
-            f"{settings.api_base}/internal/assets/{asset_id}/probe",
-            json=payload,
-            headers=headers,
-            timeout=30,
-        )
+        async with httpx.AsyncClient() as client:
+            resp = await client.patch(
+                f"{settings.api_base}/internal/assets/{asset_id}/probe",
+                json=payload,
+                headers=headers,
+                timeout=30,
+            )
         if resp.status_code >= 400:
             logger.error(f"Probe report failed body: {resp.text}")
         resp.raise_for_status()

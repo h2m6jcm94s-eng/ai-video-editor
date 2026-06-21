@@ -1,9 +1,10 @@
-﻿# Copyright (c) 2025 Devayan Dewri. All rights reserved.
+# Copyright (c) 2025 Devayan Dewri. All rights reserved.
 # Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 # Commercial SaaS use is prohibited without written permission.
 """Temporal activities for the style-analysis worker."""
 
 import os
+import shutil
 import tempfile
 from typing import List
 
@@ -17,11 +18,21 @@ from shared_py.models import Overlay, ShotBoundary, StyleAnalysis
 from shared_py.storage import download_asset
 
 
+def _activity_run_id() -> str:
+    try:
+        return activity.info().workflow_run_id or "0"
+    except RuntimeError:
+        return "0"
+
+
 @activity.defn
 async def download_reference_video(asset_id: str, storage_key: str) -> str:
     """Download a reference video asset from object storage to a local path."""
     ext = os.path.splitext(storage_key)[1] or ".mp4"
-    local_path = os.path.join(tempfile.gettempdir(), f"ave_style_{asset_id}{ext}")
+    local_path = os.path.join(
+        tempfile.gettempdir(),
+        f"ave_style_{asset_id}_{_activity_run_id()}{ext}",
+    )
     return download_asset(storage_key, local_path)
 
 
@@ -60,3 +71,19 @@ async def classify_shot_transitions(video_path: str, shot_boundaries: List[dict]
     shots = [ShotBoundary(**s) for s in shot_boundaries]
     result = classify_transitions(video_path, shots)
     return [s.model_dump() for s in result]
+
+
+@activity.defn
+async def cleanup_style_assets(video_path: str, output_dir: str) -> None:
+    """Remove the downloaded reference video and any scratch LUT directory."""
+    try:
+        if video_path and os.path.exists(video_path):
+            os.remove(video_path)
+    except OSError as e:
+        activity.logger.warning(f"Failed to remove style video {video_path}: {e}")
+
+    try:
+        if output_dir and os.path.isdir(output_dir):
+            shutil.rmtree(output_dir, ignore_errors=True)
+    except OSError as e:
+        activity.logger.warning(f"Failed to remove style output dir {output_dir}: {e}")

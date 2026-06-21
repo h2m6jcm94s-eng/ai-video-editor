@@ -1,38 +1,32 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { useForm } from "react-hook-form";
+import { PROVIDER_KEY_OPTIONS, providerKeySchema } from "@ai-video-editor/shared-types";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { KeyRound, Trash2, TestTube, Plus, Loader2, CheckCircle2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { providerKeySchema } from "@ai-video-editor/shared-types";
-import type { z } from "zod";
-import { useApi } from "@/lib/api/client";
+import { CheckCircle2, KeyRound, Loader2, Plus, TestTube, Trash2 } from "lucide-react";
+import { useCallback, useState } from "react";
+import { type SubmitHandler, useForm } from "react-hook-form";
 import { toast } from "sonner";
+import type { z } from "zod";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useApi } from "@/lib/api/client";
 import { APIError } from "@/lib/api/error";
 import { mapApiValidationErrors } from "@/lib/api/formErrors";
 
-const PROVIDERS = [
-  { value: "anthropic", label: "Anthropic (Claude)" },
-  { value: "openai", label: "OpenAI (GPT-4o)" },
-];
+const PROVIDER_LABELS: Record<(typeof PROVIDER_KEY_OPTIONS)[number], string> = {
+  anthropic: "Anthropic (Claude)",
+  openai: "OpenAI (GPT-4o)",
+  kimi: "Kimi",
+  openrouter: "OpenRouter",
+  groq: "Groq",
+  gemini: "Google (Gemini)",
+  qwen: "Alibaba (Qwen)",
+};
+
+const PROVIDERS = PROVIDER_KEY_OPTIONS.map((value) => ({ value, label: PROVIDER_LABELS[value] }));
 
 type FormValues = z.infer<typeof providerKeySchema>;
 
@@ -51,12 +45,12 @@ export function ProviderKeyManager({ initialKeys }: { initialKeys: KeyInfo[] }) 
 
   const form = useForm<FormValues>({
     resolver: zodResolver(providerKeySchema),
-    defaultValues: { provider: "", key: "" },
+    defaultValues: { provider: PROVIDERS[0].value, key: "" },
     mode: "onChange",
   });
 
-  const onSubmit = useCallback(
-    async (values: FormValues) => {
+  const onSubmit: SubmitHandler<FormValues> = useCallback(
+    async (values) => {
       try {
         await api.settings.providerKeys.save(values);
         toast.success(`${PROVIDERS.find((p) => p.value === values.provider)?.label} key saved`);
@@ -78,7 +72,7 @@ export function ProviderKeyManager({ initialKeys }: { initialKeys: KeyInfo[] }) 
         }
       }
     },
-    [api, form]
+    [api, form],
   );
 
   const handleDelete = useCallback(
@@ -98,7 +92,7 @@ export function ProviderKeyManager({ initialKeys }: { initialKeys: KeyInfo[] }) 
         setDeleting((prev) => ({ ...prev, [provider]: false }));
       }
     },
-    [api]
+    [api],
   );
 
   const handleTest = useCallback(
@@ -117,7 +111,7 @@ export function ProviderKeyManager({ initialKeys }: { initialKeys: KeyInfo[] }) 
         setTesting((prev) => ({ ...prev, [provider]: false }));
       }
     },
-    [api]
+    [api],
   );
 
   return (
@@ -199,10 +193,7 @@ export function ProviderKeyManager({ initialKeys }: { initialKeys: KeyInfo[] }) 
                   >
                     Cancel
                   </Button>
-                  <Button
-                    type="submit"
-                    disabled={!form.formState.isValid || form.formState.isSubmitting}
-                  >
+                  <Button type="submit" disabled={!form.formState.isValid || form.formState.isSubmitting}>
                     {form.formState.isSubmitting && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
                     Save Key
                   </Button>
@@ -234,21 +225,14 @@ export function ProviderKeyManager({ initialKeys }: { initialKeys: KeyInfo[] }) 
           {keys.map((key) => {
             const provider = PROVIDERS.find((p) => p.value === key.provider);
             return (
-              <Card
-                key={key.provider}
-                className="border-zinc-800 bg-zinc-950/50"
-              >
+              <Card key={key.provider} className="border-zinc-800 bg-zinc-950/50">
                 <CardContent className="py-4 px-5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <KeyRound className="h-5 w-5 text-zinc-500" />
                       <div>
-                        <p className="font-medium text-sm">
-                          {provider?.label || key.provider}
-                        </p>
-                        <p className="text-xs text-zinc-500 font-mono mt-0.5">
-                          {key.masked}
-                        </p>
+                        <p className="font-medium text-sm">{provider?.label || key.provider}</p>
+                        <p className="text-xs text-zinc-500 font-mono mt-0.5">{key.masked}</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2">

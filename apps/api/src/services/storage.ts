@@ -118,12 +118,10 @@ export async function listProjectAssets(projectId: string): Promise<string[]> {
 export async function deleteProjectAssets(projectId: string): Promise<void> {
   const keys = await listProjectAssets(projectId);
   const results = await Promise.allSettled(keys.map((k) => deleteAsset(k)));
-  const failures = results.filter((r) => r.status === "rejected");
+  const failures = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
   if (failures.length) {
-    logger.warn(
-      { failures: failures.map((f) => (f as PromiseRejectedResult).reason) },
-      "Some assets failed to delete",
-    );
+    logger.error({ failures: failures.map((f) => f.reason) }, "Some assets failed to delete");
+    throw new Error(`Failed to delete ${failures.length} asset(s) from storage for project ${projectId}`);
   }
 }
 

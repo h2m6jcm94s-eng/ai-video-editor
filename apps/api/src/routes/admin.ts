@@ -6,7 +6,7 @@
  * All routes require admin role (requireAdmin middleware).
  */
 
-import { and, count, desc, eq, gte, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { FastifyInstance } from "fastify";
 import { db } from "../db";
 import { adminAudit, projects, renders, userEvents, users } from "../db/schema";
@@ -55,7 +55,10 @@ export async function adminRoutes(app: FastifyInstance) {
     const limit = Math.min(parseInt(query.limit || "20", 10), 100);
     const cursor = query.cursor;
 
+    const conditions = cursor ? [lt(users.createdAt, new Date(cursor))] : [];
+
     const userList = await db.query.users.findMany({
+      where: and(...conditions),
       orderBy: [desc(users.createdAt)],
       limit: limit + 1,
     });
@@ -108,8 +111,9 @@ export async function adminRoutes(app: FastifyInstance) {
     const limit = Math.min(parseInt(query.limit || "50", 10), 200);
     const cursor = query.cursor;
 
-    const conditions = cursor ? [desc(userEvents.createdAt)] : [];
+    const conditions = cursor ? [lt(userEvents.createdAt, new Date(cursor))] : [];
     const events = await db.query.userEvents.findMany({
+      where: and(...conditions),
       orderBy: [desc(userEvents.createdAt)],
       limit: limit + 1,
     });
@@ -144,7 +148,9 @@ export async function adminRoutes(app: FastifyInstance) {
     const limit = Math.min(parseInt(query.limit || "50", 10), 200);
     const cursor = query.cursor;
 
+    const conditions = cursor ? [lt(adminAudit.createdAt, new Date(cursor))] : [];
     const logs = await db.query.adminAudit.findMany({
+      where: and(...conditions),
       orderBy: [desc(adminAudit.createdAt)],
       limit: limit + 1,
     });

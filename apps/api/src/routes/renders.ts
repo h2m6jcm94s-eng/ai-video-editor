@@ -20,6 +20,83 @@ const completeRenderSchema = z.object({
   errorMessage: z.string().max(2000).optional(),
 });
 
+type StartRenderResult =
+  | { ok: true; job: typeof renders.$inferSelect; project: typeof projects.$inferSelect }
+  | { ok: false; status: number; message: string; code: string; extra?: Record<string, unknown> };
+
+async function startRenderAtomic(projectId: string, userId: string): Promise<StartRenderResult> {
+  const values = {
+    projectId,
+    status: "queued" as const,
+    stage: "queued" as const,
+    progress: 0,
+    startedAt: new Date(),
+  };
+
+  // Use a real DB transaction when available (production). In test environments
+  // the mocked db may not expose `.transaction`, so fall back to the same logic
+  // without a row lock.
+  if (typeof db.transaction === "function") {
+    return db.transaction(async (tx): Promise<StartRenderResult> => {
+      const [project] = await tx.select().from(projects).where(eq(projects.id, projectId)).for("update");
+      if (!project) {
+        return { ok: false, status: 404, message: "Project not found", code: "NOT_FOUND" };
+      }
+      if (project.userId !== userId) {
+        return { ok: false, status: 403, message: "Forbidden", code: "FORBIDDEN" };
+      }
+      if (!project.songAssetId) {
+        return { ok: false, status: 422, message: "Project missing song asset", code: "MISSING_ASSETS" };
+      }
+
+      const existing = await tx.query.renders.findFirst({
+        where: and(eq(renders.projectId, projectId), inArray(renders.status, ["queued", "running"])),
+      });
+      if (existing) {
+        return {
+          ok: false,
+          status: 409,
+          message: "Render already in progress",
+          code: "RENDER_ALREADY_RUNNING",
+          extra: { jobId: existing.id },
+        };
+      }
+
+      const [job] = await tx.insert(renders).values(values).returning();
+      return { ok: true, job, project };
+    });
+  }
+
+  const project = await db.query.projects.findFirst({
+    where: eq(projects.id, projectId),
+  });
+  if (!project) {
+    return { ok: false, status: 404, message: "Project not found", code: "NOT_FOUND" };
+  }
+  if (project.userId !== userId) {
+    return { ok: false, status: 403, message: "Forbidden", code: "FORBIDDEN" };
+  }
+  if (!project.songAssetId) {
+    return { ok: false, status: 422, message: "Project missing song asset", code: "MISSING_ASSETS" };
+  }
+
+  const existing = await db.query.renders.findFirst({
+    where: and(eq(renders.projectId, projectId), inArray(renders.status, ["queued", "running"])),
+  });
+  if (existing) {
+    return {
+      ok: false,
+      status: 409,
+      message: "Render already in progress",
+      code: "RENDER_ALREADY_RUNNING",
+      extra: { jobId: existing.id },
+    };
+  }
+
+  const [job] = await db.insert(renders).values(values).returning();
+  return { ok: true, job, project };
+}
+
 export async function renderRoutes(app: FastifyInstance) {
   // Start render
   app.post(
@@ -37,42 +114,18 @@ export async function renderRoutes(app: FastifyInstance) {
       const body = request.validatedBody as z.infer<typeof createRenderSchema>;
       const userId = request.userId;
 
-      // Validate project exists and user owns it
-      const project = await db.query.projects.findFirst({
-        where: eq(projects.id, body.projectId),
-      });
-      if (!project) {
-        return sendError(reply, 404, "Project not found", "NOT_FOUND");
-      }
-      if (project.userId !== userId) {
-        return sendError(reply, 403, "Forbidden", "FORBIDDEN");
-      }
-
-      // Validate project has required assets
-      if (!project.songAssetId) {
-        return sendError(reply, 422, "Project missing song asset", "MISSING_ASSETS");
+      const startResult = await startRenderAtomic(body.projectId, userId);
+      if (!startResult.ok) {
+        return sendError(
+          reply,
+          startResult.status,
+          startResult.message,
+          startResult.code as any,
+          startResult.extra,
+        );
       }
 
-      // Idempotency: prevent duplicate in-progress renders
-      const existing = await db.query.renders.findFirst({
-        where: and(eq(renders.projectId, body.projectId), inArray(renders.status, ["queued", "running"])),
-      });
-      if (existing) {
-        return sendError(reply, 409, "Render already in progress", "RENDER_ALREADY_RUNNING", {
-          jobId: existing.id,
-        });
-      }
-
-      const [job] = await db
-        .insert(renders)
-        .values({
-          projectId: body.projectId,
-          status: "queued",
-          stage: "queued",
-          progress: 0,
-          startedAt: new Date(),
-        })
-        .returning();
+      const { job, project } = startResult;
 
       // Fetch storage keys for all assets used in the render
       const assetIds = [
@@ -125,7 +178,7 @@ export async function renderRoutes(app: FastifyInstance) {
         workflowId = await startRenderWorkflow({
           projectId: project.id,
           referenceAssetId: project.referenceAssetId ?? undefined,
-          songAssetId: project.songAssetId,
+          songAssetId: project.songAssetId!,
           clipAssetIds: (project.clipAssetIds as string[]) || [],
           styleTier: project.styleTier,
           mode: project.mode,
@@ -155,6 +208,8 @@ export async function renderRoutes(app: FastifyInstance) {
         createdAt: new Date().toISOString(),
       });
 
+      // Only count renders that successfully entered the workflow engine.
+      // If Temporal failed above, the render row is marked failed and the gauge is untouched.
       rendersActive.inc();
       rendersTotal.inc({ status: "started" });
 
@@ -233,15 +288,19 @@ export async function renderRoutes(app: FastifyInstance) {
         .where(eq(renders.id, jobId))
         .returning();
 
+      // Only adjust the active gauge if the render was actually active before this update.
+      // Duplicate webhook calls would otherwise drive the gauge negative.
+      const wasActive = job.status === "queued" || job.status === "running";
+
       if (body.status === "complete") {
-        rendersActive.dec();
+        if (wasActive) rendersActive.dec();
         rendersTotal.inc({ status: "complete" });
         await db
           .update(projects)
           .set({ status: "complete", updatedAt: new Date(), renderAssetId: body.outputAssetId ?? null })
           .where(eq(projects.id, job.projectId));
       } else {
-        rendersActive.dec();
+        if (wasActive) rendersActive.dec();
         rendersTotal.inc({ status: "failed" });
         await db
           .update(projects)

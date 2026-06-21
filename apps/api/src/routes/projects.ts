@@ -397,10 +397,14 @@ export async function projectRoutes(app: FastifyInstance) {
       return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
 
-    // Clean up assets from R2 asynchronously (don't block response)
-    deleteProjectAssets(id).catch((err) => {
-      request.log.error({ err, projectId: id }, "Failed to delete assets for project");
-    });
+    // Clean up assets from R2 before deleting the DB row. If storage cleanup
+    // fails, the project remains intact so the user/admin can retry.
+    try {
+      await deleteProjectAssets(id);
+    } catch (err) {
+      request.log.error({ err, projectId: id }, "Failed to delete project assets from storage");
+      return sendError(reply, 500, "Failed to delete project assets", "STORAGE_ERROR");
+    }
 
     await db.delete(projects).where(eq(projects.id, id));
     await cacheDel(`projects:list:${userId}`);

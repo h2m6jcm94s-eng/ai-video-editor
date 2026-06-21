@@ -84,6 +84,7 @@ export class APIError extends Error {
       case "REDIS_UNAVAILABLE":
       case "TEMPORAL_UNAVAILABLE":
       case "R2_UNAVAILABLE":
+      case "STORAGE_ERROR":
         return "Service temporarily unavailable. Try again in a moment.";
       case "ALL_PROVIDERS_FAILED":
         return "Every AI provider in your chain failed. Check your keys in Settings or try again.";

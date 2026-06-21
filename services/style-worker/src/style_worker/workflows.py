@@ -67,54 +67,62 @@ class AnalyzeStyleWorkflow:
 
         output_dir = tempfile.mkdtemp(prefix="ave_style_")
 
-        # LUT extraction is independent of motion/transitions/text — run in parallel
-        lut_future = workflow.execute_activity(
-            "extract_lut",
-            args=(reference_video_path, output_dir, input.lut_strength),
-            start_to_close_timeout=timeout,
-            retry_policy=retry,
-        )
+        try:
+            # LUT extraction is independent of motion/transitions/text — run in parallel
+            lut_future = workflow.execute_activity(
+                "extract_lut",
+                args=(reference_video_path, output_dir, input.lut_strength),
+                start_to_close_timeout=timeout,
+                retry_policy=retry,
+            )
 
-        motion_future = workflow.execute_activity(
-            "analyze_motion",
-            args=(reference_video_path, input.shot_boundaries),
-            start_to_close_timeout=timeout,
-            retry_policy=retry,
-        )
+            motion_future = workflow.execute_activity(
+                "analyze_motion",
+                args=(reference_video_path, input.shot_boundaries),
+                start_to_close_timeout=timeout,
+                retry_policy=retry,
+            )
 
-        transitions_future = workflow.execute_activity(
-            "classify_shot_transitions",
-            args=(reference_video_path, input.shot_boundaries),
-            start_to_close_timeout=timeout,
-            retry_policy=retry,
-        )
+            transitions_future = workflow.execute_activity(
+                "classify_shot_transitions",
+                args=(reference_video_path, input.shot_boundaries),
+                start_to_close_timeout=timeout,
+                retry_policy=retry,
+            )
 
-        text_future = workflow.execute_activity(
-            "detect_text_overlays",
-            args=(reference_video_path, input.text_sample_fps),
-            start_to_close_timeout=timeout,
-            retry_policy=retry,
-        )
+            text_future = workflow.execute_activity(
+                "detect_text_overlays",
+                args=(reference_video_path, input.text_sample_fps),
+                start_to_close_timeout=timeout,
+                retry_policy=retry,
+            )
 
-        lut_result, motions, transitions, overlays = await asyncio.gather(
-            lut_future, motion_future, transitions_future, text_future
-        )
+            lut_result, motions, transitions, overlays = await asyncio.gather(
+                lut_future, motion_future, transitions_future, text_future
+            )
 
-        transitions_list = transitions or []
-        detected_transitions = [s.get("transition_in", "hard_cut") for s in transitions_list]
+            transitions_list = transitions or []
+            detected_transitions = [s.get("transition_in", "hard_cut") for s in transitions_list]
 
-        self._output = AnalyzeStyleOutput(
-            color_palette=lut_result.get("color_palette", []),
-            contrast_level=lut_result.get("contrast_level", 1.0),
-            saturation_level=lut_result.get("saturation_level", 1.0),
-            brightness_level=lut_result.get("brightness_level", 1.0),
-            lut_extracted=lut_result.get("lut_extracted", False),
-            lut_storage_key=lut_result.get("lut_storage_key"),
-            detected_transitions=detected_transitions,
-            detected_overlays=overlays or [],
-            camera_motions=motions or [],
-        )
-        return self._output
+            self._output = AnalyzeStyleOutput(
+                color_palette=lut_result.get("color_palette", []),
+                contrast_level=lut_result.get("contrast_level", 1.0),
+                saturation_level=lut_result.get("saturation_level", 1.0),
+                brightness_level=lut_result.get("brightness_level", 1.0),
+                lut_extracted=lut_result.get("lut_extracted", False),
+                lut_storage_key=lut_result.get("lut_storage_key"),
+                detected_transitions=detected_transitions,
+                detected_overlays=overlays or [],
+                camera_motions=motions or [],
+            )
+            return self._output
+        finally:
+            await workflow.execute_activity(
+                "cleanup_style_assets",
+                args=(reference_video_path, output_dir),
+                start_to_close_timeout=timedelta(seconds=60),
+                retry_policy=RetryPolicy(maximum_attempts=2),
+            )
 
     @workflow.query
     def get_analysis(self) -> Optional[AnalyzeStyleOutput]:
