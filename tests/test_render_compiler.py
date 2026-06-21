@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "services", "sh
 
 import warnings
 
-from render_worker.compiler import compile_timeline, render_preview, XFADE_MAP
+from render_worker.compiler import compile_timeline, render_preview, XFADE_MAP, _get_fontconfig_file
 from shared_py.models import CutList, CutListGlobals, Slot, Overlay, RenderConfig, Effect
 
 
@@ -36,6 +36,24 @@ def create_test_video(path: str, duration: float = 5.0, fps: int = 30,
         check=True, capture_output=True,
     )
     return path
+
+
+class TestFontconfig:
+    def test_generates_config_when_system_font_dirs_exist(self, monkeypatch):
+        monkeypatch.delenv("FONTCONFIG_FILE", raising=False)
+        config_path = _get_fontconfig_file()
+        # On most systems at least one standard font directory exists.
+        if config_path:
+            assert os.path.exists(config_path)
+            with open(config_path, "r", encoding="utf-8") as f:
+                contents = f.read()
+            assert "<fontconfig>" in contents
+            assert "<cachedir>" in contents
+
+    def test_respects_existing_fontconfig_file_env(self, monkeypatch):
+        existing = "/path/to/existing/fonts.conf"
+        monkeypatch.setenv("FONTCONFIG_FILE", existing)
+        assert _get_fontconfig_file() == existing
 
 
 class TestXfadeMap:
