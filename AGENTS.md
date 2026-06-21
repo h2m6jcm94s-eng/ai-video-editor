@@ -525,6 +525,8 @@ Closes #202
 | 2025-06 | Style worker trigger | Upload flow now starts `AnalyzeStyleWorkflow` on `style` queue for `reference_video` assets; workflow downloads asset via new `download_reference_video` activity |
 | 2025-06 | Style analysis persistence | Added `style_analysis` JSONB column to `projects`; `GET /projects/:id/style` queries Temporal style workflow and caches result; render workflow skips re-analysis when cached analysis is passed |
 | 2025-06 | Windows fontconfig warning | Render worker generates a minimal `fonts.conf` and sets `FONTCONFIG_FILE` before FFmpeg calls to suppress drawtext/fontconfig warnings on Windows |
+| 2025-06 | Chaos E2E tests | Added Playwright chaos tests that simulate real users: random navigation, rapid clicks, wrong file uploads, refresh mid-flow, and double-submit |
+
 
 ---
 
