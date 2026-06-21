@@ -1,4 +1,13 @@
-import type { Asset, CutList, GenerationJob, Project, RenderJob, Subtitle } from "@/types/api";
+import type {
+  Asset,
+  CutList,
+  GenerationJob,
+  Invoice,
+  Project,
+  RenderJob,
+  Subscription,
+  Subtitle,
+} from "@/types/api";
 import { APIError } from "./error";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
@@ -200,6 +209,13 @@ export function createAPI(getToken: TokenGetter) {
       subscribe: (jobId: string): EventSource => {
         return new EventSource(`${API_BASE}/progress/${jobId}/events`);
       },
+    },
+    billing: {
+      plan: (): Promise<{ subscription: Subscription }> => fetchJSON("/billing/plan"),
+      invoices: (): Promise<{ invoices: Invoice[] }> => fetchJSON("/billing/invoices"),
+      checkout: (): Promise<{ sessionId: string; url: string }> =>
+        fetchJSON("/billing/checkout", { method: "POST" }),
+      portal: (): Promise<{ url: string }> => fetchJSON("/billing/portal", { method: "POST" }),
     },
     settings: {
       providerKeys: {

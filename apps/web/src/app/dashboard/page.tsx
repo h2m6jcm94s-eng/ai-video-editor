@@ -7,6 +7,7 @@ import { DashboardHeader } from "@/components/dashboard/DashboardHeader";
 import { HeroSection } from "@/components/dashboard/HeroSection";
 import { ProjectList } from "@/components/dashboard/ProjectList";
 import { StatsSection } from "@/components/dashboard/StatsSection";
+import { SubscriptionCard } from "@/components/dashboard/SubscriptionCard";
 import { apiServer } from "@/lib/api/server";
 import { getServerAuth } from "@/lib/auth";
 
@@ -36,6 +37,9 @@ export default async function DashboardPage() {
           </div>
         )}
         <HeroSection projectCount={projects.length} />
+        <div className="mt-6">
+          <SubscriptionCard />
+        </div>
         <StatsSection projects={projects} />
         <div className="mt-10">
           <ProjectList projects={projects} />

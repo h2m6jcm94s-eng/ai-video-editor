@@ -28,7 +28,7 @@ export function SegmentPanel({ projectId, assets }: SegmentPanelProps) {
   const skippedReason = (result?.skipped_reason as string) || "";
 
   return (
-    <div className="w-[260px] border-l border-zinc-800 flex flex-col bg-zinc-950 shrink-0">
+    <div className="hidden md:flex md:w-[260px] border-l border-zinc-800 flex-col bg-zinc-950 shrink-0">
       <div className="h-10 border-b border-zinc-800 flex items-center px-3">
         <Scan className="w-4 h-4 mr-2 text-zinc-400" />
         <span className="text-xs font-medium text-zinc-300">Segment</span>

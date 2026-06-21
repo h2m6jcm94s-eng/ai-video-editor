@@ -2,10 +2,10 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
+import { Pause, Play, SkipBack, SkipForward, ZoomIn, ZoomOut } from "lucide-react";
 import { useRef } from "react";
-import { Play, Pause, SkipBack, SkipForward, ZoomIn, ZoomOut } from "lucide-react";
-import { Timeline } from "../timeline/Timeline";
 import type { CutList, Slot } from "@/types/api";
+import { Timeline } from "../timeline/Timeline";
 
 interface TimelinePanelProps {
   cutList: CutList | null;
@@ -85,16 +85,28 @@ export function TimelinePanel({
   };
 
   return (
-    <div className="h-[200px] border-t border-zinc-800 bg-zinc-950 flex flex-col shrink-0">
+    <div className="h-36 sm:h-44 md:h-48 lg:h-[200px] border-t border-zinc-800 bg-zinc-950 flex flex-col shrink-0">
       {/* Timeline Toolbar */}
       <div className="h-8 border-b border-zinc-800 flex items-center px-3 gap-2">
-        <button onClick={onTogglePlay} className="p-1 hover:bg-zinc-800 rounded" aria-label={isPlaying ? "Pause" : "Play"}>
+        <button
+          onClick={onTogglePlay}
+          className="p-1 hover:bg-zinc-800 rounded"
+          aria-label={isPlaying ? "Pause" : "Play"}
+        >
           {isPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
         </button>
-        <button onClick={() => onSeek(0)} className="p-1 hover:bg-zinc-800 rounded" aria-label="Skip to start">
+        <button
+          onClick={() => onSeek(0)}
+          className="p-1 hover:bg-zinc-800 rounded"
+          aria-label="Skip to start"
+        >
           <SkipBack className="w-3 h-3" />
         </button>
-        <button onClick={() => onSeek(duration)} className="p-1 hover:bg-zinc-800 rounded" aria-label="Skip to end">
+        <button
+          onClick={() => onSeek(duration)}
+          className="p-1 hover:bg-zinc-800 rounded"
+          aria-label="Skip to end"
+        >
           <SkipForward className="w-3 h-3" />
         </button>
         <div className="w-px h-4 bg-zinc-800 mx-1" />
@@ -102,9 +114,7 @@ export function TimelinePanel({
           {formatTime(currentTime)}
         </span>
         <span className="text-[10px] text-zinc-600">/</span>
-        <span className="text-[10px] font-mono text-zinc-500 w-16 text-center">
-          {formatTime(duration)}
-        </span>
+        <span className="text-[10px] font-mono text-zinc-500 w-16 text-center">{formatTime(duration)}</span>
         <div className="flex-1" />
         <button onClick={onZoomIn} className="p-1 hover:bg-zinc-800 rounded" aria-label="Zoom in">
           <ZoomIn className="w-3 h-3" />

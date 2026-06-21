@@ -77,7 +77,7 @@ export function MediaPanel({ projectId, assets, onAssetsChange }: MediaPanelProp
   ];
 
   return (
-    <div className="w-[260px] border-r border-zinc-800 flex flex-col bg-zinc-950 shrink-0">
+    <div className="hidden md:flex md:w-[260px] border-r border-zinc-800 flex-col bg-zinc-950 shrink-0">
       <div className="h-10 border-b border-zinc-800 flex items-center px-3 gap-1">
         {tabs.map((t) => (
           <button

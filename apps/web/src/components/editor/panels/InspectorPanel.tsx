@@ -217,7 +217,7 @@ function InspectorPanelInner({
   };
 
   return (
-    <div className="w-[280px] border-l border-zinc-800 flex flex-col bg-zinc-950 shrink-0">
+    <div className="hidden md:flex md:w-[280px] border-l border-zinc-800 flex-col bg-zinc-950 shrink-0">
       <div className="h-10 border-b border-zinc-800 flex items-center px-3 text-xs font-medium text-zinc-400">
         Inspector
       </div>

@@ -123,6 +123,21 @@ export interface CutList {
   audioTracks?: AudioTrack[];
 }
 
+export interface Subscription {
+  plan: string;
+  status: "active" | "canceled" | "past_due" | "trialing";
+  currentPeriodEnd: string;
+  features: string[];
+}
+
+export interface Invoice {
+  id: string;
+  amount: number;
+  currency: string;
+  status: string;
+  createdAt: string;
+}
+
 export interface BeatGrid {
   bpm: number;
   timeSignature: string;

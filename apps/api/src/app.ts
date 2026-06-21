@@ -18,6 +18,7 @@ import {
 import { requireAuth } from "./middleware/auth";
 import { adminRoutes } from "./routes/admin";
 import { anomalyRoutes } from "./routes/anomaly";
+import { billingRoutes } from "./routes/billing";
 import { healthRoutes } from "./routes/health";
 import { internalRoutes } from "./routes/internal";
 import { logRoutes } from "./routes/log";
@@ -144,9 +145,13 @@ export async function buildApp() {
     if (request.url === "/api/internal" || request.url.startsWith("/api/internal/")) {
       return;
     }
+    if (request.url === "/api/billing/webhook") {
+      return;
+    }
     await requireAuth(request, reply);
   });
 
+  await app.register(billingRoutes, { prefix: "/api/billing" });
   await app.register(projectRoutes, { prefix: "/api/projects" });
   await app.register(uploadRoutes, { prefix: "/api/uploads" });
   await app.register(renderRoutes, { prefix: "/api/renders" });

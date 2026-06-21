@@ -8,13 +8,19 @@ import {
   Command as CommandIcon,
   Film,
   FolderOpen,
+  Library,
   Loader2,
+  MessageSquare,
   Music,
+  PanelLeft,
+  PanelRight,
   Pause,
   Play,
   RotateCcw,
   Save,
+  ScanLine,
   Settings,
+  SlidersHorizontal,
   Smartphone,
   Subtitles,
   Type,
@@ -43,6 +49,8 @@ const PromptPanel = dynamic(() => import("./panels/PromptPanel").then((m) => m.P
 
 import { toast } from "sonner";
 import { type CommandAction, CommandPalette, useCommandPalette } from "@/components/cmdk/CommandPalette";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useAssetPoller } from "@/hooks/useAssetPoller";
 import { useEditor } from "@/hooks/useEditor";
 import { useProgress } from "@/hooks/useProgress";
@@ -81,6 +89,8 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
   const [loadTemplateOpen, setLoadTemplateOpen] = useState(false);
   const [cmdkOpen, setCmdkOpen] = useState(false);
   const [generatingRef, setGeneratingRef] = useState(false);
+  const [mobilePanel, setMobilePanel] = useState<null | "media" | "inspector" | "segment">(null);
+  const isMobile = useIsMobile();
   const styleAnalysis = useStyleAnalysis(project.id);
   const api = useApi();
 
@@ -305,7 +315,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
             <SaveStatusBadge state={saveState} onRetry={retrySave} />
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2 overflow-x-auto [&::-webkit-scrollbar]:hidden max-w-[55vw] sm:max-w-none">
           <button
             onClick={timeline.togglePlay}
             className="p-2 hover:bg-zinc-800 rounded-lg transition"
@@ -322,9 +332,10 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
           </button>
           <button
             onClick={() => setPromptOpen((p) => !p)}
-            className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition"
+            className="px-2 sm:px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition whitespace-nowrap"
           >
-            AI Prompt
+            <span className="hidden sm:inline">AI Prompt</span>
+            <Wand2 className="w-4 h-4 sm:hidden" />
           </button>
           <button
             onClick={async () => {
@@ -360,16 +371,19 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
               styleAnalysis.isPending ||
               !!activeJobId
             }
-            className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition disabled:opacity-50"
+            className="px-2 sm:px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition disabled:opacity-50 whitespace-nowrap"
             data-testid="generate-from-reference"
           >
-            {generatingRef
-              ? "Generating..."
-              : styleAnalysis.isPending
-                ? "Analyzing reference..."
-                : activeJobId
-                  ? "Generation running..."
-                  : "Generate from reference"}
+            <span className="hidden sm:inline">
+              {generatingRef
+                ? "Generating..."
+                : styleAnalysis.isPending
+                  ? "Analyzing reference..."
+                  : activeJobId
+                    ? "Generation running..."
+                    : "Generate from reference"}
+            </span>
+            <Wand2 className="w-4 h-4 sm:hidden" />
           </button>
           <button
             onClick={async () => {
@@ -396,18 +410,18 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
               }
             }}
             disabled={transcribing}
-            className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition disabled:opacity-50 flex items-center gap-1.5"
+            className="px-2 sm:px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition disabled:opacity-50 flex items-center gap-1.5 whitespace-nowrap"
             title="Generate subtitles from audio"
           >
             <Subtitles className="w-3.5 h-3.5" />
-            {transcribing ? "..." : "Subtitles"}
+            <span className="hidden sm:inline">{transcribing ? "..." : "Subtitles"}</span>
           </button>
 
           {/* Aspect ratio dropdown */}
           <div className="relative group">
-            <button className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition flex items-center gap-1.5">
+            <button className="px-2 sm:px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition flex items-center gap-1.5 whitespace-nowrap">
               <Smartphone className="w-3.5 h-3.5" />
-              {aspectRatio}
+              <span className="hidden sm:inline">{aspectRatio}</span>
             </button>
             <div className="absolute right-0 top-full mt-1 hidden group-hover:flex flex-col bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden z-50 min-w-[100px]">
               {["9:16", "4:5", "1:1", "16:9"].map((ratio) => (
@@ -426,9 +440,9 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
 
           {/* Template save/load */}
           <div className="relative group">
-            <button className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition flex items-center gap-1.5">
+            <button className="px-2 sm:px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition flex items-center gap-1.5 whitespace-nowrap">
               <Save className="w-3.5 h-3.5" />
-              Template
+              <span className="hidden sm:inline">Template</span>
             </button>
             <div className="absolute right-0 top-full mt-1 hidden group-hover:flex flex-col bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden z-50 min-w-[140px]">
               <button
@@ -522,16 +536,130 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
         <SegmentPanel projectId={project.id} assets={state.assets} />
       </div>
 
-      {promptOpen && (
-        <div className="absolute bottom-[220px] right-[300px] w-96 z-50">
-          <PromptPanel
-            projectId={project.id}
-            cutList={state.cutList}
-            onPromptApply={actions.promptApply}
-            onUndo={actions.undo}
-            onClose={() => setPromptOpen(false)}
-          />
-        </div>
+      {/* Mobile bottom toolbar */}
+      <div className="md:hidden h-14 border-t border-zinc-800 bg-zinc-950 shrink-0 flex items-center justify-around px-2">
+        <button
+          onClick={() => setMobilePanel("media")}
+          className="flex flex-col items-center gap-0.5 p-2 text-zinc-400 hover:text-zinc-100"
+          aria-label="Media"
+        >
+          <Library className="w-5 h-5" />
+          <span className="text-[10px]">Media</span>
+        </button>
+        <button
+          onClick={() => setMobilePanel("inspector")}
+          className="flex flex-col items-center gap-0.5 p-2 text-zinc-400 hover:text-zinc-100"
+          aria-label="Inspector"
+        >
+          <SlidersHorizontal className="w-5 h-5" />
+          <span className="text-[10px]">Edit</span>
+        </button>
+        <button
+          onClick={() => setPromptOpen(true)}
+          className="flex flex-col items-center gap-0.5 p-2 text-cyan-400 hover:text-cyan-300"
+          aria-label="AI Prompt"
+        >
+          <MessageSquare className="w-5 h-5" />
+          <span className="text-[10px]">AI</span>
+        </button>
+        <button
+          onClick={() => setMobilePanel("segment")}
+          className="flex flex-col items-center gap-0.5 p-2 text-zinc-400 hover:text-zinc-100"
+          aria-label="Segment"
+        >
+          <ScanLine className="w-5 h-5" />
+          <span className="text-[10px]">Mask</span>
+        </button>
+      </div>
+
+      {/* Mobile panel sheets */}
+      {mobilePanel !== null && (
+        <>
+          <Sheet open={mobilePanel === "media"} onOpenChange={(open) => !open && setMobilePanel(null)}>
+            <SheetContent
+              side="left"
+              className="bg-zinc-950 border-zinc-800 text-zinc-100 w-3/4 sm:max-w-sm p-0"
+            >
+              <SheetHeader className="p-4 border-b border-zinc-800">
+                <SheetTitle className="text-sm text-zinc-100">Media</SheetTitle>
+              </SheetHeader>
+              <div className="flex-1 overflow-auto">
+                <MediaPanel projectId={project.id} assets={state.assets} onAssetsChange={actions.setAssets} />
+              </div>
+            </SheetContent>
+          </Sheet>
+
+          <Sheet open={mobilePanel === "inspector"} onOpenChange={(open) => !open && setMobilePanel(null)}>
+            <SheetContent
+              side="right"
+              className="bg-zinc-950 border-zinc-800 text-zinc-100 w-3/4 sm:max-w-sm p-0"
+            >
+              <SheetHeader className="p-4 border-b border-zinc-800">
+                <SheetTitle className="text-sm text-zinc-100">Inspector</SheetTitle>
+              </SheetHeader>
+              <div className="flex-1 overflow-auto">
+                <InspectorPanel
+                  selectedSlot={selectedSlot}
+                  selectedSlotIndex={state.selectedSlotIndex}
+                  selectedOverlayId={state.selectedOverlayId}
+                  overlays={state.cutList?.overlays || []}
+                  cutList={state.cutList}
+                  onUpdateSlot={actions.updateSlot}
+                  onUpdateOverlay={actions.updateOverlay}
+                  onSelectOverlay={actions.selectOverlay}
+                  onUpdateEffects={(effects) => {
+                    if (!state.cutList) return;
+                    actions.setCutList({
+                      ...state.cutList,
+                      globals: { ...state.cutList.globals, effects },
+                    });
+                  }}
+                />
+              </div>
+            </SheetContent>
+          </Sheet>
+
+          <Sheet open={mobilePanel === "segment"} onOpenChange={(open) => !open && setMobilePanel(null)}>
+            <SheetContent
+              side="right"
+              className="bg-zinc-950 border-zinc-800 text-zinc-100 w-3/4 sm:max-w-sm p-0"
+            >
+              <SheetHeader className="p-4 border-b border-zinc-800">
+                <SheetTitle className="text-sm text-zinc-100">Segment</SheetTitle>
+              </SheetHeader>
+              <div className="flex-1 overflow-auto">
+                <SegmentPanel projectId={project.id} assets={state.assets} />
+              </div>
+            </SheetContent>
+          </Sheet>
+        </>
+      )}
+
+      {/* Prompt panel: bottom sheet on mobile, floating card on desktop */}
+      {isMobile ? (
+        <Sheet open={promptOpen} onOpenChange={setPromptOpen}>
+          <SheetContent side="bottom" className="bg-zinc-950 border-zinc-800 text-zinc-100 h-[60vh]">
+            <PromptPanel
+              projectId={project.id}
+              cutList={state.cutList}
+              onPromptApply={actions.promptApply}
+              onUndo={actions.undo}
+              onClose={() => setPromptOpen(false)}
+            />
+          </SheetContent>
+        </Sheet>
+      ) : (
+        promptOpen && (
+          <div className="absolute bottom-[220px] right-[300px] w-96 z-50">
+            <PromptPanel
+              projectId={project.id}
+              cutList={state.cutList}
+              onPromptApply={actions.promptApply}
+              onUndo={actions.undo}
+              onClose={() => setPromptOpen(false)}
+            />
+          </div>
+        )
       )}
 
       {state.cutList && (

@@ -31,6 +31,12 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"], storageState: "e2e/.auth/user.json" },
       dependencies: ["setup"],
     },
+    {
+      name: "mobile-safari",
+      testIgnore: /auth\.setup\.ts$/,
+      use: { ...devices["iPhone 14"], storageState: "e2e/.auth/user.json" },
+      dependencies: ["setup"],
+    },
   ],
   webServer: {
     command: "pnpm dev",

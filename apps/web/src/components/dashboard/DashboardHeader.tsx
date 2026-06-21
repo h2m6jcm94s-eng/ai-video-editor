@@ -1,6 +1,6 @@
 // Copyright (c) 2025 Devayan Dewri. All rights reserved.
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
-import { Settings, Sparkles } from "lucide-react";
+import { CreditCard, Settings, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { CreateProjectDialog } from "@/components/dashboard/CreateProjectDialog";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,18 @@ export function DashboardHeader() {
           <span className="text-lg font-semibold tracking-tight text-gradient">AI Video Editor</span>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            asChild
+            className="text-glass-muted hover:text-glass hover:bg-glass-hover hidden sm:inline-flex"
+          >
+            <Link href="/pricing">
+              <CreditCard className="h-4 w-4 mr-1.5" />
+              Pricing
+            </Link>
+          </Button>
           <Button
             variant="ghost"
             size="sm"
@@ -25,7 +36,7 @@ export function DashboardHeader() {
           >
             <Link href="/settings">
               <Settings className="h-4 w-4 mr-1.5" />
-              Settings
+              <span className="hidden sm:inline">Settings</span>
             </Link>
           </Button>
           <CreateProjectDialog />

@@ -2,13 +2,14 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 export const dynamic = "force-dynamic";
 
-import { ArrowLeft, Keyboard, KeyRound, Palette, Settings, User } from "lucide-react";
+import { ArrowLeft, CreditCard, Keyboard, KeyRound, Palette, Settings, User } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getServerAuth } from "@/lib/auth";
 
 const tabs = [
   { label: "Account", href: "/settings/account", icon: User, disabled: true },
+  { label: "Billing", href: "/settings/billing", icon: CreditCard },
   { label: "API Keys", href: "/settings/keys", icon: KeyRound },
   { label: "Appearance", href: "/settings/appearance", icon: Palette, disabled: true },
   { label: "Shortcuts", href: "/settings/shortcuts", icon: Keyboard, disabled: true },
