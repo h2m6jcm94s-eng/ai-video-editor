@@ -50,10 +50,61 @@ def _find_font() -> str:
     return ""
 
 
+def _get_fontconfig_file() -> Optional[str]:
+    """Return a usable fontconfig configuration file path.
+
+    FFmpeg's drawtext filter uses fontconfig to resolve font names.  On
+    Windows the default config is often missing, which produces a non-fatal
+    warning.  We generate a minimal config pointing at the system font
+    directories so the warning is suppressed and font lookup works.
+    """
+    if os.environ.get("FONTCONFIG_FILE"):
+        return os.environ.get("FONTCONFIG_FILE")
+
+    cache_dir = os.path.join(tempfile.gettempdir(), "ave_fontconfig_cache")
+    os.makedirs(cache_dir, exist_ok=True)
+
+    font_dirs = []
+    if os.name == "nt":
+        font_dirs.append("C:\\Windows\\Fonts")
+        # Some FFmpeg builds ship their own fonts directory.
+        ffmpeg_dir = os.path.dirname(shutil.which("ffmpeg") or "")
+        if ffmpeg_dir:
+            font_dirs.append(os.path.join(ffmpeg_dir, "fonts"))
+    else:
+        font_dirs.extend([
+            "/usr/share/fonts",
+            "/usr/local/share/fonts",
+            os.path.expanduser("~/.fonts"),
+        ])
+
+    # Only keep dirs that actually exist so fontconfig doesn't complain.
+    font_dirs = [d for d in font_dirs if os.path.isdir(d)]
+    if not font_dirs:
+        return None
+
+    dir_xml = "".join(f"    <dir>{d}</dir>\n" for d in font_dirs)
+    config = f"""<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+{dir_xml}    <cachedir>{cache_dir}</cachedir>
+</fontconfig>
+"""
+    config_path = os.path.join(tempfile.gettempdir(), "ave_fonts.conf")
+    with open(config_path, "w", encoding="utf-8") as f:
+        f.write(config)
+    return config_path
+
+
 def _run_ffmpeg(cmd: List[str], context: str, cwd: Optional[str] = None) -> None:
     """Run FFmpeg with rich error context on failure."""
+    env = os.environ.copy()
+    fontconfig = _get_fontconfig_file()
+    if fontconfig and not env.get("FONTCONFIG_FILE"):
+        env["FONTCONFIG_FILE"] = fontconfig
+
     try:
-        subprocess.run(cmd, check=True, capture_output=True, cwd=cwd)
+        subprocess.run(cmd, check=True, capture_output=True, cwd=cwd, env=env)
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode("utf-8", errors="replace") if e.stderr else ""
         try:
