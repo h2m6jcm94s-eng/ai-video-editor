@@ -1,4 +1,4 @@
-import type { Asset, CutList, Project, RenderJob, Subtitle } from "@/types/api";
+import type { Asset, CutList, GenerationJob, Project, RenderJob, Subtitle } from "@/types/api";
 import { APIError } from "./error";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
@@ -89,6 +89,12 @@ export function createAPI(getToken: TokenGetter) {
           body: JSON.stringify({ prompt }),
           ...init,
         }),
+      generate: (
+        id: string,
+        body: { prompt?: string; options?: Record<string, unknown> } = {},
+      ): Promise<{ job: GenerationJob }> =>
+        fetchJSON(`/projects/${id}/generate`, { method: "POST", body: JSON.stringify(body) }),
+      getGeneration: (id: string): Promise<{ job: GenerationJob }> => fetchJSON(`/projects/${id}/generation`),
       transcribe: (id: string, assetId: string): Promise<{ subtitles: Subtitle[] }> =>
         fetchJSON(`/projects/${id}/transcribe`, { method: "POST", body: JSON.stringify({ assetId }) }),
       getStyle: (id: string): Promise<{ styleAnalysis: Record<string, unknown> | null }> =>

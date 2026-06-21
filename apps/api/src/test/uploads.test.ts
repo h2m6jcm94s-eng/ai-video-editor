@@ -137,7 +137,7 @@ describe("Upload Routes", () => {
       payload: { sizeBytes: 1024, etag: '"abc123"' },
     });
     expect(res.statusCode).toBe(200);
-    expect(startProbeWorkflow).toHaveBeenCalledWith(ASSET_ID, refAsset.storageKey);
+    expect(startProbeWorkflow).toHaveBeenCalledWith(ASSET_ID, refAsset.storageKey, "reference_video");
     expect(startAnalyzeStyleWorkflow).toHaveBeenCalledWith({
       assetId: ASSET_ID,
       storageKey: refAsset.storageKey,

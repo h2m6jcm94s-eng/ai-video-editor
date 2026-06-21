@@ -5310,11 +5310,13 @@ dependencies = [
     { name = "anthropic" },
     { name = "google-genai" },
     { name = "httpx" },
+    { name = "ingest-worker" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "shared-py" },
+    { name = "temporalio" },
     { name = "twelvelabs" },
 ]
 
@@ -5323,9 +5325,11 @@ requires-dist = [
     { name = "anthropic", specifier = ">=0.28.0" },
     { name = "google-genai", specifier = ">=2.9.0" },
     { name = "httpx", specifier = ">=0.27.0" },
+    { name = "ingest-worker", editable = "services/ingest-worker" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "scipy", specifier = ">=1.13.0" },
     { name = "shared-py", editable = "services/shared-py" },
+    { name = "temporalio", specifier = ">=1.7.0" },
     { name = "twelvelabs", specifier = ">=0.32.0" },
 ]
 

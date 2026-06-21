@@ -5,15 +5,18 @@
  * Protected by requireInternalToken.
  */
 
+import { cutListSchema } from "@ai-video-editor/shared-types";
 import { and, eq, inArray } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { db } from "../db";
-import { assets, projects, renders } from "../db/schema";
+import { assets, generationJobs, projects, renders } from "../db/schema";
+import { verifyCompletionToken } from "../lib/crypto";
 import { sendError } from "../lib/errors";
 import { recordUserEvent } from "../lib/userEvents";
 import { requireInternalToken } from "../middleware/requireInternalToken";
 import { validateBody } from "../middleware/validate";
+import { publishProgress, setJobStatus } from "../services/queue";
 
 const userEventSchema = z
   .object({
@@ -266,6 +269,151 @@ export async function internalRoutes(app: FastifyInstance) {
         .returning();
 
       return { asset: updated };
+    },
+  );
+
+  // Publish a progress event for any job (render or generation)
+  const progressPublishSchema = z
+    .object({
+      stage: z.string().min(1).max(100),
+      progress: z.number().min(0).max(100),
+      message: z.string().max(2000).optional(),
+    })
+    .strict();
+
+  app.post(
+    "/api/internal/progress/:jobId",
+    { preHandler: [requireInternalToken, validateBody(progressPublishSchema)] },
+    async (request, reply) => {
+      const { jobId } = request.params as { jobId: string };
+      const body = request.validatedBody as z.infer<typeof progressPublishSchema>;
+
+      const renderJob = await db.query.renders.findFirst({ where: eq(renders.id, jobId) });
+      const generationJob = renderJob
+        ? null
+        : await db.query.generationJobs.findFirst({ where: eq(generationJobs.id, jobId) });
+      if (!renderJob && !generationJob) {
+        return sendError(reply, 404, "Job not found", "NOT_FOUND");
+      }
+
+      await Promise.all([
+        publishProgress(jobId, body.stage, body.progress, body.message || ""),
+        setJobStatus(jobId, body.stage, body.progress, body.message || ""),
+      ]);
+
+      if (renderJob) {
+        await db
+          .update(renders)
+          .set({ stage: body.stage, progress: body.progress })
+          .where(eq(renders.id, jobId));
+      } else {
+        await db
+          .update(generationJobs)
+          .set({ stage: body.stage, progress: body.progress })
+          .where(eq(generationJobs.id, jobId));
+      }
+
+      return { ok: true };
+    },
+  );
+
+  // Persist a generated cut-list and mark the generation job complete
+  const generatedCutlistSchema = z
+    .object({
+      cutList: cutListSchema,
+      generationJobId: z.string().uuid(),
+      completionToken: z.string().min(1).optional(),
+    })
+    .strict();
+
+  app.patch(
+    "/api/internal/projects/:id/generated-cutlist",
+    { preHandler: [requireInternalToken, validateBody(generatedCutlistSchema)] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = request.validatedBody as z.infer<typeof generatedCutlistSchema>;
+
+      const project = await db.query.projects.findFirst({ where: eq(projects.id, id) });
+      if (!project) {
+        return sendError(reply, 404, "Project not found", "NOT_FOUND");
+      }
+
+      const job = await db.query.generationJobs.findFirst({
+        where: and(eq(generationJobs.id, body.generationJobId), eq(generationJobs.projectId, id)),
+      });
+      if (!job) {
+        return sendError(reply, 404, "Generation job not found", "NOT_FOUND");
+      }
+
+      if (body.completionToken && !verifyCompletionToken(body.completionToken, job.id, id)) {
+        return sendError(reply, 403, "Invalid completion token", "FORBIDDEN");
+      }
+
+      const [updatedProject] = await db
+        .update(projects)
+        .set({ cutList: body.cutList, updatedAt: new Date() })
+        .where(eq(projects.id, id))
+        .returning();
+
+      const [updatedJob] = await db
+        .update(generationJobs)
+        .set({
+          status: "complete",
+          stage: "complete",
+          progress: 100,
+          outputCutList: body.cutList,
+          completedAt: new Date(),
+        })
+        .where(eq(generationJobs.id, job.id))
+        .returning();
+
+      await publishProgress(job.id, "complete", 100, "Cut-list generation complete");
+      await setJobStatus(job.id, "complete", 100, "Cut-list generation complete");
+
+      return { project: updatedProject, job: updatedJob };
+    },
+  );
+
+  // Mark a generation job as failed
+  const failGenerationSchema = z
+    .object({
+      errorMessage: z.string().min(1).max(2000),
+      completionToken: z.string().min(1).optional(),
+    })
+    .strict();
+
+  app.post(
+    "/api/internal/generation-jobs/:jobId/fail",
+    { preHandler: [requireInternalToken, validateBody(failGenerationSchema)] },
+    async (request, reply) => {
+      const { jobId } = request.params as { jobId: string };
+      const body = request.validatedBody as z.infer<typeof failGenerationSchema>;
+
+      const job = await db.query.generationJobs.findFirst({ where: eq(generationJobs.id, jobId) });
+      if (!job) {
+        return sendError(reply, 404, "Generation job not found", "NOT_FOUND");
+      }
+
+      if (body.completionToken && !verifyCompletionToken(body.completionToken, jobId, job.projectId)) {
+        return sendError(reply, 403, "Invalid completion token", "FORBIDDEN");
+      }
+
+      const [updated] = await db
+        .update(generationJobs)
+        .set({
+          status: "failed",
+          stage: "failed",
+          progress: 0,
+          errorMessage: body.errorMessage,
+          completedAt: new Date(),
+        })
+        .where(eq(generationJobs.id, jobId))
+        .returning();
+
+      await publishProgress(jobId, "failed", 0, body.errorMessage);
+      await setJobStatus(jobId, "failed", 0, body.errorMessage);
+
+      return { job: updated };
     },
   );
 }

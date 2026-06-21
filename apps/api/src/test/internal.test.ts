@@ -207,4 +207,143 @@ describe("Internal Routes", () => {
       expect(JSON.parse(res.body).code).toBe("VALIDATION_ERROR");
     });
   });
+
+  describe("Generated cutlist routes", () => {
+    const PROJ_ID = "8562dc1a-1493-42ee-ab6e-1075b83c88d6";
+    const JOB_ID = "fc6b55b4-01cd-431b-808a-35b4f28613e1";
+
+    const mockProject = {
+      id: PROJ_ID,
+      userId: "test-user-id",
+      name: "Test",
+      status: "uploading",
+      referenceAssetId: null,
+      songAssetId: null,
+      clipAssetIds: [],
+      styleTier: "full_style",
+      mode: "auto",
+      cutList: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const mockJob = {
+      id: JOB_ID,
+      projectId: PROJ_ID,
+      status: "running",
+      stage: "generating_cutlist",
+      progress: 75,
+      workflowId: "generate-wf-1",
+      outputCutList: null,
+      errorMessage: null,
+      options: null,
+      startedAt: new Date(),
+      completedAt: null,
+      createdAt: new Date(),
+    };
+
+    const validCutList = {
+      globals: {
+        totalDurationS: 60,
+        tempoBpm: 128,
+        timeSignature: "4/4",
+        aspectRatio: "9:16",
+      },
+      slots: [
+        {
+          index: 0,
+          startS: 0,
+          durationS: 2,
+          beatIndex: 0,
+          section: "intro",
+          targetShotType: "wide",
+          subjectHint: "person",
+          motionHint: "static",
+        },
+      ],
+    };
+
+    it("PATCH /api/internal/projects/:id/generated-cutlist persists cutlist and completes job", async () => {
+      vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(mockProject as any);
+      vi.mocked(db.query.generationJobs.findFirst).mockResolvedValueOnce(mockJob as any);
+      vi.mocked(db.update).mockReturnValueOnce({
+        set: vi.fn().mockReturnValueOnce({
+          where: vi.fn().mockReturnValueOnce({
+            returning: vi.fn().mockResolvedValueOnce([{ ...mockProject, cutList: validCutList }]),
+          }),
+        }),
+      } as any);
+      vi.mocked(db.update).mockReturnValueOnce({
+        set: vi.fn().mockReturnValueOnce({
+          where: vi.fn().mockReturnValueOnce({
+            returning: vi.fn().mockResolvedValueOnce([{ ...mockJob, status: "complete", progress: 100 }]),
+          }),
+        }),
+      } as any);
+
+      const app = await buildApp();
+      const res = await app.inject({
+        method: "PATCH",
+        url: `/api/internal/projects/${PROJ_ID}/generated-cutlist`,
+        payload: { cutList: validCutList, generationJobId: JOB_ID },
+        headers: { "x-internal-token": TOKEN },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.job.status).toBe("complete");
+      expect(body.project.cutList).toEqual(validCutList);
+    });
+
+    it("PATCH /api/internal/projects/:id/generated-cutlist returns 404 for missing job", async () => {
+      vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(mockProject as any);
+      vi.mocked(db.query.generationJobs.findFirst).mockResolvedValueOnce(undefined);
+
+      const app = await buildApp();
+      const res = await app.inject({
+        method: "PATCH",
+        url: `/api/internal/projects/${PROJ_ID}/generated-cutlist`,
+        payload: { cutList: validCutList, generationJobId: JOB_ID },
+        headers: { "x-internal-token": TOKEN },
+      });
+
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("POST /api/internal/generation-jobs/:jobId/fail marks a job as failed", async () => {
+      vi.mocked(db.query.generationJobs.findFirst).mockResolvedValueOnce(mockJob as any);
+      vi.mocked(db.update).mockReturnValueOnce({
+        set: vi.fn().mockReturnValueOnce({
+          where: vi.fn().mockReturnValueOnce({
+            returning: vi
+              .fn()
+              .mockResolvedValueOnce([{ ...mockJob, status: "failed", errorMessage: "boom" }]),
+          }),
+        }),
+      } as any);
+
+      const app = await buildApp();
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/internal/generation-jobs/${JOB_ID}/fail`,
+        payload: { errorMessage: "boom" },
+        headers: { "x-internal-token": TOKEN },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body).job.status).toBe("failed");
+    });
+
+    it("POST /api/internal/generation-jobs/:jobId/fail rejects missing error message", async () => {
+      const app = await buildApp();
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/internal/generation-jobs/${JOB_ID}/fail`,
+        payload: {},
+        headers: { "x-internal-token": TOKEN },
+      });
+
+      expect(res.statusCode).toBe(422);
+    });
+  });
 });

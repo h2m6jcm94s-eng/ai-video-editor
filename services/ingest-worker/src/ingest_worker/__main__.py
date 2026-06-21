@@ -10,7 +10,11 @@ from shared_py.startup import validate_startup
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from ingest_worker.activities import probe_asset
+from ingest_worker.activities import (
+    detect_beats_activity,
+    detect_shot_boundaries_activity,
+    probe_asset,
+)
 from ingest_worker.workflows import ProbeAssetWorkflow
 
 
@@ -22,7 +26,11 @@ async def main() -> None:
         client,
         task_queue="ingest",
         workflows=[ProbeAssetWorkflow],
-        activities=[probe_asset],
+        activities=[
+            probe_asset,
+            detect_beats_activity,
+            detect_shot_boundaries_activity,
+        ],
     )
 
     print("Ingest worker started, polling task queue: ingest")

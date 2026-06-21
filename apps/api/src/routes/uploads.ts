@@ -173,7 +173,7 @@ export async function uploadRoutes(app: FastifyInstance) {
 
     // Trigger probe workflow for video/audio assets (fire-and-forget)
     if (["reference_video", "clip", "render", "song"].includes(asset.type)) {
-      startProbeWorkflow(asset.id, asset.storageKey).catch((e) =>
+      startProbeWorkflow(asset.id, asset.storageKey, asset.type).catch((e) =>
         request.log.error({ err: e, assetId }, "probe trigger failed"),
       );
     }

@@ -173,6 +173,13 @@ export const renderOptionsSchema = z
   })
   .strict();
 
+export const generateFromReferenceSchema = z
+  .object({
+    prompt: z.string().min(1).max(2000).optional(),
+    options: z.record(z.unknown()).optional(),
+  })
+  .strict();
+
 export const templateMetaSchema = createTemplateSchema.omit({ cutList: true });
 
 export const PROVIDER_KEY_OPTIONS = [

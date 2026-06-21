@@ -100,6 +100,31 @@ export const renders = pgTable(
   }),
 );
 
+export const generationJobs = pgTable(
+  "generation_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    status: varchar("status", { length: 50 }).notNull().default("queued"),
+    stage: varchar("stage", { length: 100 }).notNull().default("queued"),
+    progress: real("progress").notNull().default(0),
+    workflowId: text("workflow_id"),
+    outputCutList: jsonb("output_cut_list"),
+    errorMessage: text("error_message"),
+    options: jsonb("options"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => ({
+    projectIdx: index("generation_jobs_project_idx").on(table.projectId),
+    statusIdx: index("generation_jobs_status_idx").on(table.status),
+    projectStatusIdx: index("generation_jobs_project_status_idx").on(table.projectId, table.status),
+  }),
+);
+
 export const templates = pgTable(
   "templates",
   {
@@ -187,6 +212,7 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   user: one(users, { fields: [projects.userId], references: [users.id] }),
   assets: many(assets),
   renders: many(renders),
+  generationJobs: many(generationJobs),
 }));
 
 export const assetsRelations = relations(assets, ({ one }) => ({
@@ -195,6 +221,10 @@ export const assetsRelations = relations(assets, ({ one }) => ({
 
 export const rendersRelations = relations(renders, ({ one }) => ({
   project: one(projects, { fields: [renders.projectId], references: [projects.id] }),
+}));
+
+export const generationJobsRelations = relations(generationJobs, ({ one }) => ({
+  project: one(projects, { fields: [generationJobs.projectId], references: [projects.id] }),
 }));
 
 export const templatesRelations = relations(templates, ({ one }) => ({
@@ -209,6 +239,8 @@ export type Asset = typeof assets.$inferSelect;
 export type NewAsset = typeof assets.$inferInsert;
 export type Render = typeof renders.$inferSelect;
 export type NewRender = typeof renders.$inferInsert;
+export type GenerationJob = typeof generationJobs.$inferSelect;
+export type NewGenerationJob = typeof generationJobs.$inferInsert;
 export type Template = typeof templates.$inferSelect;
 export type NewTemplate = typeof templates.$inferInsert;
 export type ProviderKey = typeof providerKeys.$inferSelect;

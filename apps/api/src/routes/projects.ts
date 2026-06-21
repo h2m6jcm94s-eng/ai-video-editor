@@ -9,8 +9,9 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { db } from "../db";
-import { assets, projects, renders } from "../db/schema";
+import { assets, generationJobs, projects, renders } from "../db/schema";
 import { cacheDel, cacheGet, cacheSet } from "../lib/cache";
+import { createCompletionToken } from "../lib/crypto";
 import { buildInitialCutList } from "../lib/cutlist";
 import { sendError } from "../lib/errors";
 import { slidingWindowCheck } from "../lib/rateLimit";
@@ -18,14 +19,20 @@ import { validatePromptGuardrails } from "../middleware/guardrails";
 import { enforceTokenBudget, incrementTokenUsage } from "../middleware/tokenBudget";
 import {
   createProjectSchema,
+  generateFromReferenceSchema,
   patchProjectSchema,
   promptEditSchema,
   updateCutlistSchema,
   validateBody,
 } from "../middleware/validate";
 import { applyPromptEdit, transcribeAudio } from "../services/ai";
+import { enqueueJob, publishProgress } from "../services/queue";
 import { deleteProjectAssets, downloadAsset } from "../services/storage";
-import { getStyleAnalysisFromWorkflow, sendCutlistApprovedSignal } from "../services/temporal";
+import {
+  getStyleAnalysisFromWorkflow,
+  sendCutlistApprovedSignal,
+  startGenerateCutlistWorkflow,
+} from "../services/temporal";
 
 export async function projectRoutes(app: FastifyInstance) {
   // List projects for user
@@ -191,6 +198,217 @@ export async function projectRoutes(app: FastifyInstance) {
 
     await cacheDel(`projects:list:${userId}`);
     return { project: updated };
+  });
+
+  type StartGenerationResult =
+    | { ok: true; job: typeof generationJobs.$inferSelect; project: typeof projects.$inferSelect }
+    | { ok: false; status: number; message: string; code: ApiErrorCode; extra?: Record<string, unknown> };
+
+  async function startGenerationAtomic(
+    projectId: string,
+    userId: string,
+    options?: Record<string, unknown>,
+  ): Promise<StartGenerationResult> {
+    const values = {
+      projectId,
+      status: "queued" as const,
+      stage: "queued" as const,
+      progress: 0,
+      options: options || null,
+      startedAt: new Date(),
+    };
+
+    if (typeof db.transaction === "function") {
+      return db.transaction(async (tx): Promise<StartGenerationResult> => {
+        const [project] = await tx.select().from(projects).where(eq(projects.id, projectId)).for("update");
+        if (!project) {
+          return { ok: false, status: 404, message: "Project not found", code: "NOT_FOUND" };
+        }
+        if (project.userId !== userId) {
+          return { ok: false, status: 403, message: "Forbidden", code: "FORBIDDEN" };
+        }
+        if (!project.referenceAssetId) {
+          return {
+            ok: false,
+            status: 422,
+            message: "Project missing reference video",
+            code: "MISSING_ASSETS",
+          };
+        }
+        if (!project.songAssetId) {
+          return { ok: false, status: 422, message: "Project missing song asset", code: "MISSING_ASSETS" };
+        }
+
+        const existing = await tx.query.generationJobs.findFirst({
+          where: and(
+            eq(generationJobs.projectId, projectId),
+            inArray(generationJobs.status, ["queued", "running"]),
+          ),
+        });
+        if (existing) {
+          return {
+            ok: false,
+            status: 409,
+            message: "Generation already in progress",
+            code: "GENERATION_ALREADY_RUNNING",
+            extra: { jobId: existing.id },
+          };
+        }
+
+        const [job] = await tx.insert(generationJobs).values(values).returning();
+        return { ok: true, job, project };
+      });
+    }
+
+    const project = await db.query.projects.findFirst({ where: eq(projects.id, projectId) });
+    if (!project) {
+      return { ok: false, status: 404, message: "Project not found", code: "NOT_FOUND" };
+    }
+    if (project.userId !== userId) {
+      return { ok: false, status: 403, message: "Forbidden", code: "FORBIDDEN" };
+    }
+    if (!project.referenceAssetId) {
+      return { ok: false, status: 422, message: "Project missing reference video", code: "MISSING_ASSETS" };
+    }
+    if (!project.songAssetId) {
+      return { ok: false, status: 422, message: "Project missing song asset", code: "MISSING_ASSETS" };
+    }
+
+    const existing = await db.query.generationJobs.findFirst({
+      where: and(
+        eq(generationJobs.projectId, projectId),
+        inArray(generationJobs.status, ["queued", "running"]),
+      ),
+    });
+    if (existing) {
+      return {
+        ok: false,
+        status: 409,
+        message: "Generation already in progress",
+        code: "GENERATION_ALREADY_RUNNING",
+        extra: { jobId: existing.id },
+      };
+    }
+
+    const [job] = await db.insert(generationJobs).values(values).returning();
+    return { ok: true, job, project };
+  }
+
+  // Generate a cutlist from the reference video and song
+  app.post(
+    "/:id/generate",
+    { preHandler: validateBody(generateFromReferenceSchema) },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const userId = request.userId;
+      const body = request.validatedBody as { prompt?: string; options?: Record<string, unknown> };
+
+      const options = (body.options || undefined) as Record<string, unknown> | undefined;
+      const startResult = await startGenerationAtomic(id, userId, options);
+      if (!startResult.ok) {
+        return sendError(reply, startResult.status, startResult.message, startResult.code, startResult.extra);
+      }
+
+      const { job, project } = startResult;
+      const completionToken = createCompletionToken(job.id, project.id);
+
+      // Resolve style analysis if it is not already cached.
+      let styleAnalysis = (project.styleAnalysis as Record<string, unknown> | null) ?? undefined;
+      if (!styleAnalysis && project.referenceAssetId) {
+        styleAnalysis = (await getStyleAnalysisFromWorkflow(project.referenceAssetId)) ?? undefined;
+        if (styleAnalysis) {
+          await db.update(projects).set({ styleAnalysis, updatedAt: new Date() }).where(eq(projects.id, id));
+        }
+      }
+      if (!styleAnalysis) {
+        await db.delete(generationJobs).where(eq(generationJobs.id, job.id));
+        return sendError(reply, 202, "Style analysis not yet available", "PENDING");
+      }
+
+      const assetIds = [
+        project.referenceAssetId,
+        project.songAssetId,
+        ...((project.clipAssetIds as string[]) || []),
+      ].filter((id): id is string => Boolean(id));
+
+      const assetRows =
+        (assetIds.length
+          ? await db.query.assets.findMany({
+              where: (table, { inArray }) => inArray(table.id, assetIds),
+              columns: { id: true, storageKey: true },
+            })
+          : []) ?? [];
+
+      const assetKeyMap: Record<string, string> = {};
+      for (const row of assetRows) {
+        if (row?.id && row?.storageKey) {
+          assetKeyMap[row.id] = row.storageKey;
+        }
+      }
+
+      let workflowId: string;
+      try {
+        workflowId = await startGenerateCutlistWorkflow({
+          projectId: project.id,
+          generationJobId: job.id,
+          userId,
+          referenceAssetId: project.referenceAssetId,
+          songAssetId: project.songAssetId!,
+          clipAssetIds: (project.clipAssetIds as string[]) || [],
+          styleAnalysis,
+          assetKeyMap,
+          completionToken,
+          options,
+        });
+      } catch (e) {
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        await db
+          .update(generationJobs)
+          .set({ status: "failed", errorMessage })
+          .where(eq(generationJobs.id, job.id));
+        return sendError(reply, 500, "Generation engine unavailable", "TEMPORAL_ERROR");
+      }
+
+      await db.update(generationJobs).set({ workflowId }).where(eq(generationJobs.id, job.id));
+
+      await enqueueJob({
+        jobId: job.id,
+        projectId: id,
+        type: "cutlist_generation",
+        payload: options || {},
+        priority: 1,
+        createdAt: new Date().toISOString(),
+      });
+
+      await publishProgress(job.id, "queued", 0, "Generation queued");
+
+      return { job: { ...job, workflowId } };
+    },
+  );
+
+  // Get latest generation job for a project
+  app.get("/:id/generation", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const userId = request.userId;
+
+    const project = await db.query.projects.findFirst({ where: eq(projects.id, id) });
+    if (!project) {
+      return sendError(reply, 404, "Project not found", "NOT_FOUND");
+    }
+    if (project.userId !== userId) {
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
+    }
+
+    const job = await db.query.generationJobs.findFirst({
+      where: eq(generationJobs.projectId, id),
+      orderBy: [desc(generationJobs.createdAt)],
+    });
+
+    if (!job) {
+      return sendError(reply, 404, "No generation job found", "NOT_FOUND");
+    }
+
+    return { job };
   });
 
   // Transcribe audio asset to subtitles

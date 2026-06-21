@@ -41,11 +41,11 @@ const PromptPanel = dynamic(() => import("./panels/PromptPanel").then((m) => m.P
   ),
 });
 
-import { buildInitialCutList } from "@ai-video-editor/shared-types";
 import { toast } from "sonner";
 import { type CommandAction, CommandPalette, useCommandPalette } from "@/components/cmdk/CommandPalette";
 import { useAssetPoller } from "@/hooks/useAssetPoller";
 import { useEditor } from "@/hooks/useEditor";
+import { useProgress } from "@/hooks/useProgress";
 import { useRenderStatus } from "@/hooks/useRenderStatus";
 import { useStyleAnalysis } from "@/hooks/useStyleAnalysis";
 import { useTimeline } from "@/hooks/useTimeline";
@@ -83,6 +83,39 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
   const [generatingRef, setGeneratingRef] = useState(false);
   const styleAnalysis = useStyleAnalysis(project.id);
   const api = useApi();
+
+  useProgress(activeJobId, {
+    onComplete: async () => {
+      try {
+        const { job } = await api.projects.getGeneration(project.id);
+        if (job.outputCutList) {
+          actions.promptApply(job.outputCutList as CutList);
+          toast.success("Cut-list ready — generated from reference");
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Generation result unavailable");
+      } finally {
+        setActiveJobId(null);
+      }
+    },
+    onFailed: (message) => {
+      toast.error(message);
+      setActiveJobId(null);
+    },
+    fallbackPoll: async () => {
+      try {
+        const { job } = await api.projects.getGeneration(project.id);
+        return {
+          type: job.status,
+          stage: job.stage,
+          progress: job.progress,
+          message: job.status === "complete" ? "Generation complete" : job.errorMessage || "Generating...",
+        };
+      } catch {
+        return null;
+      }
+    },
+  });
 
   const aspectRatio = state.cutList?.globals?.aspectRatio || "9:16";
   const setAspectRatio = (ratio: string) => {
@@ -310,20 +343,11 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
                   toast.info("Style analysis is still running. Try again in a few seconds.");
                   return;
                 }
-                // Create a basic cutlist if none exists
-                if (!state.cutList) {
-                  const basicCutList = buildInitialCutList(state.assets) as unknown as CutList;
-                  await api.projects.updateCutlist(project.id, basicCutList);
-                  actions.setCutList(basicCutList);
-                }
-                const prompt = `Generate a cutlist that matches the reference video's editing style, shot types, transitions, and pacing. Analyze the reference and replicate its visual rhythm.\n\nReference style analysis:\n${JSON.stringify(analysis, null, 2)}`;
-                const result = await api.projects.prompt(project.id, prompt, {
-                  signal: AbortSignal.timeout(180_000),
+                const { job } = await api.projects.generate(project.id, {
+                  prompt: `Generate a cutlist that matches the reference video's editing style, shot types, transitions, and pacing. Analyze the reference and replicate its visual rhythm.`,
                 });
-                if (result.project.cutList) {
-                  actions.promptApply(result.project.cutList as CutList);
-                  toast.success("Cut-list ready — generated from reference");
-                }
+                setActiveJobId(job.id);
+                toast.info("Generation started — you can keep editing while it runs.");
               } catch (err) {
                 toast.error(err instanceof Error ? err.message : "Reference generation failed");
               } finally {
@@ -333,7 +357,8 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
             disabled={
               generatingRef ||
               !state.assets.some((a) => a.type === "reference_video") ||
-              styleAnalysis.isPending
+              styleAnalysis.isPending ||
+              !!activeJobId
             }
             className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition disabled:opacity-50"
             data-testid="generate-from-reference"
@@ -342,7 +367,9 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
               ? "Generating..."
               : styleAnalysis.isPending
                 ? "Analyzing reference..."
-                : "Generate from reference"}
+                : activeJobId
+                  ? "Generation running..."
+                  : "Generate from reference"}
           </button>
           <button
             onClick={async () => {

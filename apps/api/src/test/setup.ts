@@ -70,6 +70,7 @@ vi.mock("../db", () => ({
       projects: { findFirst: vi.fn(), findMany: vi.fn() },
       assets: { findFirst: vi.fn(), findMany: vi.fn() },
       renders: { findFirst: vi.fn(), findMany: vi.fn() },
+      generationJobs: { findFirst: vi.fn(), findMany: vi.fn() },
       templates: { findFirst: vi.fn(), findMany: vi.fn() },
       providerKeys: { findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn() },
       userEvents: { findFirst: vi.fn(), findMany: vi.fn() },
@@ -166,6 +167,9 @@ vi.mock("../services/queue", () => ({
   enqueueJob: vi.fn(async () => {}),
   probeRedis: vi.fn(async () => {}),
   publishNotification: vi.fn(async () => {}),
+  publishProgress: vi.fn(async () => {}),
+  setJobStatus: vi.fn(async () => {}),
+  getBufferedEvents: vi.fn(async () => []),
 }));
 
 // Mock Temporal
@@ -176,6 +180,7 @@ vi.mock("../services/temporal", () => ({
   startAnalyzeStyleWorkflow: vi.fn(async () => "style-wf-123"),
   startProbeWorkflow: vi.fn(async () => "probe-wf-123"),
   startSegmentSubjectWorkflow: vi.fn(async () => "segment-wf-123"),
+  startGenerateCutlistWorkflow: vi.fn(async () => "generate-wf-123"),
   getStyleAnalysisFromWorkflow: vi.fn(async () => null),
   sendCutlistApprovedSignal: vi.fn(async () => {}),
   getTemporalClient: vi.fn(async () => ({

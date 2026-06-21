@@ -44,6 +44,7 @@ export class APIError extends Error {
         return this.formatZodErrors() ?? "Please check your input.";
       case "CONFLICT":
       case "RENDER_ALREADY_RUNNING":
+      case "GENERATION_ALREADY_RUNNING":
       case "CONCURRENT_EDIT":
       case "PROJECT_LOCKED":
         return "This conflicts with current state. Refresh and try again.";

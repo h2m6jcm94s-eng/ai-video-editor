@@ -57,6 +57,20 @@ export interface RenderJob {
   createdAt: string;
 }
 
+export interface GenerationJob {
+  id: string;
+  projectId: string;
+  status: "queued" | "running" | "complete" | "failed";
+  stage: string;
+  progress: number;
+  workflowId: string | null;
+  outputCutList: CutList | null;
+  errorMessage: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+}
+
 export interface PreviewEffects {
   brightness: number; // 0-2, default 1
   contrast: number; // 0-2, default 1

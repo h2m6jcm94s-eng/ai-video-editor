@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { FastifyInstance } from "fastify";
 import Redis from "ioredis";
 import { db } from "../db";
-import { renders } from "../db/schema";
+import { generationJobs, renders } from "../db/schema";
 import { sendError } from "../lib/errors";
 import { getBufferedEvents } from "../services/queue";
 
@@ -15,11 +15,19 @@ export async function progressRoutes(app: FastifyInstance) {
     const { jobId } = request.params as { jobId: string };
     const userId = request.userId;
 
-    // Auth check: verify user owns this render job
-    const job = await db.query.renders.findFirst({
+    // Auth check: verify user owns this render or generation job
+    const renderJob = await db.query.renders.findFirst({
       where: eq(renders.id, jobId),
       with: { project: true },
     });
+    const generationJob = renderJob
+      ? null
+      : await db.query.generationJobs?.findFirst({
+          where: eq(generationJobs.id, jobId),
+          with: { project: true },
+        });
+    const job = renderJob || generationJob;
+
     if (!job) {
       return sendError(reply, 404, "Job not found", "NOT_FOUND");
     }

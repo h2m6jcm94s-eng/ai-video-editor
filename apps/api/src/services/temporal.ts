@@ -123,23 +123,23 @@ export async function startAnalyzeStyleWorkflow(options: StartAnalyzeStyleOption
   });
 }
 
-export async function startProbeWorkflow(assetId: string, storageKey: string) {
+export async function startProbeWorkflow(assetId: string, storageKey: string, assetType?: string) {
   return withTemporalReconnect(async (client) => {
     const handle = await client.workflow.start("ProbeAssetWorkflow", {
       taskQueue: "ingest",
-      args: [{ asset_id: assetId, storage_key: storageKey }],
+      args: [{ asset_id: assetId, storage_key: storageKey, asset_type: assetType || "" }],
       workflowId: `probe-${assetId}`,
     });
     return handle.workflowId;
   });
 }
 
-export async function getStyleAnalysisFromWorkflow(assetId: string) {
+export async function getStyleAnalysisFromWorkflow(assetId: string): Promise<Record<string, unknown> | null> {
   return withTemporalReconnect(async (client) => {
     const handle = client.workflow.getHandle(`style-${assetId}`);
     try {
       // Query the running/completed workflow for its current output.
-      return await handle.query("get_analysis");
+      return (await handle.query("get_analysis")) as Record<string, unknown> | null;
     } catch (e) {
       // Workflow may not exist yet or may have already completed and been cleaned up.
       return null;
@@ -151,6 +151,43 @@ export async function sendCutlistApprovedSignal(workflowId: string, cutList: Cut
   return withTemporalReconnect(async (client) => {
     const handle = client.workflow.getHandle(workflowId);
     await handle.signal("cutlist_approved", cutList);
+  });
+}
+
+export interface StartGenerateOptions {
+  projectId: string;
+  generationJobId: string;
+  userId: string;
+  referenceAssetId?: string | null;
+  songAssetId: string;
+  clipAssetIds: string[];
+  styleAnalysis?: Record<string, unknown> | null;
+  assetKeyMap: Record<string, string>;
+  completionToken: string;
+  options?: Record<string, unknown>;
+}
+
+export async function startGenerateCutlistWorkflow(options: StartGenerateOptions) {
+  return withTemporalReconnect(async (client) => {
+    const handle = await client.workflow.start("GenerateFromReferenceWorkflow", {
+      taskQueue: "generate",
+      args: [
+        {
+          project_id: options.projectId,
+          generation_job_id: options.generationJobId,
+          user_id: options.userId,
+          reference_asset_id: options.referenceAssetId,
+          song_asset_id: options.songAssetId,
+          clip_asset_ids: options.clipAssetIds,
+          style_analysis: options.styleAnalysis || null,
+          asset_key_map: options.assetKeyMap,
+          completion_token: options.completionToken,
+          options: options.options || {},
+        },
+      ],
+      workflowId: `generate-${options.projectId}-${options.generationJobId}`,
+    });
+    return handle.workflowId;
   });
 }
 

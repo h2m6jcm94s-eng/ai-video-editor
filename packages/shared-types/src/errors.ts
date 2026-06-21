@@ -16,6 +16,7 @@ export const API_ERROR_CODES = [
   // Conflict
   "CONFLICT",
   "RENDER_ALREADY_RUNNING",
+  "GENERATION_ALREADY_RUNNING",
   "CONCURRENT_EDIT",
   "PROJECT_LOCKED",
   // Provider
