@@ -11,6 +11,7 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from style_worker.activities import (
+    download_reference_video,
     extract_lut,
     detect_text_overlays,
     analyze_motion,
@@ -28,6 +29,7 @@ async def main() -> None:
         task_queue="style",
         workflows=[AnalyzeStyleWorkflow],
         activities=[
+            download_reference_video,
             extract_lut,
             detect_text_overlays,
             analyze_motion,

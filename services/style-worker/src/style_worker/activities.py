@@ -3,6 +3,8 @@
 # Commercial SaaS use is prohibited without written permission.
 """Temporal activities for the style-analysis worker."""
 
+import os
+import tempfile
 from typing import List
 
 from temporalio import activity
@@ -12,6 +14,15 @@ from style_worker.lut_extract import extract_lut_from_reference
 from style_worker.text_extract import extract_text_overlays
 from style_worker.transition_type import classify_transitions
 from shared_py.models import Overlay, ShotBoundary, StyleAnalysis
+from shared_py.storage import download_asset
+
+
+@activity.defn
+async def download_reference_video(asset_id: str, storage_key: str) -> str:
+    """Download a reference video asset from object storage to a local path."""
+    ext = os.path.splitext(storage_key)[1] or ".mp4"
+    local_path = os.path.join(tempfile.gettempdir(), f"ave_style_{asset_id}{ext}")
+    return download_asset(storage_key, local_path)
 
 
 @activity.defn

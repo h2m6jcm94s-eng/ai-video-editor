@@ -4,6 +4,8 @@
 """Temporal workflow definitions for the style-analysis worker."""
 
 import asyncio
+import os
+import tempfile
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import List, Optional
@@ -14,8 +16,15 @@ from temporalio.common import RetryPolicy
 
 @dataclass
 class AnalyzeStyleInput:
-    reference_video_path: str
-    output_dir: str
+    """Input for the standalone style-analysis workflow.
+
+    The workflow downloads the reference video from object storage, then runs
+    LUT extraction, motion analysis, transition classification, and text
+    overlay detection in parallel.
+    """
+
+    asset_id: str
+    storage_key: str
     shot_boundaries: List[dict] = field(default_factory=list)
     lut_strength: float = 0.5
     text_sample_fps: float = 5.0
@@ -45,31 +54,41 @@ class AnalyzeStyleWorkflow:
         retry = RetryPolicy(maximum_attempts=3)
         timeout = timedelta(seconds=300)
 
+        # Download the reference video from R2/S3 to a local temp path.
+        reference_video_path = await workflow.execute_activity(
+            "download_reference_video",
+            args=(input.asset_id, input.storage_key),
+            start_to_close_timeout=timeout,
+            retry_policy=retry,
+        )
+
+        output_dir = tempfile.mkdtemp(prefix="ave_style_")
+
         # LUT extraction is independent of motion/transitions/text — run in parallel
         lut_future = workflow.execute_activity(
             "extract_lut",
-            args=(input.reference_video_path, input.output_dir, input.lut_strength),
+            args=(reference_video_path, output_dir, input.lut_strength),
             start_to_close_timeout=timeout,
             retry_policy=retry,
         )
 
         motion_future = workflow.execute_activity(
             "analyze_motion",
-            args=(input.reference_video_path, input.shot_boundaries),
+            args=(reference_video_path, input.shot_boundaries),
             start_to_close_timeout=timeout,
             retry_policy=retry,
         )
 
         transitions_future = workflow.execute_activity(
             "classify_shot_transitions",
-            args=(input.reference_video_path, input.shot_boundaries),
+            args=(reference_video_path, input.shot_boundaries),
             start_to_close_timeout=timeout,
             retry_policy=retry,
         )
 
         text_future = workflow.execute_activity(
             "detect_text_overlays",
-            args=(input.reference_video_path, input.text_sample_fps),
+            args=(reference_video_path, input.text_sample_fps),
             start_to_close_timeout=timeout,
             retry_policy=retry,
         )
