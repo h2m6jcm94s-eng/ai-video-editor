@@ -106,30 +106,205 @@ def _get_param(params, key: str, default):
     return getattr(params, key, default)
 
 
-def _apply_video_effects(slot: Slot, base_vf: str) -> str:
-    """Apply video effects to a slot's filter chain."""
+def _enable_expr(start_s: float, end_s: float) -> str:
+    """Build an FFmpeg enable expression for a time window.
+
+    Commas are escaped because the filter chain is comma-separated.
+    """
+    return f"between(t\\,{start_s:.3f}\\,{end_s:.3f})"
+
+
+def _drawtext_filter(
+    text: str,
+    start_s: float,
+    end_s: float,
+    position: str,
+    font_size_px: int,
+    color: str,
+    stroke: str,
+    fontfile: str,
+) -> str:
+    """Build a drawtext filter string for an in-slot text effect."""
+    x_expr = "(w-text_w)/2"
+    y_expr = "(h-text_h)/2"
+    if position == "top":
+        y_expr = "h*0.1"
+    elif position == "bottom":
+        y_expr = "h*0.9"
+    elif position == "top_left":
+        x_expr = "w*0.05"
+        y_expr = "h*0.1"
+    elif position == "top_right":
+        x_expr = "w*0.95-text_w"
+        y_expr = "h*0.1"
+    elif position == "bottom_left":
+        x_expr = "w*0.05"
+        y_expr = "h*0.9-text_h"
+    elif position == "bottom_right":
+        x_expr = "w*0.95-text_w"
+        y_expr = "h*0.9-text_h"
+
+    font_clause = f"fontfile={fontfile}:" if fontfile else ""
+    enable = _enable_expr(start_s, end_s)
+    return (
+        f"drawtext=text='{_esc_text(text)}':"
+        f"x={x_expr}:y={y_expr}:"
+        f"fontsize={font_size_px}:"
+        f"fontcolor={color}:"
+        f"{font_clause}"
+        f"borderw=2:bordercolor={stroke}:"
+        f"enable='{enable}'"
+    )
+
+
+def _apply_video_effects(
+    slot: Slot,
+    base_vf: str,
+    temp_dir: str,
+    relative_font: str,
+    config: RenderConfig,
+) -> str:
+    """Apply video effects to a slot's filter chain.
+
+    Effects are applied during segment extraction, so ``t`` is relative to the
+    start of the slot.  ``effect.start_s`` is absolute timeline time; we compute
+    a relative window for timeline-enabled filters.
+    """
     filters = [base_vf] if base_vf else []
+
     for effect in slot.effects or []:
         etype = effect.type
         params = effect.params
+        rel_start = max(0.0, effect.start_s - slot.start_s)
+        rel_end = rel_start + min(effect.duration_s, slot.duration_s - rel_start)
+        if rel_end <= rel_start:
+            continue
+
         if etype == "zoom_punch_in":
             scale = _get_param(params, "target_scale", 1.3)
-            dur = _get_param(params, "duration_ms", 300) / 1000.0
+            dur = min(_get_param(params, "duration_ms", 300) / 1000.0, rel_end - rel_start)
+            # Use a time-varying crop window to simulate a zoom/punch-in.
+            # ``n`` is the frame index relative to the start of the segment.
+            fps = config.fps or 30
+            start_frame = int(rel_start * fps)
+            end_frame = start_frame + max(1, int(dur * fps))
+            ramp_expr = f"max(0\\,min(1\\,(n-{start_frame})/({end_frame}-{start_frame})))"
             filters.append(
-                f"zoompan=z='1+({scale}-1)*min(t/{dur},1)':d=1:s=1280x720"
+                f"crop='iw/(1+({scale}-1)*{ramp_expr})':"
+                f"'ih/(1+({scale}-1)*{ramp_expr})':"
+                f"(iw-ow)/2:(ih-oh)/2"
             )
+
         elif etype == "vignette":
             intensity = _get_param(params, "intensity", 0.4)
-            filters.append(f"vignette=PI/{max(0.01, 1 - intensity)}")
+            filters.append(
+                f"vignette=PI/{max(0.01, 1 - intensity)}:enable='{_enable_expr(rel_start, rel_end)}'"
+            )
+
         elif etype == "film_grain":
             intensity = _get_param(params, "intensity", 0.2)
-            filters.append(f"noise=c0s={intensity*10}:allf=t+u")
+            filters.append(
+                f"noise=c0s={intensity * 10}:allf=t+u:enable='{_enable_expr(rel_start, rel_end)}'"
+            )
+
         elif etype == "shake":
             intensity = _get_param(params, "intensity", 5)
-            dur = _get_param(params, "duration_ms", 300) / 1000.0
+            dur = min(_get_param(params, "duration_ms", 300) / 1000.0, rel_end - rel_start)
+            fps = config.fps or 30
+            start_frame = int(rel_start * fps)
+            end_frame = start_frame + max(1, int(dur * fps))
+            window = f"between(n\\,{start_frame}\\,{end_frame})"
             filters.append(
-                f"crop=iw:ih:(random(1)*{intensity}):(random(1)*{intensity}):enable='lte(t,{dur})'"
+                f"crop=iw:ih:"
+                f"'(random(1)*{intensity})*{window}':"
+                f"'(random(1)*{intensity})*{window}'"
             )
+
+        elif etype == "focus_pull":
+            target_blur = _get_param(params, "target_blur", 4.0)
+            dur = min(_get_param(params, "duration_ms", 600) / 1000.0, rel_end - rel_start)
+            # Apply a Gaussian blur ramped up over the effect window.  gblur's
+            # sigma is constant, so we simulate a ramp with a short fade-in by
+            # chaining two blur passes of increasing strength.
+            mid = rel_start + dur * 0.5
+            filters.append(
+                f"gblur=sigma={target_blur * 0.4:.2f}:steps=1:"
+                f"enable='{_enable_expr(rel_start, mid)}'"
+            )
+            filters.append(
+                f"gblur=sigma={target_blur:.2f}:steps=2:"
+                f"enable='{_enable_expr(mid, rel_start + dur)}'"
+            )
+
+        elif etype == "glitch":
+            intensity = _get_param(params, "intensity", 0.3)
+            shift = max(1, int(intensity * 20))
+            filters.append(
+                f"rgbashift=rh={shift}:gh=-{shift}:bv={shift}:"
+                f"enable='{_enable_expr(rel_start, rel_end)}'"
+            )
+            filters.append(
+                f"noise=c0s={intensity * 8}:allf=t+u:"
+                f"enable='{_enable_expr(rel_start, rel_end)}'"
+            )
+
+        elif etype == "color_pop":
+            saturation = _get_param(params, "saturation", 1.5)
+            hue_shift = _get_param(params, "hue_shift", 0.0)
+            filters.append(
+                f"eq=saturation={saturation}:"
+                f"enable='{_enable_expr(rel_start, rel_end)}'"
+            )
+            if abs(hue_shift) > 0.1:
+                filters.append(
+                    f"hue=h={hue_shift}:enable='{_enable_expr(rel_start, rel_end)}'"
+                )
+
+        elif etype in ("text_kinetic", "lower_third", "callout_arrow"):
+            text = _get_param(params, "text", "")
+            if not text or not relative_font:
+                continue
+            position = "bottom" if etype == "lower_third" else _get_param(params, "position", "center")
+            font_size_px = _get_param(params, "font_size_px", 42)
+            color = _get_param(params, "color", "#FFFFFF")
+            stroke = _get_param(params, "stroke", "#000000")
+            # Render text via drawtext directly into the segment filter chain.
+            # This keeps text locked to the slot; full-cutlist overlays are still
+            # rendered in Stage 2 for global text elements.
+            filters.append(
+                _drawtext_filter(
+                    text=text,
+                    start_s=rel_start,
+                    end_s=rel_end,
+                    position=position,
+                    font_size_px=font_size_px,
+                    color=color,
+                    stroke=stroke,
+                    fontfile=relative_font,
+                )
+            )
+
+        elif etype == "freeze_frame":
+            warnings.warn(
+                f"freeze_frame effect on slot {slot.index} is not yet rendered; "
+                "it changes clip timing and requires time-remapping support.",
+                stacklevel=3,
+            )
+
+        elif etype == "speed_ramp":
+            warnings.warn(
+                f"speed_ramp effect on slot {slot.index} is not yet rendered; "
+                "it requires non-linear time-remapping to preserve timeline duration.",
+                stacklevel=3,
+            )
+
+        elif etype in ("whoosh_sfx", "ding_sfx", "record_scratch_sfx"):
+            warnings.warn(
+                f"{etype} effect on slot {slot.index} is an audio SFX and is not "
+                "yet rendered by the video compiler.",
+                stacklevel=3,
+            )
+
     return ",".join(filters)
 
 
@@ -186,6 +361,16 @@ def compile_timeline(
     temp_files = []
     temp_dir = tempfile.mkdtemp(prefix="ave_render_")
 
+    # Copy the system font into the render temp dir up-front so both per-slot
+    # text effects (Stage 1) and global overlays (Stage 2) can reference it
+    # with a relative, colon-free path on Windows.
+    fontfile = _find_font()
+    relative_font = ""
+    if fontfile and os.path.exists(fontfile):
+        local_font = os.path.join(temp_dir, "font.ttf")
+        shutil.copy2(fontfile, local_font)
+        relative_font = "font.ttf"
+
     for slot in cutlist.slots:
         clip_id = slot.selected_clip_id
         if not clip_id or clip_id not in clip_paths:
@@ -206,7 +391,7 @@ def compile_timeline(
             f"pad={config.width}:{config.height}:(ow-iw)/2:(oh-ih)/2"
         )
 
-        vf = _apply_video_effects(slot, base_vf)
+        vf = _apply_video_effects(slot, base_vf, temp_dir, relative_font, config)
 
         cmd = [
             "ffmpeg", "-y",
@@ -219,7 +404,7 @@ def compile_timeline(
             "-an",
             segment_path,
         ]
-        _run_ffmpeg(cmd, f"segment extraction for slot {slot.index}")
+        _run_ffmpeg(cmd, f"segment extraction for slot {slot.index}", cwd=temp_dir)
 
         slot_segments.append({
             "path": segment_path,
@@ -263,15 +448,7 @@ def compile_timeline(
         current_label = lut_label
 
     # Text overlays (clamp to final rendered duration with small buffer).
-    # Copy the system font into the temp dir so we can reference it with a
-    # relative, colon-free path that FFmpeg's drawtext parser accepts on Windows.
-    fontfile = _find_font()
-    relative_font = ""
-    if fontfile and os.path.exists(fontfile):
-        local_font = os.path.join(temp_dir, "font.ttf")
-        shutil.copy2(fontfile, local_font)
-        relative_font = "font.ttf"
-
+    # The system font was already copied into the render temp dir in Stage 1.
     for overlay in cutlist.overlays:
         start_s = round(max(0.0, overlay.start_s), 3)
         end_s = round(min(overlay.end_s, current_duration - 0.05), 3)
