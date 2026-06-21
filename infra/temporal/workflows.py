@@ -41,6 +41,7 @@ class VideoRenderInput:
     user_id: str
     asset_key_map: Dict[str, str]
     style_analysis: Dict[str, Any] = None
+    mask_asset_ids: List[str] = None
 
 
 @dataclass
@@ -252,7 +253,7 @@ class VideoRenderWorkflow:
 
         output_path = await workflow.execute_activity(
             "render_720p",
-            args=(cutlist, render_clip_ids, clip_key_map, style.get("lut_path"), input.song_asset_id, input.asset_key_map),
+            args=(cutlist, render_clip_ids, clip_key_map, style.get("lut_path"), input.song_asset_id, input.asset_key_map, input.mask_asset_ids or []),
             start_to_close_timeout=600,
             retry_policy=RetryPolicy(maximum_attempts=2),
         )
@@ -286,3 +287,42 @@ class VideoRenderWorkflow:
     @workflow.query
     def get_progress(self) -> dict:
         return {"stage": self._stage, "progress": self._progress}
+@dataclass
+class SegmentSubjectInput:
+    asset_id: str
+    project_id: str
+    storage_key: str
+    prompt: str
+    mode: str = "image"
+    frame_index: int = 0
+
+
+@workflow.defn
+class SegmentSubjectWorkflow:
+    """One-shot workflow to run SAM3 segmentation on an asset."""
+
+    def __init__(self) -> None:
+        self._result: dict = {}
+
+    @workflow.run
+    async def run(self, input: SegmentSubjectInput) -> dict:
+        self._result = {"status": "running"}
+        result = await workflow.execute_activity(
+            "segment_subject",
+            args=(
+                input.asset_id,
+                input.storage_key,
+                input.prompt,
+                input.mode,
+                input.frame_index,
+                input.project_id,
+            ),
+            start_to_close_timeout=600,
+            retry_policy=RetryPolicy(maximum_attempts=2),
+        )
+        self._result = {**result, "status": "completed" if not result.get("skipped") else "skipped"}
+        return self._result
+
+    @workflow.query
+    def get_result(self) -> dict:
+        return self._result

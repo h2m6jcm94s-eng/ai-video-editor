@@ -1,10 +1,4 @@
-export const STYLE_TIER = [
-  "cuts_only",
-  "color_grade",
-  "with_text",
-  "with_effects",
-  "full_remix",
-] as const;
+export const STYLE_TIER = ["cuts_only", "color_grade", "with_text", "with_effects", "full_remix"] as const;
 
 export const EDIT_MODE = ["auto", "assisted"] as const;
 
@@ -17,21 +11,12 @@ export const ASSET_TYPE = [
   "subtitle",
   "lut",
   "sfx",
+  "mask",
 ] as const;
 
-export const PROJECT_STATUS = [
-  "uploading",
-  "processing",
-  "complete",
-  "failed",
-] as const;
+export const PROJECT_STATUS = ["uploading", "processing", "complete", "failed"] as const;
 
-export const RENDER_STATUS = [
-  "queued",
-  "running",
-  "complete",
-  "failed",
-] as const;
+export const RENDER_STATUS = ["queued", "running", "complete", "failed"] as const;
 
 export type StyleTier = (typeof STYLE_TIER)[number];
 export type EditMode = (typeof EDIT_MODE)[number];

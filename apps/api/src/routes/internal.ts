@@ -28,7 +28,7 @@ const userEventSchema = z
 const createAssetSchema = z
   .object({
     projectId: z.string().uuid(),
-    type: z.enum(["reference_video", "song", "clip", "render", "subtitle", "lut", "sfx"]),
+    type: z.enum(["reference_video", "song", "clip", "render", "subtitle", "lut", "sfx", "mask"]),
     filename: z.string().min(1).max(255),
     mimeType: z.string().min(1).max(100),
   })
@@ -131,7 +131,7 @@ export async function internalRoutes(app: FastifyInstance) {
   // Create a new asset row for worker-generated outputs (e.g. renders, LUTs)
   app.post(
     "/api/internal/assets",
-    { preHandler: validateBody(createAssetSchema) },
+    { preHandler: [requireInternalToken, validateBody(createAssetSchema)] },
     async (request, reply) => {
       const body = request.validatedBody as z.infer<typeof createAssetSchema>;
 
@@ -166,7 +166,7 @@ export async function internalRoutes(app: FastifyInstance) {
   // Update asset probe metadata (used by ingest worker after ffprobe)
   app.patch(
     "/api/internal/assets/:assetId/probe",
-    { preHandler: validateBody(probeUpdateSchema) },
+    { preHandler: [requireInternalToken, validateBody(probeUpdateSchema)] },
     async (request, reply) => {
       const { assetId } = request.params as { assetId: string };
       const body = request.validatedBody as z.infer<typeof probeUpdateSchema>;
@@ -193,10 +193,36 @@ export async function internalRoutes(app: FastifyInstance) {
     },
   );
 
+  // Merge metadata into an existing asset (used by workers for segmentation, etc.)
+  app.patch(
+    "/api/internal/assets/:assetId/metadata",
+    { preHandler: requireInternalToken },
+    async (request, reply) => {
+      const { assetId } = request.params as { assetId: string };
+      const body = request.body as { metadata?: Record<string, unknown> };
+
+      const asset = await db.query.assets.findFirst({
+        where: eq(assets.id, assetId),
+      });
+      if (!asset) {
+        return sendError(reply, 404, "Asset not found", "NOT_FOUND");
+      }
+
+      const merged = { ...(asset.metadata || {}), ...(body.metadata || {}) };
+      const [updated] = await db
+        .update(assets)
+        .set({ metadata: merged })
+        .where(eq(assets.id, assetId))
+        .returning();
+
+      return { asset: updated };
+    },
+  );
+
   // Mark a worker-generated asset as complete and set its public URL
   app.patch(
     "/api/internal/assets/:assetId/complete",
-    { preHandler: validateBody(assetCompleteSchema) },
+    { preHandler: [requireInternalToken, validateBody(assetCompleteSchema)] },
     async (request, reply) => {
       const { assetId } = request.params as { assetId: string };
       const body = request.validatedBody as z.infer<typeof assetCompleteSchema>;

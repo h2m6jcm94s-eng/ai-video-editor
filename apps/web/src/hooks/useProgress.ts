@@ -4,6 +4,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useApi } from "@/lib/api/client";
 import { useSSE } from "./useSSE";
 
 interface ProgressState {
@@ -23,6 +24,7 @@ interface ProgressEvent {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
 
 export function useProgress(jobId: string | null) {
+  const api = useApi();
   const [state, setState] = useState<ProgressState>({
     stage: "",
     progress: 0,
@@ -40,11 +42,27 @@ export function useProgress(jobId: string | null) {
     });
   }, []);
 
+  const fallbackPoll = useCallback(async () => {
+    if (!jobId) return null;
+    const { job } = await api.renders.get(jobId);
+    if (!job) return null;
+    const ev: ProgressEvent = {
+      type: job.status,
+      stage: job.stage,
+      progress: job.progress,
+      message: job.status === "complete" ? "Render complete" : job.errorMessage || "",
+    };
+    return ev;
+  }, [jobId, api]);
+
   const { connected } = useSSE<ProgressEvent>({
     url: jobId ? `${API_BASE}/progress/${jobId}/events` : "",
     enabled: !!jobId,
     onEvent: handleEvent,
     maxReconnectAttempts: 5,
+    fallbackPoll,
+    pollIntervalMs: 3000,
+    shouldClose: (data) => data.type === "complete" || data.type === "failed",
   });
 
   return {

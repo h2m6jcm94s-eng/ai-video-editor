@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../services/inges
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../services/style-worker/src"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../services/reason-worker/src"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../services/render-worker/src"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../services/segment-worker/src"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../services/shared-py/src"))
 
 from temporalio import activity, workflow
@@ -310,10 +311,20 @@ async def rank_clips_per_slot(cutlist: dict, clip_ids: list, clip_metadata: dict
 
 
 @activity.defn
-async def render_720p(cutlist: dict, clip_ids: list, clip_key_map: dict, lut_path: str = None, song_asset_id: str = None, song_key_map: dict = None) -> str:
+async def render_720p(
+    cutlist: dict,
+    clip_ids: list,
+    clip_key_map: dict,
+    lut_path: str = None,
+    song_asset_id: str = None,
+    asset_key_map: dict = None,
+    mask_asset_ids: list = None,
+) -> str:
     """Render 720p master."""
     from render_worker.compiler import compile_timeline
     from shared_py.models import CutList, RenderConfig
+
+    asset_key_map = asset_key_map or {}
 
     # Download clips
     clip_paths = {}
@@ -324,8 +335,14 @@ async def render_720p(cutlist: dict, clip_ids: list, clip_key_map: dict, lut_pat
 
     # Download song if provided
     song_path = None
-    if song_asset_id and song_key_map:
-        song_path = _get_asset_path(song_asset_id, song_key_map)
+    if song_asset_id and song_asset_id in asset_key_map:
+        song_path = _get_asset_path(song_asset_id, asset_key_map)
+
+    # Download segmentation masks so the compiler can apply them as mattes
+    mask_paths = {}
+    for mid in mask_asset_ids or []:
+        if mid in asset_key_map:
+            mask_paths[mid] = _get_asset_path(mid, asset_key_map)
 
     output_path = os.path.join(tempfile.gettempdir(), f"ave_render_{cutlist.get('globals', {}).get('projectId', 'out')}.mp4")
 
@@ -336,6 +353,7 @@ async def render_720p(cutlist: dict, clip_ids: list, clip_key_map: dict, lut_pat
         fps=30,
         song_path=song_path,
         lut_path=lut_path,
+        mask_paths=mask_paths,
     )
 
     cutlist_obj = CutList(**cutlist)
@@ -397,6 +415,7 @@ async def main():
             render_720p,
             upload_to_r2,
             notify_user,
+            segment_subject,
         ],
     )
 

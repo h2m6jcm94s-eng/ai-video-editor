@@ -62,6 +62,15 @@ class TestGeminiVeoProvider:
         # The provider attempts import in __init__; with modules broken it stays unavailable.
         assert not provider.available()
 
+    def test_unavailable_with_oauth_token(self):
+        """OAuth/access tokens (e.g., starting with 'AQ.') are rejected with a clear error."""
+        provider = GeminiVeoProvider(api_key="AQ.Ab8RN6K_...")
+        assert not provider.available()
+        result = provider.generate("prompt", 5.0)
+        assert not result.ok
+        assert "OAuth" in result.error
+        assert "AIza" in result.error
+
 
 class TestOpenAICompatibleProviders:
     def test_seedance_unavailable_without_key(self, monkeypatch):

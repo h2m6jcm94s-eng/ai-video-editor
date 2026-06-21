@@ -53,6 +53,7 @@ export interface StartRenderOptions {
   renderId?: string;
   assetKeyMap?: Record<string, string>;
   styleAnalysis?: Record<string, unknown> | null;
+  maskAssetIds?: string[];
 }
 
 export interface StartAnalyzeStyleOptions {
@@ -78,6 +79,7 @@ export async function startRenderWorkflow(options: StartRenderOptions) {
           user_id: options.userId,
           asset_key_map: options.assetKeyMap || {},
           style_analysis: options.styleAnalysis || null,
+          mask_asset_ids: options.maskAssetIds || [],
         },
       ],
       workflowId: `render-${options.projectId}-${options.renderId || Date.now()}`,
@@ -134,5 +136,34 @@ export async function sendCutlistApprovedSignal(workflowId: string, cutList: Cut
   return withTemporalReconnect(async (client) => {
     const handle = client.workflow.getHandle(workflowId);
     await handle.signal("cutlist_approved", cutList);
+  });
+}
+
+export interface StartSegmentSubjectOptions {
+  assetId: string;
+  projectId: string;
+  storageKey: string;
+  prompt: string;
+  mode?: "image" | "video";
+  frameIndex?: number;
+}
+
+export async function startSegmentSubjectWorkflow(options: StartSegmentSubjectOptions) {
+  return withTemporalReconnect(async (client) => {
+    const handle = await client.workflow.start("SegmentSubjectWorkflow", {
+      taskQueue: "segment",
+      args: [
+        {
+          asset_id: options.assetId,
+          project_id: options.projectId,
+          storage_key: options.storageKey,
+          prompt: options.prompt,
+          mode: options.mode || "image",
+          frame_index: options.frameIndex ?? 0,
+        },
+      ],
+      workflowId: `segment-${options.assetId}-${Date.now()}`,
+    });
+    return handle.workflowId;
   });
 }

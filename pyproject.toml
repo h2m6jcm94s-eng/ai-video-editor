@@ -19,6 +19,7 @@ dependencies = [
     "style-worker",
     "upscale-worker",
     "guardrails",
+    "segment-worker",
 ]
 
 [project.optional-dependencies]
@@ -31,7 +32,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "services/segment-worker/tests"]
 pythonpath = [
     "services/shared-py/src",
     "services/ingest-worker/src",
@@ -40,6 +41,7 @@ pythonpath = [
     "services/render-worker/src",
     "services/upscale-worker/src",
     "services/guardrails/src",
+    "services/segment-worker/src",
 ]
 addopts = [
     "-v",
@@ -74,6 +76,7 @@ source = [
     "services/style-worker/src",
     "services/render-worker/src",
     "services/upscale-worker/src",
+    "services/segment-worker/src",
 ]
 omit = [
     "*/tests/*",
@@ -96,3 +99,4 @@ render-worker = { workspace = true }
 style-worker = { workspace = true }
 upscale-worker = { workspace = true }
 guardrails = { workspace = true }
+segment-worker = { workspace = true }

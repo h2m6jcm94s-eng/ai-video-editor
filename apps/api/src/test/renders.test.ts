@@ -102,6 +102,56 @@ describe("Render Routes", () => {
     expect(vi.mocked(startRenderWorkflow)).toHaveBeenCalledWith(expect.objectContaining({ styleAnalysis }));
   });
 
+  it("POST /api/renders passes segmentation mask IDs to workflow", async () => {
+    const maskId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+    const referenceAsset = {
+      id: mockProject.referenceAssetId,
+      storageKey: "uploads/ref.mp4",
+      metadata: { segmentation: { maskAssetIds: [maskId] } },
+    };
+    const maskAsset = {
+      id: maskId,
+      storageKey: "projects/ref/mask/mask-0.png",
+      metadata: {},
+    };
+
+    vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(mockProject as any);
+    vi.mocked(db.query.assets.findMany)
+      .mockResolvedValueOnce([referenceAsset] as any)
+      .mockResolvedValueOnce([maskAsset] as any);
+    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(undefined);
+    vi.mocked(db.insert).mockReturnValueOnce({
+      values: vi.fn().mockReturnValueOnce({
+        returning: vi.fn().mockResolvedValueOnce([mockRender]),
+      }),
+    } as any);
+    vi.mocked(db.update).mockReturnValueOnce({
+      set: vi.fn().mockReturnValueOnce({
+        where: vi.fn().mockReturnValueOnce({
+          returning: vi.fn().mockResolvedValueOnce([mockRender]),
+        }),
+      }),
+    } as any);
+    vi.mocked(startRenderWorkflow).mockResolvedValueOnce("wf-123");
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/renders",
+      payload: { projectId: PROJ_ID },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(vi.mocked(startRenderWorkflow)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maskAssetIds: [maskId],
+        assetKeyMap: expect.objectContaining({
+          [mockProject.referenceAssetId]: referenceAsset.storageKey,
+          [maskId]: maskAsset.storageKey,
+        }),
+      }),
+    );
+  });
+
   it("POST /api/renders returns 404 for missing project", async () => {
     vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(undefined);
 

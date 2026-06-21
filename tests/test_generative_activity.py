@@ -34,7 +34,7 @@ def sample_slot():
 class TestGenerateFillerClipActivity:
     def test_activity_succeeds_and_uploads(self, monkeypatch, sample_slot):
         from reason_worker import generative_client
-        from infra.temporal.worker import generate_filler_clip
+        from worker import generate_filler_clip
 
         fake_video = os.path.join(tempfile.gettempdir(), "ave_fake_gen.mp4")
         with open(fake_video, "wb") as f:
@@ -67,7 +67,7 @@ class TestGenerateFillerClipActivity:
             return FakeProvider()
 
         monkeypatch.setattr(generative_client, "get_generative_provider", fake_provider_factory)
-        monkeypatch.setattr("infra.temporal.worker.upload_file", fake_upload)
+        monkeypatch.setattr("worker.upload_file", fake_upload)
 
         result = asyncio.run(
             generate_filler_clip(sample_slot, {}, None, "proj-123", "16:9")
@@ -81,7 +81,7 @@ class TestGenerateFillerClipActivity:
 
     def test_activity_reports_failure_when_provider_fails(self, monkeypatch, sample_slot):
         from reason_worker import generative_client
-        from infra.temporal.worker import generate_filler_clip
+        from worker import generate_filler_clip
 
         def fake_provider_factory(*args, **kwargs):
             class FakeProvider:

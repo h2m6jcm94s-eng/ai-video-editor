@@ -71,12 +71,27 @@ class GeminiVeoProvider(VideoProvider):
         self._sdk_error: Optional[str] = None
         self._init_sdk()
 
+    @staticmethod
+    def _looks_like_oauth_token(key: str) -> bool:
+        """Google API keys start with 'AIza'; OAuth tokens do not."""
+        return not key.startswith("AIza")
+
     def _init_sdk(self):
         try:
             from google import genai
 
-            if self.api_key:
-                self._client = genai.Client(api_key=self.api_key)
+            if not self.api_key:
+                self._sdk_error = "no api key"
+                self._client = None
+                return
+            if self._looks_like_oauth_token(self.api_key):
+                self._sdk_error = (
+                    "GEMINI_API_KEY looks like an OAuth/access token "
+                    "(should be a Google AI Studio API key starting with 'AIza')"
+                )
+                self._client = None
+                return
+            self._client = genai.Client(api_key=self.api_key)
         except Exception as exc:  # pragma: no cover - import failures
             self._sdk_error = str(exc)
             self._client = None
