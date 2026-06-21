@@ -2,7 +2,8 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import { AlertCircle, Clock, Loader2, Play } from "lucide-react";
+import { motion } from "framer-motion";
+import { AlertCircle, Clock, Loader2, Play, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -11,20 +12,38 @@ import { useApi } from "@/lib/api/client";
 import type { Asset, Project } from "@/types/api";
 
 function StatusBadge({ status }: { status: Project["status"] }) {
-  const variants: Record<
-    string,
-    { variant: "default" | "secondary" | "destructive" | "outline"; icon: React.ReactNode }
-  > = {
-    uploading: { variant: "secondary", icon: <Loader2 className="w-3 h-3 animate-spin" /> },
-    processing: { variant: "outline", icon: <Loader2 className="w-3 h-3 animate-spin" /> },
-    complete: { variant: "default", icon: <Play className="w-3 h-3" /> },
-    failed: { variant: "destructive", icon: <AlertCircle className="w-3 h-3" /> },
+  const variants: Record<string, { classes: string; icon: React.ReactNode; label: string }> = {
+    uploading: {
+      classes: "bg-amber-500/10 text-amber-300 border-amber-500/20",
+      icon: <Loader2 className="w-3 h-3 animate-spin" />,
+      label: "Uploading",
+    },
+    processing: {
+      classes: "bg-indigo-500/10 text-indigo-300 border-indigo-500/20",
+      icon: <Wand2 className="w-3 h-3 animate-pulse" />,
+      label: "Processing",
+    },
+    rendering: {
+      classes: "bg-purple-500/10 text-purple-300 border-purple-500/20",
+      icon: <Loader2 className="w-3 h-3 animate-spin" />,
+      label: "Rendering",
+    },
+    complete: {
+      classes: "bg-emerald-500/10 text-emerald-300 border-emerald-500/20",
+      icon: <Play className="w-3 h-3" />,
+      label: "Ready",
+    },
+    failed: {
+      classes: "bg-red-500/10 text-red-300 border-red-500/20",
+      icon: <AlertCircle className="w-3 h-3" />,
+      label: "Failed",
+    },
   };
   const config = variants[status] || variants.processing;
   return (
-    <Badge variant={config.variant} className="gap-1 capitalize">
+    <Badge variant="outline" className={`gap-1.5 capitalize backdrop-blur-md ${config.classes}`}>
       {config.icon}
-      {status}
+      {config.label}
     </Badge>
   );
 }
@@ -56,8 +75,10 @@ function Thumbnail({ renderAssetId, alt }: { renderAssetId: string | null; alt: 
 
   if (!renderAssetId || loading || !asset?.storageUrl) {
     return (
-      <div className="w-full h-full flex items-center justify-center text-zinc-600">
-        <Play className="w-8 h-8" />
+      <div className="w-full h-full flex items-center justify-center bg-black/20">
+        <div className="w-14 h-14 rounded-2xl bg-white/[0.05] border border-white/[0.08] flex items-center justify-center">
+          <Play className="w-6 h-6 text-glass-subtle" />
+        </div>
       </div>
     );
   }
@@ -69,7 +90,7 @@ function Thumbnail({ renderAssetId, alt }: { renderAssetId: string | null; alt: 
       preload="metadata"
       muted
       playsInline
-      className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+      className="w-full h-full object-cover group-hover:scale-110 transition duration-700 ease-out"
       aria-label={alt}
       onLoadedData={(e) => {
         const video = e.currentTarget;
@@ -82,21 +103,35 @@ function Thumbnail({ renderAssetId, alt }: { renderAssetId: string | null; alt: 
 export function ProjectCard({ project }: { project: Project }) {
   return (
     <Link href={`/editor/${project.id}`}>
-      <Card className="bg-zinc-900 border-zinc-800 hover:border-zinc-700 transition cursor-pointer overflow-hidden group">
-        <div className="aspect-video bg-zinc-950 relative overflow-hidden">
-          <Thumbnail renderAssetId={project.renderAssetId} alt={project.name} />
-          <div className="absolute top-2 right-2">
-            <StatusBadge status={project.status} />
+      <motion.div
+        whileHover={{ y: -6, scale: 1.01 }}
+        transition={{ type: "spring", stiffness: 300, damping: 22 }}
+      >
+        <Card className="glass-card overflow-hidden group cursor-pointer glow-hover border-white/[0.08] hover:border-white/[0.16]">
+          <div className="aspect-video relative overflow-hidden">
+            <Thumbnail renderAssetId={project.renderAssetId} alt={project.name} />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60 group-hover:opacity-80 transition-opacity" />
+            <div className="absolute top-3 right-3">
+              <StatusBadge status={project.status} />
+            </div>
+            <div className="absolute bottom-3 left-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+              <div className="flex items-center gap-2 text-xs font-medium text-white">
+                <Play className="w-3.5 h-3.5" />
+                Open editor
+              </div>
+            </div>
           </div>
-        </div>
-        <CardContent className="p-4">
-          <h3 className="font-medium truncate">{project.name}</h3>
-          <div className="flex items-center gap-2 mt-2 text-xs text-zinc-500">
-            <Clock className="w-3 h-3" />
-            <span>{new Date(project.updatedAt).toLocaleDateString()}</span>
-          </div>
-        </CardContent>
-      </Card>
+          <CardContent className="p-5">
+            <h3 className="font-semibold text-glass truncate group-hover:text-gradient transition-all">
+              {project.name}
+            </h3>
+            <div className="flex items-center gap-2 mt-2 text-xs text-glass-faint">
+              <Clock className="w-3.5 h-3.5" />
+              <span>Updated {new Date(project.updatedAt).toLocaleDateString()}</span>
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
     </Link>
   );
 }

@@ -2,12 +2,11 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 export const dynamic = "force-dynamic";
 
-import { Settings } from "lucide-react";
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { CreateProjectDialog } from "@/components/dashboard/CreateProjectDialog";
+import { DashboardHeader } from "@/components/dashboard/DashboardHeader";
+import { HeroSection } from "@/components/dashboard/HeroSection";
 import { ProjectList } from "@/components/dashboard/ProjectList";
-import { Button } from "@/components/ui/button";
+import { StatsSection } from "@/components/dashboard/StatsSection";
 import { apiServer } from "@/lib/api/server";
 import { getServerAuth } from "@/lib/auth";
 
@@ -24,24 +23,15 @@ export default async function DashboardPage() {
   }
 
   return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-100">
-      <header className="border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
-          <h1 className="text-lg font-semibold tracking-tight">AI Video Editor</h1>
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="sm" asChild>
-              <Link href="/settings">
-                <Settings className="h-4 w-4 mr-1.5" />
-                Settings
-              </Link>
-            </Button>
-            <CreateProjectDialog />
-          </div>
-        </div>
-      </header>
+    <main className="min-h-screen text-foreground">
+      <DashboardHeader />
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <ProjectList projects={projects} />
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16">
+        <HeroSection projectCount={projects.length} />
+        <StatsSection projects={projects} />
+        <div className="mt-10">
+          <ProjectList projects={projects} />
+        </div>
       </div>
     </main>
   );

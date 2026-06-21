@@ -82,15 +82,18 @@ export function CreateProjectDialog() {
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button size="sm" className="gap-2">
+        <Button
+          size="sm"
+          className="gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-glow hover:shadow-glow-lg transition-all border-0"
+        >
           <Plus className="w-4 h-4" />
           New Project
         </Button>
       </DialogTrigger>
-      <DialogContent className="bg-zinc-900 border-zinc-800 text-zinc-100 sm:max-w-md">
+      <DialogContent className="glass-strong border-glass-strong text-glass sm:max-w-md rounded-2xl">
         <DialogHeader>
           <DialogTitle>Create New Project</DialogTitle>
-          <DialogDescription className="text-zinc-400">
+          <DialogDescription className="text-glass-subtle">
             Start a new AI-powered video editing session.
           </DialogDescription>
         </DialogHeader>
@@ -100,7 +103,7 @@ export function CreateProjectDialog() {
             <Input
               id="project-name"
               placeholder="My Awesome Edit"
-              className="bg-zinc-950 border-zinc-800"
+              className="bg-glass border-glass-strong rounded-xl focus:border-indigo-400/50 focus:ring-indigo-400/20"
               {...register("name")}
             />
             {errors.name && <p className="text-xs text-red-400">{errors.name.message}</p>}
@@ -112,7 +115,10 @@ export function CreateProjectDialog() {
               value={styleTier}
               onValueChange={(v) => setValue("styleTier", v as FormData["styleTier"])}
             >
-              <SelectTrigger className="bg-zinc-950 border-zinc-800" data-testid="style-tier-select">
+              <SelectTrigger
+                className="bg-glass border-glass-strong rounded-xl"
+                data-testid="style-tier-select"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -129,7 +135,7 @@ export function CreateProjectDialog() {
           <div className="space-y-2">
             <Label>Edit Mode</Label>
             <Select value={mode} onValueChange={(v) => setValue("mode", v as FormData["mode"])}>
-              <SelectTrigger className="bg-zinc-950 border-zinc-800">
+              <SelectTrigger className="bg-glass border-glass-strong rounded-xl">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -145,11 +151,21 @@ export function CreateProjectDialog() {
 
           <div className="flex justify-end gap-3">
             <DialogTrigger asChild>
-              <Button type="button" variant="outline" disabled={isSubmitting}>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isSubmitting}
+                className="border-glass-strong bg-glass hover:bg-glass-strong text-glass-muted"
+              >
                 Cancel
               </Button>
             </DialogTrigger>
-            <Button type="submit" disabled={!isValid || isSubmitting} data-testid="create-project-submit">
+            <Button
+              type="submit"
+              disabled={!isValid || isSubmitting}
+              data-testid="create-project-submit"
+              className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-glow hover:shadow-glow-lg transition-all border-0"
+            >
               {isSubmitting ? "Creating..." : "Create"}
             </Button>
           </div>

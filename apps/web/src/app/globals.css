@@ -57,3 +57,117 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer utilities {
+  .glass {
+    @apply bg-white/[0.04] backdrop-blur-xl border border-white/[0.08] shadow-[0_8px_32px_0_rgba(0,0,0,0.36)];
+  }
+  .glass-card {
+    @apply glass rounded-2xl;
+  }
+  .glass-strong {
+    @apply bg-white/[0.08] backdrop-blur-2xl border border-white/[0.14] shadow-[0_8px_40px_0_rgba(0,0,0,0.48)];
+  }
+
+  /* Semantic glass text tokens */
+  .text-glass {
+    @apply text-zinc-100;
+  }
+  .text-glass-muted {
+    @apply text-zinc-300;
+  }
+  .text-glass-subtle {
+    @apply text-zinc-400;
+  }
+  .text-glass-faint {
+    @apply text-zinc-500;
+  }
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-indigo-300 via-purple-300 to-pink-300;
+  }
+  .text-gradient-subtle {
+    @apply bg-clip-text text-transparent bg-gradient-to-br from-zinc-100 to-zinc-400;
+  }
+
+  /* Semantic glass surface tokens */
+  .bg-glass {
+    @apply bg-white/[0.04];
+  }
+  .bg-glass-strong {
+    @apply bg-white/[0.08];
+  }
+  .bg-glass-surface {
+    @apply bg-white/[0.05];
+  }
+  .bg-glass-hover {
+    @apply hover:bg-white/[0.06];
+  }
+
+  /* Semantic glass border tokens */
+  .border-glass {
+    @apply border-white/[0.08];
+  }
+  .border-glass-strong {
+    @apply border-white/[0.12];
+  }
+  .border-glass-subtle {
+    @apply border-white/[0.14];
+  }
+
+  .glow {
+    box-shadow: 0 0 40px -10px rgba(99, 102, 241, 0.45);
+  }
+  .glow-hover {
+    transition: box-shadow 0.4s ease, transform 0.4s ease;
+  }
+  .glow-hover:hover {
+    box-shadow:
+      0 0 60px -5px rgba(168, 85, 247, 0.5),
+      0 0 24px -5px rgba(99, 102, 241, 0.35);
+  }
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0) 0%,
+      rgba(255, 255, 255, 0.06) 50%,
+      rgba(255, 255, 255, 0) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s infinite linear;
+  }
+}
+
+@layer components {
+  .ambient-gradient {
+    background: radial-gradient(ellipse at top, hsl(255 60% 18%) 0%, hsl(240 10% 4%) 45%, hsl(0 0% 0%) 100%);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-18px);
+  }
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
