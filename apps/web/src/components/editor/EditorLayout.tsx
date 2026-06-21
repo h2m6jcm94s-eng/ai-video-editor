@@ -30,6 +30,7 @@ import { MediaPanel } from "./panels/MediaPanel";
 import { PreviewPanel } from "./panels/PreviewPanel";
 import { TimelinePanel } from "./panels/TimelinePanel";
 import { RenderButton } from "./RenderButton";
+import { RenderDownload } from "./RenderDownload";
 
 const PromptPanel = dynamic(() => import("./panels/PromptPanel").then((m) => m.PromptPanel), {
   loading: () => (
@@ -44,6 +45,7 @@ import { type CommandAction, CommandPalette, useCommandPalette } from "@/compone
 import { useAssetPoller } from "@/hooks/useAssetPoller";
 import { useEditor } from "@/hooks/useEditor";
 import { useRenderStatus } from "@/hooks/useRenderStatus";
+import { useStyleAnalysis } from "@/hooks/useStyleAnalysis";
 import { useTimeline } from "@/hooks/useTimeline";
 import { useApi } from "@/lib/api/client";
 import { APIError } from "@/lib/api/error";
@@ -77,6 +79,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
   const [loadTemplateOpen, setLoadTemplateOpen] = useState(false);
   const [cmdkOpen, setCmdkOpen] = useState(false);
   const [generatingRef, setGeneratingRef] = useState(false);
+  const styleAnalysis = useStyleAnalysis(project.id);
   const api = useApi();
 
   const aspectRatio = state.cutList?.globals?.aspectRatio || "9:16";
@@ -297,6 +300,14 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
               }
               setGeneratingRef(true);
               try {
+                let analysis = styleAnalysis.analysis;
+                if (!analysis) {
+                  analysis = await styleAnalysis.refresh();
+                }
+                if (!analysis) {
+                  toast.info("Style analysis is still running. Try again in a few seconds.");
+                  return;
+                }
                 // Create a basic cutlist if none exists
                 if (!state.cutList) {
                   const clips = state.assets.filter((a) => a.type === "clip");
@@ -355,11 +366,10 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
                   await api.projects.updateCutlist(project.id, basicCutList);
                   actions.setCutList(basicCutList);
                 }
-                const result = await api.projects.prompt(
-                  project.id,
-                  "Generate a cutlist that matches the reference video's editing style, shot types, transitions, and pacing. Analyze the reference and replicate its visual rhythm.",
-                  { signal: AbortSignal.timeout(180_000) },
-                );
+                const prompt = `Generate a cutlist that matches the reference video's editing style, shot types, transitions, and pacing. Analyze the reference and replicate its visual rhythm.\n\nReference style analysis:\n${JSON.stringify(analysis, null, 2)}`;
+                const result = await api.projects.prompt(project.id, prompt, {
+                  signal: AbortSignal.timeout(180_000),
+                });
                 if (result.project.cutList) {
                   actions.promptApply(result.project.cutList as CutList);
                   toast.success("Cut-list ready — generated from reference");
@@ -370,11 +380,19 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
                 setGeneratingRef(false);
               }
             }}
-            disabled={generatingRef}
+            disabled={
+              generatingRef ||
+              !state.assets.some((a) => a.type === "reference_video") ||
+              styleAnalysis.isPending
+            }
             className="px-3 py-1.5 text-sm bg-zinc-800 hover:bg-zinc-700 rounded-lg transition disabled:opacity-50"
             data-testid="generate-from-reference"
           >
-            {generatingRef ? "Generating..." : "Generate from reference"}
+            {generatingRef
+              ? "Generating..."
+              : styleAnalysis.isPending
+                ? "Analyzing reference..."
+                : "Generate from reference"}
           </button>
           <button
             onClick={async () => {
@@ -451,19 +469,22 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
             </div>
           </div>
 
-          <RenderButton projectId={project.id} onJobStart={setActiveJobId} />
+          <RenderButton projectId={project.id} assets={state.assets} onJobStart={setActiveJobId} />
           {renderStatus.latestRender && !renderStatus.activeRender && (
-            <span
-              className={`text-xs px-2 py-1 rounded-lg ${
-                renderStatus.latestRender.status === "complete"
-                  ? "bg-green-900/50 text-green-400"
-                  : "bg-red-900/50 text-red-400"
-              }`}
-              data-render-status={renderStatus.latestRender.status}
-              data-testid="render-status"
-            >
-              {renderStatus.latestRender.status === "complete" ? "Render complete" : "Render failed"}
-            </span>
+            <>
+              <span
+                className={`text-xs px-2 py-1 rounded-lg ${
+                  renderStatus.latestRender.status === "complete"
+                    ? "bg-green-900/50 text-green-400"
+                    : "bg-red-900/50 text-red-400"
+                }`}
+                data-render-status={renderStatus.latestRender.status}
+                data-testid="render-status"
+              >
+                {renderStatus.latestRender.status === "complete" ? "Render complete" : "Render failed"}
+              </span>
+              <RenderDownload render={renderStatus.latestRender} />
+            </>
           )}
         </div>
       </div>

@@ -85,6 +85,8 @@ export function createAPI(getToken: TokenGetter) {
         }),
       transcribe: (id: string, assetId: string): Promise<{ subtitles: Subtitle[] }> =>
         fetchJSON(`/projects/${id}/transcribe`, { method: "POST", body: JSON.stringify({ assetId }) }),
+      getStyle: (id: string): Promise<{ styleAnalysis: Record<string, unknown> | null }> =>
+        fetchJSON(`/projects/${id}/style`),
     },
     uploads: {
       presign: (data: {
@@ -96,6 +98,7 @@ export function createAPI(getToken: TokenGetter) {
         fetchJSON("/uploads/presigned", { method: "POST", body: JSON.stringify(data) }),
       complete: (assetId: string, data: { sizeBytes: number; etag: string }): Promise<{ asset: Asset }> =>
         fetchJSON(`/uploads/${assetId}/complete`, { method: "POST", body: JSON.stringify(data) }),
+      get: (assetId: string): Promise<{ asset: Asset }> => fetchJSON(`/uploads/${assetId}`),
       multipartInit: (data: {
         projectId: string;
         filename: string;

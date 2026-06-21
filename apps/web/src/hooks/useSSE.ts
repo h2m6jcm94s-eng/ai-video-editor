@@ -42,7 +42,11 @@ export function useSSE<T>({
       pollRef.current = setInterval(async () => {
         if (!mountedRef.current) return;
         const data = await fallbackPoll().catch(() => null);
-        if (data) onEvent(data);
+        if (!data) return;
+        onEvent(data);
+        if (shouldClose?.(data)) {
+          stopPolling();
+        }
       }, pollIntervalMs);
     };
 

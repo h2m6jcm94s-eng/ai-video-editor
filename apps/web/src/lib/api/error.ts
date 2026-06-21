@@ -89,6 +89,8 @@ export class APIError extends Error {
         return "Every AI provider in your chain failed. Check your keys in Settings or try again.";
       case "NO_CUTLIST":
         return "This project has no timeline yet. Generate or import one first.";
+      case "PENDING":
+        return "This is still processing. Check back in a moment.";
       default:
         return "Something went wrong.";
     }
