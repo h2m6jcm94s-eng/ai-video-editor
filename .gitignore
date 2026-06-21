@@ -79,3 +79,6 @@ e2e/output-*.mp4
 e2e/ffmpeg-stderr.log
 test-results/
 playwright-report/
+
+# Committed demo assets (README car-meet example)
+!docs/assets/car-meet/*

@@ -144,6 +144,9 @@ Uploads and renders require Temporal workers. Run each in a separate terminal (f
 # Ingest worker — task queue `ingest`
 uv run python -m ingest_worker
 
+# Segment worker — task queue `segment`
+uv run python -m segment_worker
+
 # Render worker — task queue `video-render-queue`
 uv run python -m render_worker
 ```
@@ -169,6 +172,35 @@ This starts:
 4. Upload a test video clip or audio file
 5. The asset spinner should switch to "ingested" once the ingest worker reports metadata
 6. Build a cut-list and click **Render** — the render worker should produce an output MP4
+
+### Demo Assets
+
+A ready-made car-meet example lives in `docs/assets/car-meet/`:
+
+```
+docs/assets/car-meet/
+├── reference.mp4   # reference style video
+├── clip-1.mp4      # raw clip 1
+├── clip-2.mp4      # raw clip 2
+├── clip-3.mp4      # raw clip 3
+├── song.mp3        # CC0 background song
+└── result.mp4      # simplified demo render output
+```
+
+These files are committed so the README example is reproducible. To refresh them from Pexels/Freesound:
+
+```bash
+# Search and write a manifest
+node scripts/select-car-meet.mjs
+
+# Download the manifest entries
+node scripts/download-car-meet.mjs
+
+# Produce a simplified 720x1280 demo render
+python scripts/demo-render-car-meet.py
+```
+
+> The simplified demo renderer uses a basic FFmpeg concat pipeline and is **only** for producing README media. The full production pipeline (`services/orchestrator.py`) is still the path used by the app.
 
 ---
 
@@ -353,7 +385,8 @@ Runbook:
 ```bash
 pnpm infra:up
 uv run python -m ingest_worker   # terminal 1
-uv run python -m render_worker   # terminal 2
+uv run python -m segment_worker  # terminal 2 (optional)
+uv run python -m render_worker   # terminal 3
 pnpm e2e:headed
 ```
 
@@ -630,7 +663,7 @@ ai_video_editor/
 │   │   ├── src/
 │   │   │   ├── app/               # App Router pages
 │   │   │   ├── components/        # React components
-│   │   │   │   ├── dashboard/     # Project list, create dialog
+│   │   │   │   ├── dashboard/     # Glassmorphic dashboard: HeroSection, StatsSection, ProjectList, ProjectCard, CreateProjectDialog, DashboardHeader, AmbientBackground
 │   │   │   │   ├── editor/        # Main editor UI
 │   │   │   │   ├── settings/      # Provider key manager
 │   │   │   │   └── ui/            # shadcn/ui components
@@ -651,6 +684,7 @@ ai_video_editor/
 │   └── ui/                        # Shared UI components (if any)
 ├── services/                      # Python uv workspace
 │   ├── ingest-worker/             # Temporal worker — media probing
+│   ├── segment-worker/            # Temporal worker — subject segmentation / masks
 │   ├── style-worker/              # LUT, transition, text, camera analysis
 │   ├── reason-worker/             # Cutlist generation, clip ranking
 │   ├── render-worker/             # Temporal worker — FFmpeg compilation
