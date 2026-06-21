@@ -172,5 +172,6 @@ vi.mock("../services/temporal", () => ({
   ),
   startAnalyzeStyleWorkflow: vi.fn(async () => "style-wf-123"),
   startProbeWorkflow: vi.fn(async () => "probe-wf-123"),
+  getStyleAnalysisFromWorkflow: vi.fn(async () => null),
   sendCutlistApprovedSignal: vi.fn(async () => {}),
 }));

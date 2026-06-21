@@ -108,6 +108,7 @@ export async function renderRoutes(app: FastifyInstance) {
           userId,
           renderId: job.id,
           assetKeyMap,
+          styleAnalysis: (project.styleAnalysis as Record<string, unknown>) ?? undefined,
         });
       } catch (e) {
         // Mark render as failed and return 500 without crashing

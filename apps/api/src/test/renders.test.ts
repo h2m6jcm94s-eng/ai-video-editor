@@ -70,6 +70,38 @@ describe("Render Routes", () => {
     expect(vi.mocked(enqueueJob)).toHaveBeenCalled();
   });
 
+  it("POST /api/renders passes cached style analysis to workflow", async () => {
+    const styleAnalysis = { color_palette: ["#000000"], contrast_level: 1.2 };
+    vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce({
+      ...mockProject,
+      styleAnalysis,
+    } as any);
+    vi.mocked(db.query.assets.findMany).mockResolvedValueOnce([]);
+    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(undefined);
+    vi.mocked(db.insert).mockReturnValueOnce({
+      values: vi.fn().mockReturnValueOnce({
+        returning: vi.fn().mockResolvedValueOnce([mockRender]),
+      }),
+    } as any);
+    vi.mocked(db.update).mockReturnValueOnce({
+      set: vi.fn().mockReturnValueOnce({
+        where: vi.fn().mockReturnValueOnce({
+          returning: vi.fn().mockResolvedValueOnce([mockRender]),
+        }),
+      }),
+    } as any);
+    vi.mocked(startRenderWorkflow).mockResolvedValueOnce("wf-123");
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/renders",
+      payload: { projectId: PROJ_ID },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(vi.mocked(startRenderWorkflow)).toHaveBeenCalledWith(expect.objectContaining({ styleAnalysis }));
+  });
+
   it("POST /api/renders returns 404 for missing project", async () => {
     vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(undefined);
 

@@ -31,7 +31,7 @@ import {
 } from "../middleware/validate";
 import { applyPromptEdit, transcribeAudio } from "../services/ai";
 import { deleteProjectAssets, downloadAsset } from "../services/storage";
-import { sendCutlistApprovedSignal } from "../services/temporal";
+import { getStyleAnalysisFromWorkflow, sendCutlistApprovedSignal } from "../services/temporal";
 
 export async function projectRoutes(app: FastifyInstance) {
   // List projects for user
@@ -89,6 +89,44 @@ export async function projectRoutes(app: FastifyInstance) {
       return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
     return { project };
+  });
+
+  // Get cached or live style analysis for the project's reference video
+  app.get("/:id/style", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const userId = request.userId;
+    const project = await db.query.projects.findFirst({
+      where: eq(projects.id, id),
+    });
+    if (!project) {
+      return sendError(reply, 404, "Not found", "NOT_FOUND");
+    }
+    if (project.userId !== userId) {
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
+    }
+
+    // Return cached analysis if already stored.
+    if (project.styleAnalysis) {
+      return { styleAnalysis: project.styleAnalysis };
+    }
+
+    // Otherwise try to fetch from the running/completed style workflow.
+    if (!project.referenceAssetId) {
+      return sendError(reply, 422, "Project has no reference video", "MISSING_ASSETS");
+    }
+
+    const analysis = await getStyleAnalysisFromWorkflow(project.referenceAssetId);
+    if (!analysis) {
+      return sendError(reply, 202, "Style analysis not yet available", "PENDING");
+    }
+
+    // Cache result for future requests.
+    await db
+      .update(projects)
+      .set({ styleAnalysis: analysis, updatedAt: new Date() })
+      .where(eq(projects.id, id));
+
+    return { styleAnalysis: analysis };
   });
 
   // Update project

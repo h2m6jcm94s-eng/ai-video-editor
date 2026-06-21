@@ -52,6 +52,7 @@ export interface StartRenderOptions {
   userId: string;
   renderId?: string;
   assetKeyMap?: Record<string, string>;
+  styleAnalysis?: Record<string, unknown> | null;
 }
 
 export interface StartAnalyzeStyleOptions {
@@ -76,6 +77,7 @@ export async function startRenderWorkflow(options: StartRenderOptions) {
           mode: options.mode,
           user_id: options.userId,
           asset_key_map: options.assetKeyMap || {},
+          style_analysis: options.styleAnalysis || null,
         },
       ],
       workflowId: `render-${options.projectId}-${options.renderId || Date.now()}`,
@@ -112,6 +114,19 @@ export async function startProbeWorkflow(assetId: string, storageKey: string) {
       workflowId: `probe-${assetId}`,
     });
     return handle.workflowId;
+  });
+}
+
+export async function getStyleAnalysisFromWorkflow(assetId: string) {
+  return withTemporalReconnect(async (client) => {
+    const handle = client.workflow.getHandle(`style-${assetId}`);
+    try {
+      // Query the running/completed workflow for its current output.
+      return await handle.query("get_analysis");
+    } catch (e) {
+      // Workflow may not exist yet or may have already completed and been cleaned up.
+      return null;
+    }
   });
 }
 
