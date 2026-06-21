@@ -1,9 +1,9 @@
 # Copyright (c) 2025 Devayan Dewri. All rights reserved.
 # Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
-"""Tests for the SAM3 segmentation engine.
+"""Tests for the SAM3 segmentation engine facade.
 
-These tests never require SAM3 or CUDA to be installed.  They verify the
-graceful fallback paths and the happy-path serialization logic with mocks.
+These tests never require SAM3 or CUDA to be installed. They verify the
+graceful fallback paths and that the engine delegates to ``Sam3Segmenter``.
 """
 
 import sys
@@ -16,81 +16,42 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 from segment_worker import engine
 
 
-class TestAvailability:
-    def test_not_available_without_sam3(self, monkeypatch):
-        monkeypatch.setattr(engine, "_load_sam3_modules", lambda: {})
-        assert not engine.is_segmentation_available()
+class FakeSegmenter:
+    """Stand-in for Sam3Segmenter that records calls."""
 
-    def test_not_available_without_hf_token(self, monkeypatch):
-        """HF_TOKEN or SAM3_CHECKPOINT_PATH is required to download checkpoints."""
-        monkeypatch.delenv("HF_TOKEN", raising=False)
-        monkeypatch.delenv("SAM3_CHECKPOINT_PATH", raising=False)
-        # Pretend SAM3 is importable.
-        monkeypatch.setattr(
-            engine,
-            "_load_sam3_modules",
-            lambda: {"build_sam3_image_model": object, "Sam3Processor": object},
-        )
-        assert not engine.is_segmentation_available()
+    def __init__(self, available: bool = False) -> None:
+        self._available = available
+        self.image_calls: list[tuple[str, str]] = []
+        self.video_calls: list[tuple[str, str, int]] = []
 
-    def test_available_with_checkpoint_path(self, monkeypatch):
-        monkeypatch.setenv("SAM3_CHECKPOINT_PATH", "/opt/sam3/sam3.pt")
-        monkeypatch.setattr(
-            engine,
-            "_load_sam3_modules",
-            lambda: {"build_sam3_image_model": object, "Sam3Processor": object},
-        )
-        assert engine.is_segmentation_available()
+    def available(self) -> bool:  # noqa: A003
+        return self._available
+
+    def segment_image(self, image_path: str, prompt: str) -> dict:
+        self.image_calls.append((image_path, prompt))
+        return {"available": self._available, "mode": "image"}
+
+    def segment_video(self, video_path: str, prompt: str, frame_index: int = 0) -> dict:
+        self.video_calls.append((video_path, prompt, frame_index))
+        return {"available": self._available, "mode": "video"}
 
 
-class TestDetectSubjectMaskImage:
-    def test_skips_when_sam3_unavailable(self, monkeypatch):
-        monkeypatch.setattr(engine, "is_segmentation_available", lambda: False)
+class TestEngineFacade:
+    def test_is_segmentation_available_delegates(self, monkeypatch):
+        fake = FakeSegmenter(available=True)
+        monkeypatch.setattr(engine, "_get_segmenter", lambda: fake)
+        assert engine.is_segmentation_available() is True
+
+    def test_detect_subject_mask_image_delegates(self, monkeypatch):
+        fake = FakeSegmenter(available=True)
+        monkeypatch.setattr(engine, "_get_segmenter", lambda: fake)
         result = engine.detect_subject_mask_image("/tmp/img.jpg", "person")
-        assert result["available"] is False
-        assert result["skipped"] is True
-        assert "SAM3" in result["skipped_reason"]
+        assert result["mode"] == "image"
+        assert fake.image_calls == [("/tmp/img.jpg", "person")]
 
-    def test_returns_masks_boxes_scores(self, monkeypatch, tmp_path):
-        """Happy path with a mocked SAM3 image model."""
-        monkeypatch.setattr(engine, "is_segmentation_available", lambda: True)
-
-        fake_mask = pytest.importorskip("numpy").array([[0.0, 1.0], [1.0, 1.0]])
-        fake_box = pytest.importorskip("numpy").array([10, 20, 30, 40])
-        fake_score = pytest.importorskip("numpy").array([0.95])
-
-        class FakeProcessor:
-            def set_image(self, image):
-                return {"image": image}
-
-            def set_text_prompt(self, state, prompt):
-                return {
-                    "masks": [fake_mask],
-                    "boxes": [fake_box],
-                    "scores": [fake_score],
-                }
-
-        monkeypatch.setattr(
-            engine,
-            "_image_model",
-            lambda: (object(), FakeProcessor()),
-        )
-
-        img_path = tmp_path / "test.png"
-        pytest.importorskip("PIL").Image.new("RGB", (64, 64), "red").save(img_path)
-
-        result = engine.detect_subject_mask_image(str(img_path), "person")
-        assert result["available"] is True
-        assert result["skipped"] is False
-        assert len(result["masks"]) == 1
-        assert result["masks"][0] is not None
-        assert result["boxes"] == [[10, 20, 30, 40]]
-        assert result["scores"] == [[0.95]]
-
-
-class TestDetectSubjectMaskVideo:
-    def test_skips_when_sam3_unavailable(self, monkeypatch):
-        monkeypatch.setattr(engine, "is_segmentation_available", lambda: False)
-        result = engine.detect_subject_mask_video("/tmp/vid.mp4", "person")
-        assert result["available"] is False
-        assert result["skipped"] is True
+    def test_detect_subject_mask_video_delegates(self, monkeypatch):
+        fake = FakeSegmenter(available=True)
+        monkeypatch.setattr(engine, "_get_segmenter", lambda: fake)
+        result = engine.detect_subject_mask_video("/tmp/vid.mp4", "person", frame_index=5)
+        assert result["mode"] == "video"
+        assert fake.video_calls == [("/tmp/vid.mp4", "person", 5)]

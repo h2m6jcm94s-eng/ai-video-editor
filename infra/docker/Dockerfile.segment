@@ -5,9 +5,19 @@ RUN apt-get update && apt-get install -y \
     libsm6 \
     libxext6 \
     libgl1 \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# Optional SAM3 support. Set INSTALL_SAM3=true and provide HF_TOKEN at build
+# time to enable GPU segmentation in this worker.
+ARG INSTALL_SAM3=false
+ARG HF_TOKEN
+RUN if [ "$INSTALL_SAM3" = "true" ]; then \
+      pip install --no-cache-dir \
+        git+https://github.com/facebookresearch/sam3.git ; \
+    fi
 
 COPY services/shared-py ./shared-py
 COPY services/segment-worker ./segment-worker
