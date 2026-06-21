@@ -31,6 +31,7 @@ import { PreviewPanel } from "./panels/PreviewPanel";
 import { TimelinePanel } from "./panels/TimelinePanel";
 import { RenderButton } from "./RenderButton";
 import { RenderDownload } from "./RenderDownload";
+import { SegmentPanel } from "./SegmentPanel";
 
 const PromptPanel = dynamic(() => import("./panels/PromptPanel").then((m) => m.PromptPanel), {
   loading: () => (
@@ -542,6 +543,7 @@ export function EditorLayout({ project, assets }: EditorLayoutProps) {
             });
           }}
         />
+        <SegmentPanel projectId={project.id} assets={state.assets} />
       </div>
 
       {promptOpen && (
