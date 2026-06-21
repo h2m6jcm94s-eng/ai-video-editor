@@ -131,7 +131,7 @@ export async function internalRoutes(app: FastifyInstance) {
   // Create a new asset row for worker-generated outputs (e.g. renders, LUTs)
   app.post(
     "/api/internal/assets",
-    { preHandler: validateBody(createAssetSchema) },
+    { preHandler: [requireInternalToken, validateBody(createAssetSchema)] },
     async (request, reply) => {
       const body = request.validatedBody as z.infer<typeof createAssetSchema>;
 
@@ -166,7 +166,7 @@ export async function internalRoutes(app: FastifyInstance) {
   // Update asset probe metadata (used by ingest worker after ffprobe)
   app.patch(
     "/api/internal/assets/:assetId/probe",
-    { preHandler: validateBody(probeUpdateSchema) },
+    { preHandler: [requireInternalToken, validateBody(probeUpdateSchema)] },
     async (request, reply) => {
       const { assetId } = request.params as { assetId: string };
       const body = request.validatedBody as z.infer<typeof probeUpdateSchema>;
@@ -222,7 +222,7 @@ export async function internalRoutes(app: FastifyInstance) {
   // Mark a worker-generated asset as complete and set its public URL
   app.patch(
     "/api/internal/assets/:assetId/complete",
-    { preHandler: validateBody(assetCompleteSchema) },
+    { preHandler: [requireInternalToken, validateBody(assetCompleteSchema)] },
     async (request, reply) => {
       const { assetId } = request.params as { assetId: string };
       const body = request.validatedBody as z.infer<typeof assetCompleteSchema>;
