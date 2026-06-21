@@ -382,6 +382,46 @@ def _build_audio_filter(audio_tracks: List[AudioTrack], base_input_count: int, s
     return "", idx
 
 
+def _apply_subject_mask(
+    segment_path: str,
+    mask_path: str,
+    output_path: str,
+    config: RenderConfig,
+    temp_dir: str,
+) -> None:
+    """Composite a subject mask over a black background using FFmpeg.
+
+    The mask is treated as an alpha matte: white areas keep the subject,
+    black areas become transparent and reveal the black background.
+    """
+    width = config.width
+    height = config.height
+    fps = config.fps or 30.0
+
+    filter_complex = (
+        f"[1:v]format=gray,"
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        f"setsar=1[mask];"
+        f"[0:v][mask]alphamerge[fg];"
+        f"color=c=black:s={width}x{height}:r={fps}[bg];"
+        f"[bg][fg]overlay=0:0:shortest=1:format=auto"
+    )
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", segment_path,
+        "-i", mask_path,
+        "-filter_complex", filter_complex,
+        "-c:v", config.video_codec,
+        "-preset", config.video_preset,
+        "-crf", str(config.video_crf),
+        "-pix_fmt", config.pix_fmt,
+        "-an",
+        output_path,
+    ]
+    _run_ffmpeg(cmd, "subject mask composite", cwd=temp_dir)
+
+
 def compile_timeline(
     cutlist: CutList,
     clip_paths: Dict[str, str],
@@ -456,6 +496,14 @@ def compile_timeline(
             segment_path,
         ]
         _run_ffmpeg(cmd, f"segment extraction for slot {slot.index}", cwd=temp_dir)
+
+        # If this clip has a segmentation mask, composite the subject over black.
+        mask_path = config.mask_paths.get(clip_id) if config.mask_paths else None
+        if mask_path and os.path.exists(mask_path):
+            masked_segment_path = os.path.join(temp_dir, f"slot_{slot.index:03d}_masked.mp4")
+            _apply_subject_mask(segment_path, mask_path, masked_segment_path, config, temp_dir)
+            segment_path = masked_segment_path
+            temp_files.append(masked_segment_path)
 
         slot_segments.append({
             "path": segment_path,

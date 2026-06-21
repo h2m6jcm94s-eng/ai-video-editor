@@ -144,6 +144,7 @@ describe("Render Routes", () => {
     expect(vi.mocked(startRenderWorkflow)).toHaveBeenCalledWith(
       expect.objectContaining({
         maskAssetIds: [maskId],
+        maskSourceMap: { [mockProject.referenceAssetId]: maskId },
         assetKeyMap: expect.objectContaining({
           [mockProject.referenceAssetId]: referenceAsset.storageKey,
           [maskId]: maskAsset.storageKey,

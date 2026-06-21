@@ -54,6 +54,7 @@ export interface StartRenderOptions {
   assetKeyMap?: Record<string, string>;
   styleAnalysis?: Record<string, unknown> | null;
   maskAssetIds?: string[];
+  maskSourceMap?: Record<string, string>;
 }
 
 export interface StartAnalyzeStyleOptions {
@@ -80,6 +81,7 @@ export async function startRenderWorkflow(options: StartRenderOptions) {
           asset_key_map: options.assetKeyMap || {},
           style_analysis: options.styleAnalysis || null,
           mask_asset_ids: options.maskAssetIds || [],
+          mask_source_map: options.maskSourceMap || {},
         },
       ],
       workflowId: `render-${options.projectId}-${options.renderId || Date.now()}`,

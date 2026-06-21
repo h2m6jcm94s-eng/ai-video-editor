@@ -42,6 +42,7 @@ class VideoRenderInput:
     asset_key_map: Dict[str, str]
     style_analysis: Dict[str, Any] = None
     mask_asset_ids: List[str] = None
+    mask_source_map: Dict[str, str] = None
 
 
 @dataclass
@@ -253,7 +254,7 @@ class VideoRenderWorkflow:
 
         output_path = await workflow.execute_activity(
             "render_720p",
-            args=(cutlist, render_clip_ids, clip_key_map, style.get("lut_path"), input.song_asset_id, input.asset_key_map, input.mask_asset_ids or []),
+            args=(cutlist, render_clip_ids, clip_key_map, style.get("lut_path"), input.song_asset_id, input.asset_key_map, input.mask_asset_ids or [], input.mask_source_map or {}),
             start_to_close_timeout=600,
             retry_policy=RetryPolicy(maximum_attempts=2),
         )
