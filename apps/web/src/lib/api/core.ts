@@ -129,6 +129,18 @@ export function createAPI(getToken: TokenGetter) {
       listByProject: (projectId: string): Promise<{ jobs: RenderJob[] }> =>
         fetchJSON(`/renders/project/${projectId}`),
     },
+    segments: {
+      start: (data: {
+        projectId: string;
+        assetId: string;
+        prompt: string;
+        mode?: "image" | "video";
+        frameIndex?: number;
+      }): Promise<{ workflowId: string; status: string }> =>
+        fetchJSON("/segments", { method: "POST", body: JSON.stringify(data) }),
+      get: (workflowId: string): Promise<{ workflowId: string; result: Record<string, unknown> }> =>
+        fetchJSON(`/segments/${workflowId}`),
+    },
     templates: {
       list: (): Promise<{
         templates: Array<{

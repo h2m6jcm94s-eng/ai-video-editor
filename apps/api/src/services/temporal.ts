@@ -136,3 +136,30 @@ export async function sendCutlistApprovedSignal(workflowId: string, cutList: Cut
     await handle.signal("cutlist_approved", cutList);
   });
 }
+
+export interface StartSegmentSubjectOptions {
+  assetId: string;
+  storageKey: string;
+  prompt: string;
+  mode?: "image" | "video";
+  frameIndex?: number;
+}
+
+export async function startSegmentSubjectWorkflow(options: StartSegmentSubjectOptions) {
+  return withTemporalReconnect(async (client) => {
+    const handle = await client.workflow.start("SegmentSubjectWorkflow", {
+      taskQueue: "segment",
+      args: [
+        {
+          asset_id: options.assetId,
+          storage_key: options.storageKey,
+          prompt: options.prompt,
+          mode: options.mode || "image",
+          frame_index: options.frameIndex ?? 0,
+        },
+      ],
+      workflowId: `segment-${options.assetId}-${Date.now()}`,
+    });
+    return handle.workflowId;
+  });
+}

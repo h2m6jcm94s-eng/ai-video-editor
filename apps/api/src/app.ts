@@ -27,6 +27,7 @@ import { presenceRoutes } from "./routes/presence";
 import { progressRoutes } from "./routes/progress";
 import { projectRoutes } from "./routes/projects";
 import { renderRoutes } from "./routes/renders";
+import { segmentRoutes } from "./routes/segments";
 import { settingsRoutes } from "./routes/settings";
 import { templateRoutes } from "./routes/templates";
 import { uploadRoutes } from "./routes/uploads";
@@ -149,6 +150,7 @@ export async function buildApp() {
   await app.register(projectRoutes, { prefix: "/api/projects" });
   await app.register(uploadRoutes, { prefix: "/api/uploads" });
   await app.register(renderRoutes, { prefix: "/api/renders" });
+  await app.register(segmentRoutes, { prefix: "/api/segments" });
   await app.register(progressRoutes, { prefix: "/api/progress" });
   await app.register(templateRoutes, { prefix: "/api/templates" });
   await app.register(presenceRoutes, { prefix: "/api/presence" });
