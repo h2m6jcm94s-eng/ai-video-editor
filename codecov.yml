@@ -52,7 +52,7 @@ component_management:
       paths: [services/**/src/**]
     - component_id: temporal
       name: "Temporal Workflows"
-      paths: [infra/temporal/**]
+      paths: [services/render-worker/src/render_worker/*.py]
 
 ignore:
   - "apps/api/src/db/migrations/**"

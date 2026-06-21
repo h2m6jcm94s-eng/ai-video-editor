@@ -25,6 +25,7 @@ class AnalyzeStyleInput:
 
     asset_id: str
     storage_key: str
+    project_id: str = ""
     shot_boundaries: List[dict] = field(default_factory=list)
     lut_strength: float = 0.5
     text_sample_fps: float = 5.0
@@ -71,7 +72,7 @@ class AnalyzeStyleWorkflow:
             # LUT extraction is independent of motion/transitions/text — run in parallel
             lut_future = workflow.execute_activity(
                 "extract_lut",
-                args=(reference_video_path, output_dir, input.lut_strength),
+                args=(reference_video_path, output_dir, input.lut_strength, input.project_id),
                 start_to_close_timeout=timeout,
                 retry_policy=retry,
             )

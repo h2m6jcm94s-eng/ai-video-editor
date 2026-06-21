@@ -21,12 +21,14 @@ import type {
   providerKeySchema,
   sectionMarkerSchema,
   slotSchema,
+  subtitleSchema,
   testProviderKeySchema,
 } from "./schemas";
 
 export type CutList = z.infer<typeof cutListSchema>;
 export type Slot = z.infer<typeof slotSchema>;
 export type Overlay = z.infer<typeof overlaySchema>;
+export type Subtitle = z.infer<typeof subtitleSchema>;
 export type AudioTrack = z.infer<typeof audioTrackSchema>;
 export type CutListGlobals = z.infer<typeof cutListGlobalsSchema>;
 export type SectionMarker = z.infer<typeof sectionMarkerSchema>;

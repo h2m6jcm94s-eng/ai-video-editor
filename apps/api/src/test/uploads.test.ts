@@ -141,6 +141,7 @@ describe("Upload Routes", () => {
     expect(startAnalyzeStyleWorkflow).toHaveBeenCalledWith({
       assetId: ASSET_ID,
       storageKey: refAsset.storageKey,
+      projectId: mockProject.id,
     });
   });
 

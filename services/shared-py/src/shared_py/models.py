@@ -170,6 +170,15 @@ class Overlay(BaseModelCamel):
     animation: str = "none"
 
 
+class Subtitle(BaseModelCamel):
+    id: str
+    text: str
+    start_s: float
+    end_s: float
+    speaker: Optional[str] = None
+    confidence: Optional[float] = None
+
+
 class AudioTrack(BaseModelCamel):
     asset_id: str
     gain_db: float = Field(default=0.0, ge=-60.0, le=12.0)
@@ -183,6 +192,7 @@ class CutList(BaseModelCamel):
     globals: CutListGlobals
     slots: List[Slot]
     overlays: List[Overlay] = Field(default_factory=list)
+    subtitles: List[Subtitle] = Field(default_factory=list)
     audio_tracks: List[AudioTrack] = Field(default_factory=list)
 
 

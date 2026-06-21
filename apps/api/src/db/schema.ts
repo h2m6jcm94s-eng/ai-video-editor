@@ -88,6 +88,7 @@ export const renders = pgTable(
     outputAssetId: uuid("output_asset_id"),
     previewAssetId: uuid("preview_asset_id"),
     errorMessage: text("error_message"),
+    options: jsonb("options"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),

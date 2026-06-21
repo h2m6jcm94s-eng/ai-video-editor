@@ -11,7 +11,7 @@ import { createCompletionToken, verifyCompletionToken } from "../lib/crypto";
 import { sendError } from "../lib/errors";
 import { rendersTotal, syncRendersActiveGauge } from "../lib/metrics";
 import { requireInternalToken } from "../middleware/requireInternalToken";
-import { createRenderSchema, validateBody } from "../middleware/validate";
+import { createRenderSchema, renderOptionsSchema, validateBody } from "../middleware/validate";
 import { enqueueJob } from "../services/queue";
 import { startRenderWorkflow } from "../services/temporal";
 
@@ -32,12 +32,17 @@ type StartRenderResult =
   | { ok: true; job: typeof renders.$inferSelect; project: typeof projects.$inferSelect }
   | { ok: false; status: number; message: string; code: string; extra?: Record<string, unknown> };
 
-async function startRenderAtomic(projectId: string, userId: string): Promise<StartRenderResult> {
+async function startRenderAtomic(
+  projectId: string,
+  userId: string,
+  options?: Record<string, unknown>,
+): Promise<StartRenderResult> {
   const values = {
     projectId,
     status: "queued" as const,
     stage: "queued" as const,
     progress: 0,
+    options: options || null,
     startedAt: new Date(),
   };
 
@@ -122,7 +127,16 @@ export async function renderRoutes(app: FastifyInstance) {
       const body = request.validatedBody as z.infer<typeof createRenderSchema>;
       const userId = request.userId;
 
-      const startResult = await startRenderAtomic(body.projectId, userId);
+      let renderOptions: Record<string, unknown> | undefined;
+      if (body.options) {
+        const parsed = renderOptionsSchema.safeParse(body.options);
+        if (!parsed.success) {
+          return sendError(reply, 422, "Invalid render options", "VALIDATION_ERROR", parsed.error.format());
+        }
+        renderOptions = parsed.data;
+      }
+
+      const startResult = await startRenderAtomic(body.projectId, userId, renderOptions);
       if (!startResult.ok) {
         return sendError(
           reply,

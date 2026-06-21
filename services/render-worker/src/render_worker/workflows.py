@@ -3,7 +3,7 @@
 # Commercial SaaS use is prohibited without written permission.
 """Temporal workflow definitions for the render worker."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Dict, List, Optional
 
@@ -22,6 +22,9 @@ class VideoRenderInput:
     asset_key_map: Dict[str, str]
     reference_asset_id: Optional[str] = None
     completion_token: Optional[str] = None
+    style_analysis: Optional[dict] = None
+    mask_asset_ids: List[str] = field(default_factory=list)
+    mask_source_map: Dict[str, str] = field(default_factory=dict)
 
 
 @workflow.defn
@@ -74,6 +77,10 @@ class VideoRenderWorkflow:
 
         output_path: Optional[str] = None
         try:
+            # Resolve export preset from the active render row (preset wins over cut-list aspect ratio)
+            active_render = project_info.get("activeRender") or {}
+            export_preset = (active_render.get("options") or {}).get("exportPreset")
+
             # 3. Compile the final video
             output_path = await workflow.execute_activity(
                 "compile_render",
@@ -82,6 +89,9 @@ class VideoRenderWorkflow:
                     download_result,
                     input.song_asset_id,
                     input.reference_asset_id,
+                    input.style_analysis,
+                    input.mask_source_map,
+                    export_preset,
                 ),
                 start_to_close_timeout=timedelta(seconds=600),
                 retry_policy=RetryPolicy(maximum_attempts=2),

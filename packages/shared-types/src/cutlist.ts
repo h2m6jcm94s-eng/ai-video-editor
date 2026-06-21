@@ -62,6 +62,7 @@ export function buildInitialCutList(assets: AssetLike[]): CutList {
     },
     slots,
     overlays: [],
+    subtitles: [],
     audioTracks: song
       ? [{ assetId: song.id, startS: 0, endS: totalDuration, gainDb: 0, fadeInS: 0, fadeOutS: 0 }]
       : [],

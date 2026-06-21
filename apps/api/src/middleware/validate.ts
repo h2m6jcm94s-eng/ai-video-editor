@@ -11,6 +11,7 @@ import {
   patchTemplateSchema,
   presignedUploadSchema,
   promptEditSchema,
+  renderOptionsSchema,
   updateCutlistSchema,
 } from "@ai-video-editor/shared-types";
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -27,6 +28,7 @@ export {
   patchTemplateSchema,
   presignedUploadSchema,
   promptEditSchema,
+  renderOptionsSchema,
   updateCutlistSchema,
 };
 

@@ -2,7 +2,7 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import { Film, ImageIcon, Music, Upload, Video } from "lucide-react";
+import { Film, ImageIcon, Music, Palette, Upload, Video } from "lucide-react";
 import { useCallback, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -20,6 +20,7 @@ function AssetItem({ asset }: { asset: Asset }) {
     reference_video: Video,
     song: Music,
     clip: Film,
+    lut: Palette,
   };
   const Icon = icons[asset.type as keyof typeof icons] || ImageIcon;
   const isIngested = asset.durationSec != null && asset.durationSec > 0;
@@ -52,7 +53,7 @@ function AssetItem({ asset }: { asset: Asset }) {
 }
 
 export function MediaPanel({ projectId, assets, onAssetsChange }: MediaPanelProps) {
-  const [activeTab, setActiveTab] = useState<"all" | "reference_video" | "song" | "clip">("all");
+  const [activeTab, setActiveTab] = useState<"all" | "reference_video" | "song" | "clip" | "lut">("all");
   const { uploadFile, uploading } = useUpload(projectId);
   const fileInputRef = useCallback((node: HTMLInputElement | null) => {
     // no-op, used for ref assignment in JSX
@@ -72,6 +73,7 @@ export function MediaPanel({ projectId, assets, onAssetsChange }: MediaPanelProp
     { key: "reference_video", label: "Ref", icon: <Video className="w-3 h-3" /> },
     { key: "song", label: "Song", icon: <Music className="w-3 h-3" /> },
     { key: "clip", label: "Clips", icon: <Film className="w-3 h-3" /> },
+    { key: "lut", label: "LUT", icon: <Palette className="w-3 h-3" /> },
   ];
 
   return (
@@ -149,6 +151,23 @@ export function MediaPanel({ projectId, assets, onAssetsChange }: MediaPanelProp
             <span>
               <Upload className="w-3 h-3" />
               {uploading ? "Uploading..." : "Upload Clip"}
+            </span>
+          </Button>
+        </label>
+
+        <input
+          type="file"
+          accept=".cube"
+          className="hidden"
+          id="upload-lut"
+          data-testid="upload-lut"
+          onChange={(e) => handleFileChange(e, "lut")}
+        />
+        <label htmlFor="upload-lut">
+          <Button variant="outline" className="w-full gap-2 text-xs" size="sm" disabled={uploading} asChild>
+            <span>
+              <Upload className="w-3 h-3" />
+              {uploading ? "Uploading..." : "Upload LUT"}
             </span>
           </Button>
         </label>

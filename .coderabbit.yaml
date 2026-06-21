@@ -269,37 +269,28 @@ reviews:
         - Defines domain models as plain dicts instead of Pydantic models
         - Reads os.environ directly for AVE_* vars (use shared_py.config.Settings instead)
 
-    # ── Temporal: Workflow ────────────────────────────────────────────────────
-    - path: "infra/temporal/**/*.py"
+    # ── Temporal: Render Workflow ─────────────────────────────────────────────
+    - path: "services/render-worker/src/render_worker/**/*.py"
       instructions: |
-        PIPELINE ORDER (10 stages, do not reorder):
-        1. probe_inputs      — 60s timeout,  3 attempts
-        2. detect_beats      — 120s timeout, 3 attempts
-        3. detect_shots      — 180s timeout, 3 attempts
-        4. analyze_reference_style — 300s,  2 attempts
-        5. embed_user_clips  — 300s timeout, 2 attempts
-        6. generate_cutlist_claude — 120s,  3 attempts
-        7. rank_clips_per_slot — 60s timeout, 2 attempts
-        8. [assisted mode only] wait for cutlist_approved signal — 24h timeout
-        9. render_720p       — 600s timeout, 2 attempts
-        10. upload_to_r2     — 120s timeout, 3 attempts
-        11. notify_user      — 30s timeout,  1 attempt (no retry)
+        CANONICAL RENDER WORKFLOW:
+        - fetch_project      — 30s timeout, 5 attempts
+        - download_render_assets — 120s timeout, 3 attempts
+        - compile_render     — 600s timeout, 2 attempts
+        - upload_render      — 120s timeout, 3 attempts
+        - complete_render    — 30s timeout, 5 attempts
+        - cleanup_render_assets — 60s timeout, 2 attempts
 
         WORKFLOW ID: Must be render-{projectId}-{renderId}. Never change this format
         without updating the API's temporal.ts service simultaneously.
 
-        PROGRESS TRACKING: Progress updates sent via workflow signal (not query).
-        The API's progress.ts SSE route subscribes to Redis channel keyed by renderId.
-
-        CUTLIST SIGNAL: For assisted mode, the API sends cutlist_approved signal containing
-        the user-edited CutList after the user approves it in the UI. The workflow waits
-        on workflow.wait_condition() with a 24-hour timeout.
+        The render worker reads the project's existing cut-list and styleAnalysis.
+        It does NOT run probe/beat/shot/style/cutlist generation; those are owned
+        by the API and dedicated workers (ingest, style, reason).
 
         Flag any change that:
-        - Reorders pipeline stages
         - Changes an activity timeout by more than 50% without explanation
         - Changes the workflow ID format
-        - Removes the cutlist_approved signal handler for assisted mode
+        - Re-introduces the old 10-stage monolithic pipeline
 
     # ── CI/CD ─────────────────────────────────────────────────────────────────
     - path: ".github/workflows/**/*.yml"

@@ -10,7 +10,7 @@ from typing import Dict, List, Optional
 import httpx
 from temporalio import activity
 
-from render_worker.compiler import compile_timeline
+from render_worker.compiler import compile_timeline, resolve_render_dimensions
 from shared_py.config import settings
 from shared_py.models import CutList, RenderConfig
 from shared_py.storage import download_asset, get_presigned_download_url, upload_file
@@ -64,6 +64,9 @@ async def compile_render(
     local_paths: Dict[str, str],
     song_asset_id: Optional[str] = None,
     reference_asset_id: Optional[str] = None,
+    style_analysis: Optional[dict] = None,
+    mask_source_map: Optional[Dict[str, str]] = None,
+    export_preset: Optional[str] = None,
 ) -> str:
     """Compile the cut-list into a final MP4."""
     cutlist_obj = CutList(**cutlist)
@@ -78,15 +81,53 @@ async def compile_render(
     # Resolve song path if available
     song_path = local_paths.get(song_asset_id) if song_asset_id else None
 
+    # Download LUT if the project style analysis references one stored in R2.
+    lut_path: Optional[str] = None
+    if style_analysis:
+        lut_storage_key = style_analysis.get("lut_storage_key")
+        if lut_storage_key:
+            ext = os.path.splitext(lut_storage_key)[1] or ".cube"
+            lut_path = os.path.join(
+                tempfile.gettempdir(),
+                f"ave_lut_{_activity_run_id()}{ext}",
+            )
+            try:
+                lut_path = download_asset(lut_storage_key, lut_path)
+            except Exception as e:
+                activity.logger.warning(f"Failed to download LUT {lut_storage_key}: {e}")
+                lut_path = None
+
+    # Download segmentation masks and map them by the clip they apply to.
+    mask_paths: Dict[str, str] = {}
+    mask_source_map = mask_source_map or {}
+    for clip_id, mask_asset_id in mask_source_map.items():
+        if clip_id not in local_paths or not mask_asset_id:
+            continue
+        try:
+            ext = ".png"
+            mask_path = os.path.join(
+                tempfile.gettempdir(),
+                f"ave_mask_{mask_asset_id}_{_activity_run_id()}{ext}",
+            )
+            mask_paths[clip_id] = download_asset(mask_asset_id, mask_path)
+        except Exception as e:
+            activity.logger.warning(f"Failed to download mask {mask_asset_id} for clip {clip_id}: {e}")
+
+    # Resolve output dimensions from export preset or cut-list aspect ratio.
+    width, height = resolve_render_dimensions(
+        export_preset,
+        cutlist_obj.globals.aspect_ratio,
+    )
+
     output_path = os.path.join(
         tempfile.gettempdir(),
-        f"ave_render_{cutlist_obj.globals.total_duration_s:.0f}s_{_activity_run_id()}.mp4",
+        f"ave_render_{width}x{height}_{cutlist_obj.globals.total_duration_s:.0f}s_{_activity_run_id()}.mp4",
     )
 
     config = RenderConfig(
         output_path=output_path,
-        width=720,
-        height=1280,
+        width=width,
+        height=height,
         fps=30,
         video_codec="libx264",
         video_preset="slow",
@@ -95,6 +136,8 @@ async def compile_render(
         audio_bitrate="192k",
         pix_fmt="yuv420p",
         song_path=song_path,
+        lut_path=lut_path,
+        mask_paths=mask_paths,
     )
 
     compile_timeline(cutlist_obj, clip_paths, output_path, config)

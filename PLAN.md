@@ -372,10 +372,10 @@ TOPAZ_API_KEY=              # Optional - Real-ESRGAN is default
 - Wire upload completion to trigger async ffprobe metadata extraction
 
 ### Phase 6: Temporal Workers
-- Create `infra/temporal/worker.py` — actual worker process that registers all activities and polls the Temporal task queue
+- Canonical render worker lives in `services/render-worker/` (fetches project, downloads assets, compiles, uploads, completes)
 - Add `apps/api/src/services/temporal.ts` — client to start workflows from API
-- Wire `POST /api/renders` to start a `VideoRenderWorkflow`
-- Wire `PATCH /api/projects/:id/cutlist` (assisted mode) to send `cutlist_approved` signal
+- Wire `POST /api/renders` to start a `VideoRenderWorkflow` on `video-render-queue`
+- Ingest/style/reason workers live in `services/` and are triggered by upload / API events, not by the render worker
 
 ### Phase 7: API Completeness
 - Add ffprobe endpoint: `POST /api/uploads/:assetId/probe` that downloads from R2, runs PyAV probe, stores metadata

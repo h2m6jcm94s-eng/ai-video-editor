@@ -183,6 +183,7 @@ export async function uploadRoutes(app: FastifyInstance) {
       startAnalyzeStyleWorkflow({
         assetId: asset.id,
         storageKey: asset.storageKey,
+        projectId: asset.projectId,
       }).catch((e) => request.log.error({ err: e, assetId }, "style analysis trigger failed"));
     }
 
@@ -355,6 +356,7 @@ export async function uploadRoutes(app: FastifyInstance) {
         startAnalyzeStyleWorkflow({
           assetId: asset.id,
           storageKey: asset.storageKey,
+          projectId: asset.projectId,
         }).catch((e) => request.log.error({ err: e, assetId: asset.id }, "style analysis trigger failed"));
       }
 

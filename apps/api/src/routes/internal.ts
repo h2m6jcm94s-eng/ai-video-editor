@@ -140,6 +140,7 @@ export async function internalRoutes(app: FastifyInstance) {
             stage: activeRender.stage,
             progress: activeRender.progress,
             workflowId: activeRender.workflowId,
+            options: activeRender.options,
           }
         : null,
     };

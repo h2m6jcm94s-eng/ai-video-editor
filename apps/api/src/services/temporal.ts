@@ -70,6 +70,7 @@ export interface StartRenderOptions {
 export interface StartAnalyzeStyleOptions {
   assetId: string;
   storageKey: string;
+  projectId: string;
   shotBoundaries?: Record<string, unknown>[];
   lutStrength?: number;
   textSampleFps?: number;
@@ -110,6 +111,7 @@ export async function startAnalyzeStyleWorkflow(options: StartAnalyzeStyleOption
         {
           asset_id: options.assetId,
           storage_key: options.storageKey,
+          project_id: options.projectId,
           shot_boundaries: options.shotBoundaries || [],
           lut_strength: options.lutStrength ?? 0.5,
           text_sample_fps: options.textSampleFps ?? 5.0,

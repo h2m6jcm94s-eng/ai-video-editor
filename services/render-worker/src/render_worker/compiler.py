@@ -12,11 +12,32 @@ from typing import List, Optional, Dict
 import numpy as np
 from PIL import ImageFont
 
-from shared_py.models import CutList, Slot, Overlay, RenderConfig, Effect, AudioTrack
+from shared_py.models import CutList, Slot, Overlay, RenderConfig, Effect, AudioTrack, Subtitle
 
 
 # Ordered from least to most capability. Used for tier-gating warnings only in M1.
 STYLE_TIERS = ("cuts_only", "color_grade", "with_text", "with_effects", "full_remix")
+
+PRESET_DIMENSIONS = {
+    "youtube_16_9": (1280, 720),
+    "reels_9_16": (720, 1280),
+    "tiktok_9_16": (720, 1280),
+    "square_1_1": (720, 720),
+}
+
+ASPECT_RATIO_DIMENSIONS = {
+    "16:9": (1280, 720),
+    "9:16": (720, 1280),
+    "4:5": (720, 900),
+    "1:1": (720, 720),
+}
+
+
+def resolve_render_dimensions(export_preset: Optional[str], aspect_ratio: Optional[str]) -> tuple[int, int]:
+    """Resolve output width/height from export preset or cut-list aspect ratio."""
+    if export_preset:
+        return PRESET_DIMENSIONS.get(export_preset, (720, 1280))
+    return ASPECT_RATIO_DIMENSIONS.get(aspect_ratio, (720, 1280))
 
 
 def _tier_index(tier: str) -> int:
@@ -504,6 +525,8 @@ def compile_timeline(
         _warn_if_below(style_tier, "color_grade", "LUT / color grade")
     if cutlist.overlays:
         _warn_if_below(style_tier, "with_text", "text overlays")
+    if cutlist.subtitles:
+        _warn_if_below(style_tier, "with_text", "subtitles")
     if cutlist.audio_tracks or config.song_path:
         _warn_if_below(style_tier, "full_remix", "audio tracks / song")
     for slot in cutlist.slots:
@@ -642,6 +665,27 @@ def compile_timeline(
                 f"enable='{enable_expr}'[{text_label}]"
             )
             current_label = text_label
+
+        # Subtitles (timed text segments) burned on top of everything.
+        for subtitle in cutlist.subtitles:
+            start_s = round(max(0.0, subtitle.start_s), 3)
+            end_s = round(min(subtitle.end_s, current_duration - 0.05), 3)
+            if start_s >= current_duration or end_s <= start_s or not subtitle.text.strip():
+                continue
+
+            sub_label = f"sub_{subtitle.id}_{start_s:.0f}"
+            enable_expr = _enable_expr(start_s, end_s)
+
+            filter_parts.append(
+                f"[{current_label}]drawtext=text='{_esc_text(subtitle.text)}':"
+                f"x=(w-text_w)/2:y=h*0.85:"
+                f"fontsize=48:"
+                f"fontcolor=#FFFFFF:"
+                f"{'fontfile=' + relative_font + ':' if relative_font else ''}"
+                f"borderw=2:bordercolor=#000000:"
+                f"enable='{enable_expr}'[{sub_label}]"
+            )
+            current_label = sub_label
 
         # Final output mapping
         filter_parts.append(f"[{current_label}]format=yuv420p[outv]")

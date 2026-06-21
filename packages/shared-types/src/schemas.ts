@@ -10,6 +10,8 @@ export const ALLOWED_MIMES = [
   "audio/wav",
   "audio/aac",
   "audio/ogg",
+  "application/vnd.adobe.cube",
+  "application/octet-stream",
 ];
 
 export const projectNameSchema = z
@@ -102,6 +104,17 @@ export const overlaySchema = z
   })
   .strict();
 
+export const subtitleSchema = z
+  .object({
+    id: z.string().min(1),
+    text: z.string().min(1),
+    startS: z.number().min(0),
+    endS: z.number().min(0),
+    speaker: z.string().optional(),
+    confidence: z.number().min(0).max(1).optional(),
+  })
+  .strict();
+
 export const audioTrackSchema = z
   .object({
     assetId: z.string().min(1),
@@ -118,6 +131,7 @@ export const cutListSchema = z
     globals: cutListGlobalsSchema,
     slots: z.array(slotSchema).min(1, "Cut list must have at least one slot"),
     overlays: z.array(overlaySchema).default([]),
+    subtitles: z.array(subtitleSchema).default([]),
     audioTracks: z.array(audioTrackSchema).default([]),
   })
   .strict();

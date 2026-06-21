@@ -22,7 +22,16 @@ const ALLOWED_TYPES = [
   "audio/wav",
   "audio/aac",
   "audio/ogg",
+  "application/vnd.adobe.cube",
+  "application/octet-stream",
 ];
+
+function getMimeType(file: File): string {
+  if (file.name.toLowerCase().endsWith(".cube")) {
+    return "application/vnd.adobe.cube";
+  }
+  return file.type;
+}
 
 const MULTIPART_THRESHOLD = 100 * 1024 * 1024; // 100MB
 const PART_SIZE = 10 * 1024 * 1024; // 10MB parts
@@ -39,8 +48,9 @@ export function useUpload(projectId: string) {
 
   const uploadFile = useCallback(
     async (file: File, type: AssetType): Promise<Asset | null> => {
-      if (!ALLOWED_TYPES.includes(file.type)) {
-        const msg = `Unsupported file type: ${file.type}. Allowed: MP4, MOV, WEBM, MP3, WAV, AAC, OGG.`;
+      const mimeType = getMimeType(file);
+      if (!ALLOWED_TYPES.includes(mimeType)) {
+        const msg = `Unsupported file type: ${mimeType}. Allowed: MP4, MOV, WEBM, MP3, WAV, AAC, OGG, CUBE.`;
         setState({ uploading: false, progress: 0, error: msg });
         toast.error(msg);
         return null;
@@ -53,9 +63,17 @@ export function useUpload(projectId: string) {
         let asset: Asset;
 
         if (file.size > MULTIPART_THRESHOLD) {
-          asset = await uploadMultipart(file, projectId, type, api, setState, abortRef.current.signal);
+          asset = await uploadMultipart(
+            file,
+            projectId,
+            type,
+            mimeType,
+            api,
+            setState,
+            abortRef.current.signal,
+          );
         } else {
-          asset = await uploadSimple(file, projectId, type, api, setState, abortRef.current.signal);
+          asset = await uploadSimple(file, projectId, type, mimeType, api, setState, abortRef.current.signal);
         }
 
         setState({ uploading: false, progress: 100, error: null });
@@ -96,6 +114,7 @@ async function uploadSimple(
   file: File,
   projectId: string,
   type: AssetType,
+  mimeType: string,
   api: ReturnType<typeof useApi>,
   setState: (s: UploadState) => void,
   signal: AbortSignal,
@@ -103,7 +122,7 @@ async function uploadSimple(
   const presign = await api.uploads.presign({
     projectId,
     filename: file.name,
-    mimeType: file.type,
+    mimeType,
     type,
   });
 
@@ -123,6 +142,7 @@ async function uploadMultipart(
   file: File,
   projectId: string,
   type: AssetType,
+  mimeType: string,
   api: ReturnType<typeof useApi>,
   setState: (s: UploadState) => void,
   signal: AbortSignal,
@@ -130,7 +150,7 @@ async function uploadMultipart(
   const init = await api.uploads.multipartInit({
     projectId,
     filename: file.name,
-    mimeType: file.type,
+    mimeType,
     type,
   });
 
