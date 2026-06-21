@@ -22,7 +22,11 @@ const batchSchema = z
 
 export async function logRoutes(app: FastifyInstance) {
   app.post("/api/log", async (request, reply) => {
-    const body = batchSchema.parse(request.body);
+    const result = batchSchema.safeParse(request.body);
+    if (!result.success) {
+      return reply.status(422).send({ ok: false, error: "Validation failed", issues: result.error.issues });
+    }
+    const body = result.data;
     for (const ev of body.events) {
       request.log[ev.level](
         {

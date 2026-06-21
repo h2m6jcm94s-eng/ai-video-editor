@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { STYLE_TIER, EDIT_MODE, ASSET_TYPE } from "./enums";
 import { effectSchema } from "./effects";
+import { ASSET_TYPE, EDIT_MODE, STYLE_TIER } from "./enums";
 
 export const ALLOWED_MIMES = [
   "video/mp4",
@@ -155,10 +155,24 @@ export const renderOptionsSchema = z
 
 export const templateMetaSchema = createTemplateSchema.omit({ cutList: true });
 
+export const PROVIDER_KEY_OPTIONS = [
+  "anthropic",
+  "openai",
+  "kimi",
+  "openrouter",
+  "groq",
+  "gemini",
+  "qwen",
+] as const;
+
 export const providerKeySchema = z
   .object({
-    provider: z.string().min(1, "Select a provider"),
-    key: z.string().min(1, "API key is required").max(2048, "Key too long"),
+    provider: z.enum(PROVIDER_KEY_OPTIONS, { message: "Select a supported provider" }),
+    key: z
+      .string()
+      .min(8, "API key is too short")
+      .max(2048, "Key too long")
+      .regex(/^[^\s]+$/, "Key cannot contain whitespace"),
   })
   .strict();
 

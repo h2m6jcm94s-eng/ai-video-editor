@@ -71,33 +71,43 @@ class VideoRenderWorkflow:
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
 
-        # 3. Compile the final video
-        output_path = await workflow.execute_activity(
-            "compile_render",
-            args=(
-                cutlist,
-                download_result,
-                input.song_asset_id,
-                input.reference_asset_id,
-            ),
-            start_to_close_timeout=timedelta(seconds=600),
-            retry_policy=RetryPolicy(maximum_attempts=2),
-        )
+        output_path: Optional[str] = None
+        try:
+            # 3. Compile the final video
+            output_path = await workflow.execute_activity(
+                "compile_render",
+                args=(
+                    cutlist,
+                    download_result,
+                    input.song_asset_id,
+                    input.reference_asset_id,
+                ),
+                start_to_close_timeout=timedelta(seconds=600),
+                retry_policy=RetryPolicy(maximum_attempts=2),
+            )
 
-        # 4. Upload output to R2 and create asset row
-        upload_result = await workflow.execute_activity(
-            "upload_render",
-            args=(output_path, input.project_id, render_id),
-            start_to_close_timeout=timedelta(seconds=120),
-            retry_policy=RetryPolicy(maximum_attempts=3),
-        )
+            # 4. Upload output to R2 and create asset row
+            upload_result = await workflow.execute_activity(
+                "upload_render",
+                args=(output_path, input.project_id, render_id),
+                start_to_close_timeout=timedelta(seconds=120),
+                retry_policy=RetryPolicy(maximum_attempts=3),
+            )
 
-        # 5. Mark render job complete
-        await workflow.execute_activity(
-            "complete_render",
-            args=(render_id, upload_result["asset_id"]),
-            start_to_close_timeout=timedelta(seconds=30),
-            retry_policy=RetryPolicy(maximum_attempts=5),
-        )
+            # 5. Mark render job complete
+            await workflow.execute_activity(
+                "complete_render",
+                args=(render_id, upload_result["asset_id"]),
+                start_to_close_timeout=timedelta(seconds=30),
+                retry_policy=RetryPolicy(maximum_attempts=5),
+            )
 
-        return upload_result["storage_key"]
+            return upload_result["storage_key"]
+        finally:
+            # Always remove locally downloaded assets and the rendered scratch file.
+            await workflow.execute_activity(
+                "cleanup_render_assets",
+                args=(download_result, output_path),
+                start_to_close_timeout=timedelta(seconds=60),
+                retry_policy=RetryPolicy(maximum_attempts=2),
+            )

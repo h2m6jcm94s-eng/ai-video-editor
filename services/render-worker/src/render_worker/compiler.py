@@ -42,7 +42,11 @@ def _find_font() -> str:
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
         "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
         "/System/Library/Fonts/Helvetica.ttc",  # macOS
-        "C:\\Windows\\Fonts\\arial.ttf",  # Windows
+        "C:\\Windows\\Fonts\\segoeuib.ttf",
+        "C:\\Windows\\Fonts\\segoeui.ttf",
+        "C:\\Windows\\Fonts\\arial.ttf",
+        "C:\\Windows\\Fonts\\calibri.ttf",
+        "C:\\Windows\\Fonts\\verdana.ttf",
     ]
     for f in candidates:
         if os.path.exists(f):
@@ -108,7 +112,8 @@ def _run_ffmpeg(cmd: List[str], context: str, cwd: Optional[str] = None) -> None
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode("utf-8", errors="replace") if e.stderr else ""
         try:
-            with open("e2e/ffmpeg-stderr.log", "a", encoding="utf-8") as f:
+            log_path = os.path.join(tempfile.gettempdir(), "ave_ffmpeg_stderr.log")
+            with open(log_path, "a", encoding="utf-8") as f:
                 f.write(f"\n--- {context} ---\n")
                 f.write(f"Command: {' '.join(cmd)}\n")
                 f.write(f"Return code: {e.returncode}\n")
@@ -120,6 +125,44 @@ def _run_ffmpeg(cmd: List[str], context: str, cwd: Optional[str] = None) -> None
             f"Command: {' '.join(cmd[:20])}...\n"
             f"Stderr: {stderr[:2000]}"
         ) from e
+
+
+# Paths supplied by callers must stay inside temp directories / cwd so FFmpeg
+# cannot be tricked into reading or writing arbitrary filesystem locations.
+_ALLOWED_ROOTS = {
+    os.path.abspath(tempfile.gettempdir()),
+    os.path.abspath(os.getcwd()),
+}
+
+
+def _safe_path(p: str, must_exist: bool = False) -> str:
+    """Resolve p, reject path-traversal, and optionally require existence.
+
+    Input clips must live inside an allowed root so FFmpeg cannot be asked to
+    read arbitrary files. Output paths only need to be absolute and free of
+    parent-directory traversal; the worker controls the actual destination.
+    """
+    abs_path = os.path.abspath(p)
+    norm_path = os.path.normpath(abs_path)
+    if ".." in norm_path.split(os.sep):
+        raise ValueError(f"Refusing unsafe path: {p}")
+
+    if not must_exist:
+        normalized_input = os.path.normpath(p)
+        is_abs = (
+            normalized_input.startswith(("/", "\\"))
+            or (len(normalized_input) > 1 and normalized_input[1] == ":")
+        )
+        if is_abs and ".." not in normalized_input.split(os.sep):
+            return abs_path
+        raise ValueError(f"Output path must be absolute: {p}")
+
+    for root in _ALLOWED_ROOTS:
+        if norm_path == root or norm_path.startswith(root + os.sep):
+            if not os.path.exists(abs_path):
+                raise ValueError(f"Required path does not exist: {p}")
+            return abs_path
+    raise ValueError(f"Path outside allowed roots: {p}")
 
 
 # Map transition types to xfade names
@@ -147,7 +190,13 @@ def _esc_path(p: str) -> str:
 
 
 def _esc_text(t: str) -> str:
-    return t.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:").replace("%", "\\%")
+    """Escape text for FFmpeg's drawtext text='...' value.
+
+    Inside a single-quoted FFmpeg string a literal single quote is written as
+    two single quotes, and ``%`` must be escaped because it enables text
+    expansion/expansion tokens.
+    """
+    return t.replace("'", "''").replace("%", "\\%")
 
 
 def _get_param(params, key: str, default):
@@ -158,11 +207,8 @@ def _get_param(params, key: str, default):
 
 
 def _enable_expr(start_s: float, end_s: float) -> str:
-    """Build an FFmpeg enable expression for a time window.
-
-    Commas are escaped because the filter chain is comma-separated.
-    """
-    return f"between(t\\,{start_s:.3f}\\,{end_s:.3f})"
+    """Build an FFmpeg enable expression for a time window."""
+    return f"between(t,{start_s:.3f},{end_s:.3f})"
 
 
 def _drawtext_filter(
@@ -369,7 +415,19 @@ def _build_audio_filter(audio_tracks: List[AudioTrack], base_input_count: int, s
     idx = base_input_count
 
     for track in audio_tracks:
-        parts.append(f"[{idx}:a]afade=t=in:ss=0:d={track.fade_in_s},afade=t=out:st={max(0, track.end_s - track.start_s - track.fade_out_s)}:d={track.fade_out_s},volume={track.gain_db}dB[a{idx}]")
+        track_filters = []
+        fade_in = track.fade_in_s or 0.0
+        if fade_in > 0:
+            track_filters.append(f"afade=t=in:ss=0:d={fade_in}")
+
+        fade_out = track.fade_out_s or 0.0
+        clip_dur = max(0.0, track.end_s - track.start_s)
+        out_start = max(0.0, clip_dur - fade_out)
+        if fade_out > 0 and out_start > 0:
+            track_filters.append(f"afade=t=out:st={out_start}:d={fade_out}")
+
+        track_filters.append(f"volume={track.gain_db}dB")
+        parts.append(f"[{idx}:a]{','.join(track_filters)}[a{idx}]")
         inputs.append(f"[a{idx}]")
         idx += 1
 
@@ -447,189 +505,187 @@ def compile_timeline(
         if slot.transition_out != "hard_cut" or slot.transition_in != "hard_cut":
             _warn_if_below(style_tier, "with_effects", f"transitions ({slot.index})")
 
+    # Sanitize input/output paths before handing them to FFmpeg.
+    output_path = _safe_path(output_path)
+    sanitized_clip_paths = {cid: _safe_path(p, must_exist=True) for cid, p in clip_paths.items()}
+
     # Stage 1: Extract each slot's segment from its assigned clip
     slot_segments = []
-    temp_files = []
     temp_dir = tempfile.mkdtemp(prefix="ave_render_")
 
-    # Copy the system font into the render temp dir up-front so both per-slot
-    # text effects (Stage 1) and global overlays (Stage 2) can reference it
-    # with a relative, colon-free path on Windows.
-    fontfile = _find_font()
-    relative_font = ""
-    if fontfile and os.path.exists(fontfile):
-        local_font = os.path.join(temp_dir, "font.ttf")
-        shutil.copy2(fontfile, local_font)
-        relative_font = "font.ttf"
+    try:
+        # Copy the system font into the render temp dir up-front so both per-slot
+        # text effects (Stage 1) and global overlays (Stage 2) can reference it
+        # with a relative, colon-free path on Windows.
+        fontfile = _find_font()
+        relative_font = ""
+        if fontfile and os.path.exists(fontfile):
+            local_font = os.path.join(temp_dir, "font.ttf")
+            shutil.copy2(fontfile, local_font)
+            relative_font = "font.ttf"
 
-    for slot in cutlist.slots:
-        clip_id = slot.selected_clip_id
-        if not clip_id or clip_id not in clip_paths:
-            continue
+        for slot in cutlist.slots:
+            clip_id = slot.selected_clip_id
+            if not clip_id or clip_id not in sanitized_clip_paths:
+                continue
 
-        if slot.start_s < 0:
-            raise ValueError(f"Slot {slot.index} has negative start_s: {slot.start_s}")
+            if slot.start_s < 0:
+                raise ValueError(f"Slot {slot.index} has negative start_s: {slot.start_s}")
 
-        clip_path = clip_paths[clip_id]
-        segment_path = os.path.join(temp_dir, f"slot_{slot.index:03d}.mp4")
+            clip_path = sanitized_clip_paths[clip_id]
+            segment_path = os.path.join(temp_dir, f"slot_{slot.index:03d}.mp4")
 
-        duration = slot.duration_s
-        start = float(slot.start_s)
+            duration = slot.duration_s
+            start = float(slot.start_s)
 
-        base_vf = (
-            f"fps={config.fps},"
-            f"scale={config.width}:{config.height}:force_original_aspect_ratio=decrease,"
-            f"pad={config.width}:{config.height}:(ow-iw)/2:(oh-ih)/2"
-        )
+            base_vf = (
+                f"fps={config.fps},"
+                f"scale={config.width}:{config.height}:force_original_aspect_ratio=decrease,"
+                f"pad={config.width}:{config.height}:(ow-iw)/2:(oh-ih)/2"
+            )
 
-        vf = _apply_video_effects(slot, base_vf, temp_dir, relative_font, config)
+            vf = _apply_video_effects(slot, base_vf, temp_dir, relative_font, config)
+
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(start),
+                "-t", str(duration),
+                "-i", clip_path,
+                "-vf", vf,
+                "-c:v", "libx264", "-preset", "ultrafast",
+                "-crf", "23", "-pix_fmt", "yuv420p",
+                "-an",
+                segment_path,
+            ]
+            _run_ffmpeg(cmd, f"segment extraction for slot {slot.index}", cwd=temp_dir)
+
+            # If this clip has a segmentation mask, composite the subject over black.
+            raw_mask_path = config.mask_paths.get(clip_id) if config.mask_paths else None
+            mask_path = raw_mask_path and _safe_path(raw_mask_path, must_exist=True)
+            if mask_path and os.path.exists(mask_path):
+                masked_segment_path = os.path.join(temp_dir, f"slot_{slot.index:03d}_masked.mp4")
+                _apply_subject_mask(segment_path, mask_path, masked_segment_path, config, temp_dir)
+                segment_path = masked_segment_path
+
+            slot_segments.append({
+                "path": segment_path,
+                "slot": slot,
+            })
+
+        if not slot_segments:
+            raise ValueError("No valid segments could be extracted")
+
+        # Stage 2: Build filter_complex for concatenation + transitions
+        filter_parts = []
+
+        for i, _ in enumerate(slot_segments):
+            filter_parts.append(f"[{i}:v]setpts=PTS-STARTPTS[v{i}]")
+
+        current_label = "v0"
+        current_duration = slot_segments[0]["slot"].duration_s
+        for i in range(len(slot_segments) - 1):
+            slot = slot_segments[i]["slot"]
+            next_slot = slot_segments[i + 1]["slot"]
+            transition = XFADE_MAP.get(slot.transition_out, "fade")
+            xfade_duration = min(0.3, slot.duration_s * 0.5, next_slot.duration_s * 0.5)
+            offset = max(0.0, current_duration - xfade_duration)
+
+            out_label = f"vx{i}"
+            filter_parts.append(
+                f"[{current_label}][v{i+1}]xfade=transition={transition}:duration={xfade_duration}:offset={offset}[{out_label}]"
+            )
+            current_label = out_label
+            current_duration = current_duration + next_slot.duration_s - xfade_duration
+
+        # LUT application if available
+        if config.lut_path and os.path.exists(config.lut_path):
+            lut_label = f"{current_label}_lut"
+            filter_parts.append(
+                f"[{current_label}]zscale=transfer=709:range=tv:out_range=pc,"
+                f"lut3d=file={_esc_path(config.lut_path)}:interp=tetrahedral,"
+                f"zscale=range=pc:out_range=tv[{lut_label}]"
+            )
+            current_label = lut_label
+
+        # Text overlays (clamp to final rendered duration with small buffer).
+        # The system font was already copied into the render temp dir in Stage 1.
+        for overlay in cutlist.overlays:
+            start_s = round(max(0.0, overlay.start_s), 3)
+            end_s = round(min(overlay.end_s, current_duration - 0.05), 3)
+            if start_s >= current_duration or end_s <= start_s:
+                continue
+
+            text_label = f"text_{start_s}"
+            x_expr = "(w-text_w)/2"
+            y_expr = "(h-text_h)/2"
+            if overlay.position == "top":
+                y_expr = "h*0.1"
+            elif overlay.position == "bottom":
+                y_expr = "h*0.9"
+
+            enable_expr = _enable_expr(start_s, end_s)
+
+            filter_parts.append(
+                f"[{current_label}]drawtext=text='{_esc_text(overlay.text)}':"
+                f"x={x_expr}:y={y_expr}:"
+                f"fontsize={overlay.font_size_px}:"
+                f"fontcolor={overlay.color}:"
+                f"{'fontfile=' + relative_font + ':' if relative_font else ''}"
+                f"borderw=2:bordercolor={overlay.stroke or 'black'}:"
+                f"enable='{enable_expr}'[{text_label}]"
+            )
+            current_label = text_label
+
+        # Final output mapping
+        filter_parts.append(f"[{current_label}]format=yuv420p[outv]")
+        final_label = "outv"
+
+        # Build full command
+        input_args = []
+        for seg in slot_segments:
+            input_args.extend(["-i", seg["path"]])
+
+        # Audio inputs
+        audio_tracks = list(cutlist.audio_tracks) if hasattr(cutlist, "audio_tracks") else []
+        if not audio_tracks and config.song_path and os.path.exists(config.song_path or ""):
+            audio_tracks = [AudioTrack(asset_id="song", start_s=0.0, end_s=1e9, gain_db=0.0)]
+
+        for track in audio_tracks:
+            path = sanitized_clip_paths.get(track.asset_id) or (config.song_path and _safe_path(config.song_path, must_exist=True))
+            if path and os.path.exists(path):
+                input_args.extend(["-i", path])
+
+        audio_filter, _ = _build_audio_filter(audio_tracks, len(slot_segments), config.song_path)
+        if audio_filter:
+            filter_parts.append(audio_filter)
+
+        filter_complex = ";".join(filter_parts)
 
         cmd = [
             "ffmpeg", "-y",
-            "-ss", str(start),
-            "-t", str(duration),
-            "-i", clip_path,
-            "-vf", vf,
-            "-c:v", "libx264", "-preset", "ultrafast",
-            "-crf", "23", "-pix_fmt", "yuv420p",
-            "-an",
-            segment_path,
+            *input_args,
+            "-filter_complex", filter_complex,
+            "-map", f"[{final_label}]",
+            "-c:v", config.video_codec,
+            "-preset", config.video_preset,
+            "-crf", str(config.video_crf),
+            "-pix_fmt", config.pix_fmt,
         ]
-        _run_ffmpeg(cmd, f"segment extraction for slot {slot.index}", cwd=temp_dir)
 
-        # If this clip has a segmentation mask, composite the subject over black.
-        mask_path = config.mask_paths.get(clip_id) if config.mask_paths else None
-        if mask_path and os.path.exists(mask_path):
-            masked_segment_path = os.path.join(temp_dir, f"slot_{slot.index:03d}_masked.mp4")
-            _apply_subject_mask(segment_path, mask_path, masked_segment_path, config, temp_dir)
-            segment_path = masked_segment_path
-            temp_files.append(masked_segment_path)
+        if audio_filter:
+            cmd.extend(["-map", "[amixed]", "-c:a", config.audio_codec, "-b:a", config.audio_bitrate, "-shortest"])
+        else:
+            cmd.extend(["-an"])
 
-        slot_segments.append({
-            "path": segment_path,
-            "slot": slot,
-        })
-        temp_files.append(segment_path)
+        cmd.extend(["-movflags", "+faststart", output_path])
 
-    if not slot_segments:
-        raise ValueError("No valid segments could be extracted")
-
-    # Stage 2: Build filter_complex for concatenation + transitions
-    filter_parts = []
-
-    for i, _ in enumerate(slot_segments):
-        filter_parts.append(f"[{i}:v]setpts=PTS-STARTPTS[v{i}]")
-
-    current_label = "v0"
-    current_duration = slot_segments[0]["slot"].duration_s
-    for i in range(len(slot_segments) - 1):
-        slot = slot_segments[i]["slot"]
-        next_slot = slot_segments[i + 1]["slot"]
-        transition = XFADE_MAP.get(slot.transition_out, "fade")
-        xfade_duration = min(0.3, slot.duration_s * 0.5, next_slot.duration_s * 0.5)
-        offset = max(0.0, current_duration - xfade_duration)
-
-        out_label = f"vx{i}"
-        filter_parts.append(
-            f"[{current_label}][v{i+1}]xfade=transition={transition}:duration={xfade_duration}:offset={offset}[{out_label}]"
-        )
-        current_label = out_label
-        current_duration = current_duration + next_slot.duration_s - xfade_duration
-
-    # LUT application if available
-    if config.lut_path and os.path.exists(config.lut_path):
-        lut_label = f"{current_label}_lut"
-        filter_parts.append(
-            f"[{current_label}]zscale=transfer=709:range=tv:out_range=pc,"
-            f"lut3d=file={_esc_path(config.lut_path)}:interp=tetrahedral,"
-            f"zscale=range=pc:out_range=tv[{lut_label}]"
-        )
-        current_label = lut_label
-
-    # Text overlays (clamp to final rendered duration with small buffer).
-    # The system font was already copied into the render temp dir in Stage 1.
-    for overlay in cutlist.overlays:
-        start_s = round(max(0.0, overlay.start_s), 3)
-        end_s = round(min(overlay.end_s, current_duration - 0.05), 3)
-        if start_s >= current_duration or end_s <= start_s:
-            continue
-
-        text_label = f"text_{start_s}"
-        x_expr = "(w-text_w)/2"
-        y_expr = "(h-text_h)/2"
-        if overlay.position == "top":
-            y_expr = "h*0.1"
-        elif overlay.position == "bottom":
-            y_expr = "h*0.9"
-
-        enable_expr = f"between(t\\,{start_s}\\,{end_s})"
-
-        filter_parts.append(
-            f"[{current_label}]drawtext=text='{_esc_text(overlay.text)}':"
-            f"x={x_expr}:y={y_expr}:"
-            f"fontsize={overlay.font_size_px}:"
-            f"fontcolor={overlay.color}:"
-            f"{'fontfile=' + relative_font + ':' if relative_font else ''}"
-            f"borderw=2:bordercolor={overlay.stroke or 'black'}:"
-            f"enable='{enable_expr}'[{text_label}]"
-        )
-        current_label = text_label
-
-    # Final output mapping
-    filter_parts.append(f"[{current_label}]format=yuv420p[outv]")
-    final_label = "outv"
-
-    # Build full command
-    input_args = []
-    for seg in slot_segments:
-        input_args.extend(["-i", seg["path"]])
-
-    # Audio inputs
-    audio_tracks = list(cutlist.audio_tracks) if hasattr(cutlist, "audio_tracks") else []
-    if not audio_tracks and config.song_path and os.path.exists(config.song_path or ""):
-        audio_tracks = [AudioTrack(asset_id="song", start_s=0.0, end_s=1e9, gain_db=0.0)]
-
-    for track in audio_tracks:
-        path = clip_paths.get(track.asset_id) or config.song_path
-        if path and os.path.exists(path):
-            input_args.extend(["-i", path])
-
-    audio_filter, _ = _build_audio_filter(audio_tracks, len(slot_segments), config.song_path)
-    if audio_filter:
-        filter_parts.append(audio_filter)
-
-    filter_complex = ";".join(filter_parts)
-
-    cmd = [
-        "ffmpeg", "-y",
-        *input_args,
-        "-filter_complex", filter_complex,
-        "-map", f"[{final_label}]",
-        "-c:v", config.video_codec,
-        "-preset", config.video_preset,
-        "-crf", str(config.video_crf),
-        "-pix_fmt", config.pix_fmt,
-    ]
-
-    if audio_filter:
-        cmd.extend(["-map", "[amixed]", "-c:a", config.audio_codec, "-b:a", config.audio_bitrate, "-shortest"])
-    else:
-        cmd.extend(["-an"])
-
-    cmd.extend(["-movflags", "+faststart", output_path])
-
-    _run_ffmpeg(cmd, "final render", cwd=temp_dir)
-
-    # Cleanup temp files
-    for f in temp_files:
-        try:
-            os.remove(f)
-        except OSError:
-            pass
-    try:
-        os.rmdir(temp_dir)
-    except OSError:
-        pass
+        _run_ffmpeg(cmd, "final render", cwd=temp_dir)
+        return output_path
+    finally:
+        # Remove the entire render scratch directory including fonts and any
+        # segments that were created. ``ignore_errors`` keeps cleanup from
+        # masking the real exception.
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
     return output_path
 

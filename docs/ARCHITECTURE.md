@@ -122,6 +122,19 @@ app/
 └── page.tsx          # Redirects to /dashboard
 ```
 
+### Dashboard UI
+
+The dashboard is built as a set of glassmorphic components in `apps/web/src/components/dashboard/`:
+
+- `DashboardHeader` — top navigation with the project-create CTA
+- `HeroSection` — value prop and project-count messaging
+- `StatsSection` — four animated glass stat cards powered by `useCountUp` (`apps/web/src/hooks/useCountUp.ts`)
+- `ProjectList` / `ProjectCard` — project grid with status badges and hover effects
+- `CreateProjectDialog` — modal for naming a project and choosing a style tier / edit mode
+- `AmbientBackground` — animated gradient orbs behind the glass panels
+
+The glass look comes from Tailwind utilities defined in `apps/web/src/app/globals.css` (`.glass`, `.glass-card`, `.text-glass`, `.glow-hover`).
+
 ### Key Design Patterns
 
 **1. Server/Client Boundary**
@@ -200,6 +213,7 @@ All routes are registered in `app.ts` under the `/api` prefix. Auth middleware (
 | `settings.ts` | `/api/settings` | 4 endpoints | Provider key management |
 | `presence.ts` | `/api/presence` | 2 endpoints | Real-time cursor presence |
 | `progress.ts` | `/api/progress` | 1 endpoint | SSE progress stream |
+| `segments.ts` | `/api/segments` | 2 endpoints | Start / query segmentation workflow |
 
 ### Middleware Pipeline
 
@@ -265,7 +279,7 @@ projects
 ├── id (UUID PK)
 ├── userId → users.id
 ├── name
-├── status (uploading | analyzing | rendering | complete | failed)
+├── status (uploading | processing | complete | failed)
 ├── styleTier (cuts_only | color_grade | with_text | with_effects | full_remix)
 ├── mode (auto | assisted)
 ├── referenceAssetId → assets.id (nullable)
@@ -279,7 +293,7 @@ projects
 assets
 ├── id (UUID PK)
 ├── projectId → projects.id
-├── type (reference | song | clip | render | preview)
+├── type (reference_video | song | clip | render | preview | subtitle | lut | sfx | mask)
 ├── filename
 ├── mimeType
 ├── sizeBytes
@@ -355,12 +369,14 @@ All foreign keys have B-tree indexes. Additional indexes:
 | **Style Worker** | On-demand | Extract LUT, classify transitions, detect text, analyze camera motion | PIL, scikit-learn, OpenCV |
 | **Reason Worker** | On-demand | Generate cutlist, rank clips per slot | Claude/OpenAI APIs, programmatic fallback |
 | **Upscale Worker** | On-demand | Optional post-render upscaling | Real-ESRGAN, Topaz (placeholder) |
+| **Segment Worker** | Temporal | Subject segmentation / mask generation | SAM, OpenCV, PyAV |
 
 ### Temporal Task Queues
 
 | Queue | Worker | Workflow | Purpose |
 |---|---|---|---|
 | `ingest` | Ingest Worker | `ProbeAssetWorkflow` | One-shot probe of a single uploaded asset |
+| `segment` | Segment Worker | `SegmentSubjectWorkflow` | Generate per-subject masks for a clip |
 | `video-render-queue` | Render Worker | `VideoRenderWorkflow` | End-to-end render: fetch, download, compile, upload, finalize |
 
 ### Data Flow (Current Temporal Pipeline)
@@ -381,6 +397,14 @@ Ingest Worker downloads asset → probes with PyAV
 PATCH /api/internal/assets/:assetId/probe (metadata)
     ↓
 Asset appears as "ingested" in the editor
+         ↓
+[Optional] User requests subject segmentation on a clip
+         ↓
+API starts SegmentSubjectWorkflow on `segment` queue
+         ↓
+Segment Worker generates a mask video and PATCHes asset metadata
+         ↓
+A `mask` asset is linked to the source clip
          ↓
 [User builds cut-list via prompt edit or reference pipeline]
          ↓
@@ -561,9 +585,12 @@ API validates:
   - Required assets present (reference + song)
   - No render already in progress
     ↓
+API collects any `mask` assets and builds a `maskSourceMap` from clip → mask
+    ↓
 API creates render record (status: queued)
     ↓
 API starts `VideoRenderWorkflow` on `video-render-queue`
+    Body includes the mask map so the compiler can apply segmentation
     ↓
 Response: { job: { id, status, stage } }
     ↓

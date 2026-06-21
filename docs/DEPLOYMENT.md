@@ -53,7 +53,7 @@ pnpm infra:up
 docker compose -f infra/local/docker-compose.yml up -d --build
 
 # Scale workers
-docker compose -f infra/local/docker-compose.yml up -d --scale ingest-worker=4 --scale render-worker=4
+docker compose -f infra/local/docker-compose.yml up -d --scale ingest-worker=4 --scale segment-worker=2 --scale render-worker=4
 ```
 
 Production images are built from Dockerfiles in `infra/docker/`.
@@ -69,6 +69,7 @@ Production images are built from Dockerfiles in `infra/docker/`.
 | `temporal` | `temporalio/auto-setup` | 7233, 8233 | 1 |
 | `temporal-ui` | `temporalio/ui` | 8080 | 1 |
 | `ingest-worker` | `aivideo/ingest` | — | 2 |
+| `segment-worker` | `aivideo/segment` | — | 1 |
 | `render-worker` | `aivideo/render` | — | 2 |
 
 ### Health Checks
@@ -181,12 +182,16 @@ Run workers directly from the repo root:
 # Ingest worker
 uv run python -m ingest_worker
 
+# Segment worker
+uv run python -m segment_worker
+
 # Render worker
 uv run python -m render_worker
 ```
 
 Workers register the following activities:
 - **Ingest**: `probe_asset`
+- **Segment**: `segment_subject`
 - **Render**: `fetch_project`, `download_clips`, `compile_video`, `upload_render`, `finalize_render`
 
 ### Workflow Retention

@@ -7,6 +7,50 @@
 
 > **Claude Code for video editing.** AI generates a working baseline from a reference video + song + clips + style tier. Newbies hit render and ship. Power users refine via prompts and manual controls.
 
+## See it in action
+
+### Dashboard
+
+<div align="center">
+  <img src="./docs/assets/dashboard-car-meet.png" alt="Glassmorphic dashboard with the Car Meet Promo project" width="720" />
+  <br />
+  <em>Dark glass cards, animated stats, and a focused project list — here with the Car Meet Promo example.</em>
+</div>
+
+### Start a project
+
+<div align="center">
+  <img src="./docs/assets/create-project-dialog.png" alt="Create project dialog" width="520" />
+  <br />
+  <em>Pick a name, style tier, and edit mode; the AI builds the first cut in seconds.</em>
+</div>
+
+### Car meet example — reference → result
+
+This is a real run through the pipeline: a car-meet reference video, three raw clips, and a CC0 song from Freesound. The AI built the cutlist and rendered the 9:16 result below.
+
+<div align="center">
+  <table>
+    <tr>
+      <td align="center">
+        <video src="./docs/assets/car-meet/reference.mp4" controls width="320" />
+        <br />
+        <strong>Reference video</strong>
+      </td>
+      <td align="center">
+        <video src="./docs/assets/car-meet/result.mp4" controls width="320" />
+        <br />
+        <strong>AI-edited result</strong>
+      </td>
+    </tr>
+  </table>
+  <p>
+    The AI studies the reference's beat grid, cuts, and motion, then compiles your clips into a matching 9:16 video.
+  </p>
+</div>
+
+> The source clips and song are in <a href="./docs/assets/car-meet">docs/assets/car-meet</a> so you can reproduce the pipeline locally.
+
 ## Table of Contents
 
 - [What It Does](#what-it-does)

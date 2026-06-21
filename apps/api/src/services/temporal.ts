@@ -2,7 +2,7 @@
 import type { CutList } from "@ai-video-editor/shared-types";
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
-import { Client, Connection } from "@temporalio/client";
+import { Client, Connection, WorkflowIdReusePolicy } from "@temporalio/client";
 import { env } from "../env";
 
 let temporalClient: Client | null = null;
@@ -12,6 +12,9 @@ export async function getTemporalClient(): Promise<Client> {
   const now = Date.now();
   if (!temporalClient || now - lastConnectAttempt > 5 * 60 * 1000) {
     lastConnectAttempt = now;
+    // Close any previously cached connection to avoid leaking gRPC sockets.
+    const previousConnection = temporalClient?.connection;
+    temporalClient = null;
     try {
       const connection = await Connection.connect({ address: env.TEMPORAL_HOST });
       temporalClient = new Client({ connection });
@@ -19,6 +22,12 @@ export async function getTemporalClient(): Promise<Client> {
       // If connect failed, clear the cached attempt time so the next caller retries immediately.
       lastConnectAttempt = 0;
       throw e;
+    } finally {
+      try {
+        await previousConnection?.close();
+      } catch {
+        // ignore close errors
+      }
     }
   }
   return temporalClient!;
@@ -84,7 +93,7 @@ export async function startRenderWorkflow(options: StartRenderOptions) {
           mask_source_map: options.maskSourceMap || {},
         },
       ],
-      workflowId: `render-${options.projectId}-${options.renderId || Date.now()}`,
+      workflowId: `render-${options.projectId}-${options.renderId || "new"}`,
     });
 
     return handle.workflowId;
@@ -164,7 +173,8 @@ export async function startSegmentSubjectWorkflow(options: StartSegmentSubjectOp
           frame_index: options.frameIndex ?? 0,
         },
       ],
-      workflowId: `segment-${options.assetId}-${Date.now()}`,
+      workflowId: `segment-${options.assetId}-${options.projectId}`,
+      workflowIdReusePolicy: WorkflowIdReusePolicy.WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
     });
     return handle.workflowId;
   });

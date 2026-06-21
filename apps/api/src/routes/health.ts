@@ -82,7 +82,14 @@ export async function healthRoutes(app: FastifyInstance) {
       },
     };
 
-    cachedReady = { payload, at: now };
+    // Only cache healthy results. If the service is degraded we want the next
+    // health probe to re-evaluate immediately rather than keep returning stale
+    // "degraded" for the full TTL after recovery.
+    if (allOk) {
+      cachedReady = { payload, at: now };
+    } else {
+      cachedReady = null;
+    }
     return payload;
   });
 }

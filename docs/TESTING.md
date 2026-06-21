@@ -419,15 +419,31 @@ it("returns 404 for missing job", async () => {
 
 ### Component Testing with jsdom
 
-```typescript
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { ProjectCard } from "./ProjectCard";
+Current dashboard component tests:
 
-describe("ProjectCard", () => {
-  it("renders project name", () => {
-    render(<ProjectCard name="Summer Vlog" status="complete" />);
-    expect(screen.getByText("Summer Vlog")).toBeInTheDocument();
+- `apps/web/src/components/dashboard/StatsSection.test.tsx` — stat-card counts and empty state
+- `apps/web/src/hooks/useCountUp.test.ts` — animated number hook
+
+```typescript
+import { describe, it, expect, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { StatsSection } from "./StatsSection";
+
+vi.mock("@/hooks/useCountUp", () => ({
+  useCountUp: (value: number) => value,
+}));
+
+describe("StatsSection", () => {
+  it("renders dashboard stat counts", () => {
+    const projects = [
+      { id: "1", name: "A", status: "complete", renderAssetId: "r1" },
+      { id: "2", name: "B", status: "uploading" },
+    ];
+
+    render(<StatsSection projects={projects as any} />);
+
+    expect(screen.getByTestId("stat-Total Projects")).toHaveTextContent("2");
+    expect(screen.getByTestId("stat-Completed")).toHaveTextContent("1");
   });
 });
 ```
@@ -773,6 +789,8 @@ Tests run automatically on every PR via GitHub Actions:
 | `test-js` | Lint + typecheck + build | ~75s |
 
 All must pass before merge.
+
+The `test-web` job exercises the glassmorphic dashboard components, including `StatsSection` and `useCountUp`.
 
 ---
 

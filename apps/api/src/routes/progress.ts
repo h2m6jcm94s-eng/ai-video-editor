@@ -87,25 +87,36 @@ export async function progressRoutes(app: FastifyInstance) {
       reply.raw.write(`:heartbeat\n\n`);
     }, 15000);
 
-    // Cleanup on close — guarded against double-fire from close + error
+    // Cleanup on close/error/abort — guarded against double-fire and awaited
+    // so Redis commands flush before the connection is garbage-collected.
     let cleaned = false;
-    const cleanup = () => {
+    const cleanup = async () => {
       if (cleaned) return;
       cleaned = true;
       clearInterval(heartbeat);
       const refCount = (subscriberRefCount.get(channel) || 1) - 1;
       subscriberRefCount.set(channel, refCount);
       if (refCount <= 0) {
-        subscriberMap.get(channel)?.unsubscribe(channel);
-        subscriberMap.get(channel)?.quit();
+        const sub = subscriberMap.get(channel);
         subscriberMap.delete(channel);
         subscriberRefCount.delete(channel);
+        try {
+          await sub?.unsubscribe(channel);
+        } catch {
+          // ignore
+        }
+        try {
+          await sub?.quit();
+        } catch {
+          // ignore
+        }
       } else {
         subscriber?.off("message", messageHandler);
       }
     };
 
     request.raw.on("close", cleanup);
+    request.raw.on("aborted", cleanup);
     request.raw.on("error", cleanup);
     reply.raw.on("error", cleanup);
   });

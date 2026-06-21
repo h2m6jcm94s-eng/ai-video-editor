@@ -152,6 +152,9 @@ class Sam3Segmenter:
                 mask = mask.detach().cpu().numpy()
             if not isinstance(mask, np.ndarray):
                 mask = np.asarray(mask)
+            # Guard against empty or degenerate masks before Image.fromarray crashes.
+            if mask.size == 0 or mask.ndim < 2:
+                return None
             # SAM3 masks are often boolean or float in [0, 1].
             if mask.dtype != np.uint8:
                 mask = (mask > 0).astype(np.uint8) * 255
@@ -159,6 +162,8 @@ class Sam3Segmenter:
                 mask = mask.transpose(1, 2, 0)
             if mask.ndim == 3 and mask.shape[-1] == 1:
                 mask = mask.squeeze(-1)
+            if mask.ndim != 2:
+                return None
             img = Image.fromarray(mask)
             buf = io.BytesIO()
             img.save(buf, format="PNG")

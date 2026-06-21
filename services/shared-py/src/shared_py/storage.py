@@ -13,6 +13,15 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 
+# Paths are restricted to temp directories and the current working directory to
+# prevent storage keys or caller-supplied local paths from becoming path-traversal
+# vectors (e.g. storage_key = "../../../etc/passwd").
+_ALLOWED_ROOTS = {
+    os.path.abspath(tempfile.gettempdir()),
+    os.path.abspath(os.getcwd()),
+}
+
+
 def _get_s3_client():
     endpoint = os.environ.get("R2_ENDPOINT", "")
     is_local = any(
@@ -27,7 +36,12 @@ def _get_s3_client():
         endpoint_url=endpoint or None,
         aws_access_key_id=os.environ.get("R2_ACCESS_KEY_ID", ""),
         aws_secret_access_key=os.environ.get("R2_SECRET_ACCESS_KEY", ""),
-        config=Config(s3={"addressing_style": "path" if is_local else "auto"}),
+        config=Config(
+            s3={"addressing_style": "path" if is_local else "auto"},
+            connect_timeout=10,
+            read_timeout=30,
+            retries={"max_attempts": 3, "mode": "adaptive"},
+        ),
     )
 
 
@@ -35,12 +49,24 @@ def _bucket() -> str:
     return os.environ.get("R2_BUCKET_NAME", "ai-video-editor")
 
 
+def _safe_local_path(local_path: str) -> str:
+    """Resolve local_path, ensure it is absolute and does not escape allowed roots."""
+    abs_path = os.path.abspath(local_path)
+    norm_path = os.path.normpath(abs_path)
+    if ".." in norm_path.split(os.sep):
+        raise ValueError(f"Refusing unsafe local path: {local_path}")
+    for root in _ALLOWED_ROOTS:
+        if norm_path == root or norm_path.startswith(root + os.sep):
+            return abs_path
+    raise ValueError(f"Local path outside allowed roots: {local_path}")
+
+
 def download_asset(storage_key: str, local_path: Optional[str] = None) -> str:
     """Download an asset from R2 to a local path.
 
     Args:
         storage_key: The S3/R2 object key.
-        local_path: Where to save the file. If None, uses a temp file.
+        local_path: Where to save the file. If None, uses a unique temp file.
 
     Returns:
         Absolute path to the downloaded file.
@@ -50,13 +76,21 @@ def download_asset(storage_key: str, local_path: Optional[str] = None) -> str:
 
     if local_path is None:
         ext = os.path.splitext(storage_key)[1] or ".tmp"
-        local_path = os.path.join(tempfile.gettempdir(), f"ave_{os.path.basename(storage_key)}")
+        # Use a unique temp file to avoid collisions between concurrent workers.
+        with tempfile.NamedTemporaryFile(delete=False, prefix="ave_", suffix=ext) as tmp:
+            local_path = tmp.name
 
+    local_path = _safe_local_path(local_path)
     os.makedirs(os.path.dirname(local_path), exist_ok=True)
 
     try:
         s3.download_file(bucket, storage_key, local_path)
     except ClientError as e:
+        # Clean up the partial/empty file on failure so it does not leak.
+        try:
+            os.remove(local_path)
+        except OSError:
+            pass
         raise RuntimeError(f"Failed to download {storage_key}: {e}") from e
 
     return local_path
@@ -75,6 +109,8 @@ def upload_file(local_path: str, storage_key: str, content_type: Optional[str] =
     """
     s3 = _get_s3_client()
     bucket = _bucket()
+
+    local_path = _safe_local_path(local_path)
 
     extra_args = {}
     if content_type:

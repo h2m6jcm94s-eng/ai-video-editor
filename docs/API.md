@@ -28,6 +28,7 @@
 - [Projects](#projects)
 - [Uploads](#uploads)
 - [Renders](#renders)
+- [Segments](#segments)
 - [Internal](#internal)
 - [Templates](#templates)
 - [Settings](#settings)
@@ -816,6 +817,81 @@ Or for failures:
 
 ---
 
+## Segments
+
+Subject segmentation powered by SAM3. These endpoints start a Temporal workflow that produces a mask asset for a given project asset.
+
+### `POST /segments`
+
+Start a segmentation job for an asset.
+
+**Auth**: Required
+
+**Request Body**:
+```json
+{
+  "projectId": "550e8400-e29b-41d4-a716-446655440000",
+  "assetId": "550e8400-e29b-41d4-a716-446655440001",
+  "prompt": "person in the foreground",
+  "mode": "image",
+  "frameIndex": 0
+}
+```
+
+**Validation Rules**:
+- `projectId`: Required, valid UUID
+- `assetId`: Required, valid UUID
+- `prompt`: Required, string, 1-500 characters
+- `mode`: Optional, enum `image | video`, default `image`
+- `frameIndex`: Optional, integer >= 0, default 0
+
+**Response**:
+```json
+{
+  "workflowId": "segment-subject-workflow-abc123",
+  "status": "queued"
+}
+```
+
+**Status Codes**:
+- `202` — Accepted
+- `400` — Invalid request body
+- `401` — Unauthorized
+- `403` — Forbidden
+- `404` — Project or asset not found
+- `422` — Asset upload not complete
+- `500` — Temporal or segment engine unavailable
+
+---
+
+### `GET /segments/:workflowId`
+
+Query the result of a segmentation workflow.
+
+**Auth**: Required
+
+**Path Parameters**:
+- `workflowId` (string) — The workflow ID returned by `POST /segments`
+
+**Response**:
+```json
+{
+  "workflowId": "segment-subject-workflow-abc123",
+  "result": {
+    "maskAssetId": "550e8400-e29b-41d4-a716-446655440002",
+    "status": "complete"
+  }
+}
+```
+
+**Status Codes**:
+- `200` — Success
+- `401` — Unauthorized
+- `404` — Segment job not found
+- `500` — Could not query segment job
+
+---
+
 ## Internal
 
 > Routes under `/api/internal` are for worker-to-API communication only. All requests must include the header `x-internal-token: <INTERNAL_WORKER_TOKEN>`.
@@ -925,7 +1001,7 @@ Create an output asset row for worker-generated outputs (render, LUT, etc.).
 
 **Validation Rules**:
 - `projectId`: Required, valid UUID
-- `type`: Required, enum `reference_video | song | clip | render | subtitle | lut | sfx`
+- `type`: Required, enum `reference_video | song | clip | render | subtitle | lut | sfx | mask`
 - `filename`: Required, string, max 255 characters
 - `mimeType`: Required, string, max 100 characters
 

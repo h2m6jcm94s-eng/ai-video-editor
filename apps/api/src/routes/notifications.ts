@@ -9,13 +9,15 @@
  * - GET /api/notifications/events — SSE stream for live updates
  */
 
-import { and, count, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, lt } from "drizzle-orm";
 import { FastifyInstance } from "fastify";
 import Redis from "ioredis";
+import { z } from "zod";
 import { db } from "../db";
 import { userEvents } from "../db/schema";
 import { sendError } from "../lib/errors";
 import { requireInternalToken } from "../middleware/requireInternalToken";
+import { validateBody } from "../middleware/validate";
 import { publishNotification } from "../services/queue";
 
 const redis = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
@@ -60,13 +62,22 @@ export async function notificationRoutes(app: FastifyInstance) {
 `);
       }, 15000);
 
-      const cleanup = () => {
+      const cleanup = async () => {
         clearInterval(heartbeat);
-        subscriber.unsubscribe(channel);
-        subscriber.quit();
+        try {
+          await subscriber.unsubscribe(channel);
+        } catch {
+          // ignore
+        }
+        try {
+          await subscriber.quit();
+        } catch {
+          // ignore
+        }
       };
 
       request.raw.on("close", cleanup);
+      request.raw.on("aborted", cleanup);
       request.raw.on("error", cleanup);
       reply.raw.on("error", cleanup);
     },
@@ -87,7 +98,8 @@ export async function notificationRoutes(app: FastifyInstance) {
     if (cursor) {
       const cursorDate = new Date(cursor);
       if (!isNaN(cursorDate.getTime())) {
-        conditions.push(desc(userEvents.createdAt));
+        // Fetch events strictly older than the cursor timestamp.
+        conditions.push(lt(userEvents.createdAt, cursorDate));
       }
     }
 
@@ -154,24 +166,30 @@ export async function notificationRoutes(app: FastifyInstance) {
     },
   );
 
+  const internalEventSchema = z.object({
+    userId: z.string().uuid(),
+    code: z.string().min(1).max(50),
+    message: z.string().min(1).max(2000),
+    details: z.record(z.unknown()).optional(),
+    route: z.string().max(255).optional(),
+  });
+
   // Internal endpoint for workers to report user events
   app.post(
     "/internal",
-    { preHandler: requireInternalToken, config: { rateLimit: { max: 60, timeWindow: "1 minute" } } },
+    {
+      preHandler: [requireInternalToken, validateBody(internalEventSchema)],
+      config: { rateLimit: { max: 60, timeWindow: "1 minute" } },
+    },
     async (request, reply) => {
-      const body = request.body as {
-        userId: string;
-        code: string;
-        message: string;
-        details?: unknown;
-        route?: string;
-      };
+      const body = request.validatedBody as z.infer<typeof internalEventSchema>;
 
       await db.insert(userEvents).values({
         userId: body.userId,
         code: body.code,
         message: body.message,
-        details: body.details ? JSON.stringify(body.details) : null,
+        // details is a jsonb column; pass the object directly to avoid double-stringifying.
+        details: body.details ?? null,
         route: body.route ?? null,
       });
 
