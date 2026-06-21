@@ -42,7 +42,7 @@ def _find_font() -> str:
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
         "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
         "/System/Library/Fonts/Helvetica.ttc",  # macOS
-        "C:\\Windows\\Fonts\\segoeuib.ttf",
+        "C:\\Windows\\Fonts\\segoeuib.ttf",  # Windows
         "C:\\Windows\\Fonts\\segoeui.ttf",
         "C:\\Windows\\Fonts\\arial.ttf",
         "C:\\Windows\\Fonts\\calibri.ttf",
@@ -190,12 +190,9 @@ def _esc_path(p: str) -> str:
 
 
 def _esc_text(t: str) -> str:
-    """Escape text for FFmpeg's drawtext text='...' value.
-
-    Inside a single-quoted FFmpeg string a literal single quote is written as
-    two single quotes, and ``%`` must be escaped because it enables text
-    expansion/expansion tokens.
-    """
+    # Inside a single-quoted FFmpeg filter value, a literal single quote is
+    # represented by two single quotes (''). Backslash escapes are not honored
+    # inside single quotes, so we only need to escape '%' (strftime sequences).
     return t.replace("'", "''").replace("%", "\\%")
 
 
@@ -207,7 +204,13 @@ def _get_param(params, key: str, default):
 
 
 def _enable_expr(start_s: float, end_s: float) -> str:
-    """Build an FFmpeg enable expression for a time window."""
+    """Build an FFmpeg enable expression for a time window.
+
+    Commas are escaped because the filter chain is comma-separated.
+    """
+    # Commas inside the single-quoted enable expression are literal and must
+    # not be escaped; FFmpeg's filter parser treats \\, inside quotes as an
+    # invalid terminator and fails with EINVAL on Windows.
     return f"between(t,{start_s:.3f},{end_s:.3f})"
 
 
@@ -416,15 +419,15 @@ def _build_audio_filter(audio_tracks: List[AudioTrack], base_input_count: int, s
 
     for track in audio_tracks:
         track_filters = []
-        fade_in = track.fade_in_s or 0.0
-        if fade_in > 0:
-            track_filters.append(f"afade=t=in:ss=0:d={fade_in}")
+        if track.fade_in_s and track.fade_in_s > 0:
+            track_filters.append(f"afade=t=in:ss=0:d={track.fade_in_s}")
 
         fade_out = track.fade_out_s or 0.0
-        clip_dur = max(0.0, track.end_s - track.start_s)
-        out_start = max(0.0, clip_dur - fade_out)
-        if fade_out > 0 and out_start > 0:
-            track_filters.append(f"afade=t=out:st={out_start}:d={fade_out}")
+        if fade_out > 0:
+            clip_dur = max(0.0, track.end_s - track.start_s)
+            out_start = max(0.0, clip_dur - fade_out)
+            if out_start > 0:
+                track_filters.append(f"afade=t=out:st={out_start}:d={fade_out}")
 
         track_filters.append(f"volume={track.gain_db}dB")
         parts.append(f"[{idx}:a]{','.join(track_filters)}[a{idx}]")
