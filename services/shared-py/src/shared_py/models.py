@@ -1,7 +1,7 @@
 ﻿# Copyright (c) 2025 Devayan Dewri. All rights reserved.
 # Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 # Commercial SaaS use is prohibited without written permission.
-from typing import List, Optional, Literal, Any
+from typing import List, Optional, Literal, Any, Dict
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 
@@ -258,4 +258,5 @@ class RenderConfig(BaseModelCamel):
     pix_fmt: str = "yuv420p"
     lut_path: Optional[str] = None
     song_path: Optional[str] = None
+    mask_paths: Dict[str, str] = Field(default_factory=dict)
     audio_tracks: List[AudioTrack] = Field(default_factory=list)

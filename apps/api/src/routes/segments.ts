@@ -49,6 +49,7 @@ export async function segmentRoutes(app: FastifyInstance) {
     try {
       const workflowId = await startSegmentSubjectWorkflow({
         assetId: asset.id,
+        projectId: project.id,
         storageKey: asset.storageKey,
         prompt: body.prompt,
         mode: body.mode,

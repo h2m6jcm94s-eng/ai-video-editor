@@ -5,7 +5,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { db } from "../db";
-import { assets, projects, renders } from "../db/schema";
+import { projects, renders } from "../db/schema";
 import { sendError } from "../lib/errors";
 import { rendersActive, rendersTotal } from "../lib/metrics";
 import { requireInternalToken } from "../middleware/requireInternalToken";
@@ -81,15 +81,33 @@ export async function renderRoutes(app: FastifyInstance) {
         ...((project.clipAssetIds as string[]) || []),
       ].filter((id): id is string => Boolean(id));
 
-      const assetRows = assetIds.length
-        ? await db.query.assets.findMany({
-            where: (table, { inArray }) => inArray(table.id, assetIds),
-            columns: { id: true, storageKey: true },
-          })
-        : [];
+      const assetRows =
+        (assetIds.length
+          ? await db.query.assets.findMany({
+              where: (table, { inArray }) => inArray(table.id, assetIds),
+              columns: { id: true, storageKey: true, metadata: true },
+            })
+          : []) ?? [];
+
+      const referenceAsset = assetRows.find((a) => a.id === project.referenceAssetId);
+      const maskAssetIds =
+        ((
+          (referenceAsset?.metadata as Record<string, unknown> | null)?.segmentation as Record<
+            string,
+            unknown
+          > | null
+        )?.maskAssetIds as string[] | undefined) ?? [];
+
+      const maskRows =
+        (maskAssetIds.length
+          ? await db.query.assets.findMany({
+              where: (table, { inArray }) => inArray(table.id, maskAssetIds),
+              columns: { id: true, storageKey: true },
+            })
+          : []) ?? [];
 
       const assetKeyMap: Record<string, string> = {};
-      for (const row of assetRows ?? []) {
+      for (const row of [...assetRows, ...maskRows]) {
         if (row?.id && row?.storageKey) {
           assetKeyMap[row.id] = row.storageKey;
         }
@@ -109,6 +127,7 @@ export async function renderRoutes(app: FastifyInstance) {
           renderId: job.id,
           assetKeyMap,
           styleAnalysis: (project.styleAnalysis as Record<string, unknown>) ?? undefined,
+          maskAssetIds,
         });
       } catch (e) {
         // Mark render as failed and return 500 without crashing

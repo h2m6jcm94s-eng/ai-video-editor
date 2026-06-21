@@ -53,6 +53,7 @@ export interface StartRenderOptions {
   renderId?: string;
   assetKeyMap?: Record<string, string>;
   styleAnalysis?: Record<string, unknown> | null;
+  maskAssetIds?: string[];
 }
 
 export interface StartAnalyzeStyleOptions {
@@ -78,6 +79,7 @@ export async function startRenderWorkflow(options: StartRenderOptions) {
           user_id: options.userId,
           asset_key_map: options.assetKeyMap || {},
           style_analysis: options.styleAnalysis || null,
+          mask_asset_ids: options.maskAssetIds || [],
         },
       ],
       workflowId: `render-${options.projectId}-${options.renderId || Date.now()}`,
@@ -139,6 +141,7 @@ export async function sendCutlistApprovedSignal(workflowId: string, cutList: Cut
 
 export interface StartSegmentSubjectOptions {
   assetId: string;
+  projectId: string;
   storageKey: string;
   prompt: string;
   mode?: "image" | "video";
@@ -152,6 +155,7 @@ export async function startSegmentSubjectWorkflow(options: StartSegmentSubjectOp
       args: [
         {
           asset_id: options.assetId,
+          project_id: options.projectId,
           storage_key: options.storageKey,
           prompt: options.prompt,
           mode: options.mode || "image",
