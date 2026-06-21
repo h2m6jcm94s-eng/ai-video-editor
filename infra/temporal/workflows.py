@@ -8,7 +8,7 @@ import asyncio
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 from dataclasses import dataclass
-from typing import List, Dict
+from typing import List, Dict, Any
 from enum import Enum
 
 with workflow.unsafe.imports_passed_through():
@@ -40,6 +40,7 @@ class VideoRenderInput:
     mode: str
     user_id: str
     asset_key_map: Dict[str, str]
+    style_analysis: Dict[str, Any] = None
 
 
 @dataclass
@@ -165,15 +166,19 @@ class VideoRenderWorkflow:
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
 
-        # 4. Analyze style
+        # 4. Analyze style (use cached analysis from style-worker when available)
         self._stage = RenderStage.STYLE_ANALYSIS
         self._progress = 40
-        style = await workflow.execute_activity(
-            "analyze_reference_style",
-            args=(input.reference_asset_id, input.style_tier, input.asset_key_map),
-            start_to_close_timeout=300,
-            retry_policy=RetryPolicy(maximum_attempts=2),
-        )
+        if input.style_analysis:
+            style = input.style_analysis
+            workflow.logger.info("Using cached style analysis from style-worker")
+        else:
+            style = await workflow.execute_activity(
+                "analyze_reference_style",
+                args=(input.reference_asset_id, input.style_tier, input.asset_key_map),
+                start_to_close_timeout=300,
+                retry_policy=RetryPolicy(maximum_attempts=2),
+            )
 
         # 5. Embed clips
         self._stage = RenderStage.EMBEDDING

@@ -49,6 +49,9 @@ class AnalyzeStyleOutput:
 class AnalyzeStyleWorkflow:
     """Analyze a reference video for color grade, motion, transitions and text."""
 
+    def __init__(self) -> None:
+        self._output: Optional[AnalyzeStyleOutput] = None
+
     @workflow.run
     async def run(self, input: AnalyzeStyleInput) -> AnalyzeStyleOutput:
         retry = RetryPolicy(maximum_attempts=3)
@@ -100,7 +103,7 @@ class AnalyzeStyleWorkflow:
         transitions_list = transitions or []
         detected_transitions = [s.get("transition_in", "hard_cut") for s in transitions_list]
 
-        return AnalyzeStyleOutput(
+        self._output = AnalyzeStyleOutput(
             color_palette=lut_result.get("color_palette", []),
             contrast_level=lut_result.get("contrast_level", 1.0),
             saturation_level=lut_result.get("saturation_level", 1.0),
@@ -111,3 +114,9 @@ class AnalyzeStyleWorkflow:
             detected_overlays=overlays or [],
             camera_motions=motions or [],
         )
+        return self._output
+
+    @workflow.query
+    def get_analysis(self) -> Optional[AnalyzeStyleOutput]:
+        """Return the current analysis result, or None if still running."""
+        return self._output

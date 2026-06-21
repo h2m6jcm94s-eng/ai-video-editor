@@ -39,6 +39,7 @@ export const projects = pgTable(
     songAssetId: uuid("song_asset_id"),
     clipAssetIds: jsonb("clip_asset_ids").$type<string[]>().default([]),
     cutList: jsonb("cut_list"),
+    styleAnalysis: jsonb("style_analysis"),
     renderAssetId: uuid("render_asset_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),

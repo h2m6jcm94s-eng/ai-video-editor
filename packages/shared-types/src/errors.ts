@@ -51,6 +51,7 @@ export const API_ERROR_CODES = [
   "TEMPORAL_ERROR",
   "BUDGET_EXCEEDED",
   "NO_CUTLIST",
+  "PENDING",
 ] as const;
 
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
