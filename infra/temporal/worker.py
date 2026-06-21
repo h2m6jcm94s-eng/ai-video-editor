@@ -319,6 +319,7 @@ async def render_720p(
     song_asset_id: str = None,
     asset_key_map: dict = None,
     mask_asset_ids: list = None,
+    mask_source_map: dict = None,
 ) -> str:
     """Render 720p master."""
     from render_worker.compiler import compile_timeline
@@ -338,11 +339,13 @@ async def render_720p(
     if song_asset_id and song_asset_id in asset_key_map:
         song_path = _get_asset_path(song_asset_id, asset_key_map)
 
-    # Download segmentation masks so the compiler can apply them as mattes
+    # Download segmentation masks so the compiler can apply them as mattes.
+    # The source map tells us which source asset (reference/clip) each mask
+    # belongs to, so the compiler can apply it to the correct slot.
     mask_paths = {}
-    for mid in mask_asset_ids or []:
-        if mid in asset_key_map:
-            mask_paths[mid] = _get_asset_path(mid, asset_key_map)
+    for source_id, mask_id in (mask_source_map or {}).items():
+        if mask_id in asset_key_map:
+            mask_paths[source_id] = _get_asset_path(mask_id, asset_key_map)
 
     output_path = os.path.join(tempfile.gettempdir(), f"ave_render_{cutlist.get('globals', {}).get('projectId', 'out')}.mp4")
 

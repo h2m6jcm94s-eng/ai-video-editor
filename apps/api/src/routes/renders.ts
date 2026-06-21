@@ -89,14 +89,20 @@ export async function renderRoutes(app: FastifyInstance) {
             })
           : []) ?? [];
 
-      const referenceAsset = assetRows.find((a) => a.id === project.referenceAssetId);
-      const maskAssetIds =
-        ((
-          (referenceAsset?.metadata as Record<string, unknown> | null)?.segmentation as Record<
-            string,
-            unknown
-          > | null
-        )?.maskAssetIds as string[] | undefined) ?? [];
+      // Collect segmentation masks from any project asset (reference or clips).
+      // For each source asset we keep the first mask so the compiler knows which
+      // matte belongs to which slot.
+      const maskSourceMap: Record<string, string> = {};
+      const maskAssetIds: string[] = [];
+      for (const row of assetRows) {
+        const metadata = (row.metadata as Record<string, unknown> | null) ?? {};
+        const segmentation = (metadata.segmentation as Record<string, unknown> | null) ?? {};
+        const ids = (segmentation.maskAssetIds as string[] | undefined) ?? [];
+        if (ids.length > 0) {
+          maskSourceMap[row.id] = ids[0];
+          maskAssetIds.push(...ids);
+        }
+      }
 
       const maskRows =
         (maskAssetIds.length
@@ -128,6 +134,7 @@ export async function renderRoutes(app: FastifyInstance) {
           assetKeyMap,
           styleAnalysis: (project.styleAnalysis as Record<string, unknown>) ?? undefined,
           maskAssetIds,
+          maskSourceMap,
         });
       } catch (e) {
         // Mark render as failed and return 500 without crashing
