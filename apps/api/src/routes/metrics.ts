@@ -32,8 +32,13 @@ export async function metricsRoutes(app: FastifyInstance) {
       return sendError(reply, 401, "Unauthorized", "UNAUTHORIZED");
     }
 
-    const metrics = await getMetrics();
-    reply.header("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
-    return reply.send(metrics);
+    try {
+      const metrics = await getMetrics();
+      reply.header("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+      return reply.send(metrics);
+    } catch (err) {
+      request.log.error({ err }, "Prometheus registry error");
+      return sendError(reply, 503, "Metrics temporarily unavailable", "METRICS_ERROR");
+    }
   });
 }

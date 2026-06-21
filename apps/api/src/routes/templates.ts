@@ -8,7 +8,7 @@ import { db } from "../db";
 import { templates } from "../db/schema";
 import { cacheDel, cacheGet, cacheSet } from "../lib/cache";
 import { sendError } from "../lib/errors";
-import { createTemplateSchema, validateBody } from "../middleware/validate";
+import { createTemplateSchema, patchTemplateSchema, validateBody } from "../middleware/validate";
 
 export async function templateRoutes(app: FastifyInstance) {
   // List templates (user's own + public)
@@ -71,9 +71,17 @@ export async function templateRoutes(app: FastifyInstance) {
   });
 
   // Update template
-  app.patch("/:id", async (request, reply) => {
+  app.patch("/:id", { preHandler: validateBody(patchTemplateSchema) }, async (request, reply) => {
     const { id } = request.params as { id: string };
     const userId = request.userId;
+    const body = request.validatedBody as Partial<{
+      name?: string;
+      description?: string;
+      cutList?: unknown;
+      tags?: string[];
+      isPublic?: boolean;
+    }>;
+
     const template = await db.query.templates.findFirst({
       where: eq(templates.id, id),
     });
@@ -83,8 +91,6 @@ export async function templateRoutes(app: FastifyInstance) {
     if (template.userId !== userId) {
       return sendError(reply, 403, "Forbidden", "FORBIDDEN");
     }
-
-    const body = request.body as Partial<typeof templates.$inferInsert>;
     const [updated] = await db
       .update(templates)
       .set({ ...body, updatedAt: new Date() })

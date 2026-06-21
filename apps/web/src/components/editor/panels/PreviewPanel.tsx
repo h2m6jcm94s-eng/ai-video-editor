@@ -4,7 +4,7 @@
 
 import { useEffect, useRef } from "react";
 import ReactPlayer from "react-player";
-import type { Asset, Overlay, PreviewEffects, Subtitle } from "@/types/api";
+import type { Asset, CanvasOverlay, PreviewEffects, Subtitle } from "@/types/api";
 import { OverlayCanvas } from "../canvas/OverlayCanvas";
 
 interface PreviewPanelProps {
@@ -12,7 +12,7 @@ interface PreviewPanelProps {
   currentTime: number;
   isPlaying: boolean;
   onTimeUpdate: (time: number) => void;
-  overlays: Overlay[];
+  overlays: CanvasOverlay[];
   subtitles?: Subtitle[];
   showSubtitles?: boolean;
   aspectRatio?: string;

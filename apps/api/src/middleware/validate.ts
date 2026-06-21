@@ -1,31 +1,33 @@
 // Copyright (c) 2025 Devayan Dewri. All rights reserved.
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
-import { z } from "zod";
-import type { FastifyRequest, FastifyReply } from "fastify";
+
 import {
   ALLOWED_MIMES,
   createProjectSchema,
-  patchProjectSchema,
-  presignedUploadSchema,
   createRenderSchema,
-  updateCutlistSchema,
-  promptEditSchema,
   createTemplateSchema,
+  patchProjectSchema,
+  patchTemplateSchema,
+  presignedUploadSchema,
+  promptEditSchema,
+  updateCutlistSchema,
 } from "@ai-video-editor/shared-types";
+import type { FastifyReply, FastifyRequest } from "fastify";
+import { z } from "zod";
 import { sendError } from "../lib/errors";
-
-export { ALLOWED_MIMES };
 
 // Re-export shared schemas so routes can import from one place
 export {
+  ALLOWED_MIMES,
   createProjectSchema,
-  patchProjectSchema,
-  presignedUploadSchema,
   createRenderSchema,
-  updateCutlistSchema,
-  promptEditSchema,
   createTemplateSchema,
+  patchProjectSchema,
+  patchTemplateSchema,
+  presignedUploadSchema,
+  promptEditSchema,
+  updateCutlistSchema,
 };
 
 export function validateBody<T>(schema: z.ZodSchema<T>) {

@@ -60,6 +60,7 @@ export interface StartRenderOptions {
   mode: string;
   userId: string;
   renderId?: string;
+  completionToken?: string;
   assetKeyMap?: Record<string, string>;
   styleAnalysis?: Record<string, unknown> | null;
   maskAssetIds?: string[];
@@ -91,6 +92,7 @@ export async function startRenderWorkflow(options: StartRenderOptions) {
           style_analysis: options.styleAnalysis || null,
           mask_asset_ids: options.maskAssetIds || [],
           mask_source_map: options.maskSourceMap || {},
+          completion_token: options.completionToken,
         },
       ],
       workflowId: `render-${options.projectId}-${options.renderId || "new"}`,

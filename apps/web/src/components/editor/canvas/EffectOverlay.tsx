@@ -2,10 +2,10 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import type { Overlay } from "@/types/api";
+import type { CanvasOverlay } from "@/types/api";
 
 interface EffectOverlayProps {
-  overlay: Overlay;
+  overlay: CanvasOverlay;
 }
 
 export function EffectOverlay({ overlay }: EffectOverlayProps) {

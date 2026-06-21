@@ -1,16 +1,13 @@
-﻿// Copyright (c) 2025 Devayan Dewri. All rights reserved.
-import { eq } from "drizzle-orm";
+// Copyright (c) 2025 Devayan Dewri. All rights reserved.
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
+import { eq } from "drizzle-orm";
 import { FastifyInstance } from "fastify";
 import Redis from "ioredis";
 import { db } from "../db";
 import { renders } from "../db/schema";
 import { sendError } from "../lib/errors";
 import { getBufferedEvents } from "../services/queue";
-
-const subscriberMap = new Map<string, Redis>();
-const subscriberRefCount = new Map<string, number>();
 
 export async function progressRoutes(app: FastifyInstance) {
   // SSE endpoint for job progress
@@ -36,37 +33,33 @@ export async function progressRoutes(app: FastifyInstance) {
       Connection: "keep-alive",
     });
 
-    // Replay missed events if client reconnects with Last-Event-ID header or query param
-    const lastEventIdHeader = (request.headers["last-event-id"] as string) || "";
-    const lastEventIdQuery = (request.query as Record<string, string>).lastEventId || "";
-    const lastEventId = parseInt(lastEventIdHeader || lastEventIdQuery, 10);
-    if (!isNaN(lastEventId) && lastEventId > 0) {
-      const missed = await getBufferedEvents(jobId, lastEventId);
-      for (const event of missed) {
-        reply.raw.write(`id: ${event.id}\ndata: ${event.data}\n\n`);
+    let subscriber: Redis | undefined;
+    let heartbeat: NodeJS.Timeout | undefined;
+    let cleaned = false;
+
+    const cleanup = async () => {
+      if (cleaned) return;
+      cleaned = true;
+      if (heartbeat) {
+        clearInterval(heartbeat);
+        heartbeat = undefined;
       }
-    }
-
-    // Send initial connection message
-    reply.raw.write(`data: ${JSON.stringify({ type: "connected", jobId })}\n\n`);
-
-    // Subscribe to Redis channel (reuse connection per channel)
-    const channel = `job:${jobId}`;
-    let subscriber = subscriberMap.get(channel);
-    if (!subscriber) {
-      subscriber = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
-      subscriber.on("error", (err) => {
-        request.log.error({ err, channel }, "Redis subscriber error");
-        cleanup();
-      });
-      await subscriber.subscribe(channel);
-      subscriberMap.set(channel, subscriber);
-      subscriberRefCount.set(channel, 0);
-    }
-    subscriberRefCount.set(channel, (subscriberRefCount.get(channel) || 0) + 1);
+      try {
+        subscriber?.off("message", messageHandler);
+        await subscriber?.unsubscribe(`job:${jobId}`);
+      } catch {
+        // ignore
+      }
+      try {
+        await subscriber?.quit();
+      } catch {
+        // ignore
+      }
+      subscriber = undefined;
+    };
 
     const messageHandler = (ch: string, message: string) => {
-      if (ch === channel) {
+      if (ch === `job:${jobId}`) {
         try {
           const parsed = JSON.parse(message);
           if (parsed.id && parsed.data) {
@@ -79,44 +72,46 @@ export async function progressRoutes(app: FastifyInstance) {
         }
       }
     };
-    subscriber.on("message", messageHandler);
 
-    // Keep connection alive
-    const heartbeat = setInterval(() => {
-      reply.raw.write(`:heartbeat\n\n`);
-    }, 15000);
-
-    // Cleanup on close/error/abort — guarded against double-fire and awaited
-    // so Redis commands flush before the connection is garbage-collected.
-    let cleaned = false;
-    const cleanup = async () => {
-      if (cleaned) return;
-      cleaned = true;
-      clearInterval(heartbeat);
-      const refCount = (subscriberRefCount.get(channel) || 1) - 1;
-      subscriberRefCount.set(channel, refCount);
-      if (refCount <= 0) {
-        const sub = subscriberMap.get(channel);
-        subscriberMap.delete(channel);
-        subscriberRefCount.delete(channel);
-        try {
-          await sub?.unsubscribe(channel);
-        } catch {
-          // ignore
+    try {
+      // Replay missed events if client reconnects with Last-Event-ID header or query param
+      const lastEventIdHeader = (request.headers["last-event-id"] as string) || "";
+      const lastEventIdQuery = (request.query as Record<string, string>).lastEventId || "";
+      const lastEventId = parseInt(lastEventIdHeader || lastEventIdQuery, 10);
+      if (!isNaN(lastEventId) && lastEventId > 0) {
+        const missed = await getBufferedEvents(jobId, lastEventId);
+        for (const event of missed) {
+          reply.raw.write(`id: ${event.id}\ndata: ${event.data}\n\n`);
         }
-        try {
-          await sub?.quit();
-        } catch {
-          // ignore
-        }
-      } else {
-        subscriber?.off("message", messageHandler);
       }
-    };
 
-    request.raw.on("close", cleanup);
-    request.raw.on("aborted", cleanup);
-    request.raw.on("error", cleanup);
-    reply.raw.on("error", cleanup);
+      // Send initial connection message
+      reply.raw.write(`data: ${JSON.stringify({ type: "connected", jobId })}\n\n`);
+
+      // Subscribe to Redis channel (one subscriber per connection)
+      subscriber = new Redis(process.env.REDIS_URL || "redis://localhost:6379");
+      subscriber.on("error", (err) => {
+        request.log.error({ err, jobId }, "Redis subscriber error");
+        cleanup().catch(() => {});
+      });
+      await subscriber.subscribe(`job:${jobId}`);
+      subscriber.on("message", messageHandler);
+
+      // Keep connection alive
+      heartbeat = setInterval(() => {
+        reply.raw.write(`:heartbeat\n\n`);
+      }, 15000);
+
+      request.raw.on("close", () => cleanup().catch(() => {}));
+      request.raw.on("aborted", () => cleanup().catch(() => {}));
+      request.raw.on("error", () => cleanup().catch(() => {}));
+      reply.raw.on("error", () => cleanup().catch(() => {}));
+    } catch (err) {
+      request.log.error({ err, jobId }, "SSE progress handler error");
+      await cleanup();
+      if (!reply.raw.writableEnded) {
+        reply.raw.end();
+      }
+    }
   });
 }

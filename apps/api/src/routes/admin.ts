@@ -17,35 +17,39 @@ export async function adminRoutes(app: FastifyInstance) {
   app.addHook("preHandler", requireAdmin);
 
   // Overview KPIs
-  app.get("/overview", async () => {
-    const now = new Date();
-    const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  app.get("/overview", async (_request, reply) => {
+    try {
+      const now = new Date();
+      const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-    const [totalUsers] = await db.select({ count: count() }).from(users);
-    const [activeUsers] = await db
-      .select({ count: count() })
-      .from(userEvents)
-      .where(gte(userEvents.createdAt, dayAgo));
-    const [totalErrors] = await db.select({ count: count() }).from(userEvents);
-    const [recentErrors] = await db
-      .select({ count: count() })
-      .from(userEvents)
-      .where(gte(userEvents.createdAt, dayAgo));
-    const [totalRenders] = await db.select({ count: count() }).from(renders);
-    const [queuedRenders] = await db
-      .select({ count: count() })
-      .from(renders)
-      .where(eq(renders.status, "queued"));
-    const [runningRenders] = await db
-      .select({ count: count() })
-      .from(renders)
-      .where(eq(renders.status, "running"));
+      const [totalUsers] = await db.select({ count: count() }).from(users);
+      const [activeUsers] = await db
+        .select({ count: count() })
+        .from(userEvents)
+        .where(gte(userEvents.createdAt, dayAgo));
+      const [totalErrors] = await db.select({ count: count() }).from(userEvents);
+      const [recentErrors] = await db
+        .select({ count: count() })
+        .from(userEvents)
+        .where(gte(userEvents.createdAt, dayAgo));
+      const [totalRenders] = await db.select({ count: count() }).from(renders);
+      const [queuedRenders] = await db
+        .select({ count: count() })
+        .from(renders)
+        .where(eq(renders.status, "queued"));
+      const [runningRenders] = await db
+        .select({ count: count() })
+        .from(renders)
+        .where(eq(renders.status, "running"));
 
-    return {
-      users: { total: totalUsers.count, active24h: activeUsers.count },
-      errors: { total: totalErrors.count, last24h: recentErrors.count },
-      renders: { total: totalRenders.count, queued: queuedRenders.count, running: runningRenders.count },
-    };
+      return {
+        users: { total: totalUsers.count, active24h: activeUsers.count },
+        errors: { total: totalErrors.count, last24h: recentErrors.count },
+        renders: { total: totalRenders.count, queued: queuedRenders.count, running: runningRenders.count },
+      };
+    } catch (err) {
+      return sendError(reply, 503, "Admin metrics temporarily unavailable", "DB_UNAVAILABLE");
+    }
   });
 
   // User list (paginated)

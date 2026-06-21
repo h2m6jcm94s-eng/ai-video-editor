@@ -3,7 +3,7 @@
 "use client";
 
 import { useCallback, useMemo, useReducer } from "react";
-import type { Asset, AudioTrack, CutList, Effect, Overlay, Slot } from "@/types/api";
+import type { Asset, AudioTrack, CanvasOverlay, CutList, Effect, Slot } from "@/types/api";
 
 const MAX_UNDO_DEPTH = 50;
 
@@ -32,8 +32,8 @@ type EditorAction =
   | { type: "ADD_SLOT"; slot: Slot }
   | { type: "REMOVE_SLOT"; index: number; ripple?: boolean }
   | { type: "REORDER_SLOTS"; slots: Slot[] }
-  | { type: "ADD_OVERLAY"; overlay: Overlay }
-  | { type: "UPDATE_OVERLAY"; id: string; overlay: Partial<Overlay> }
+  | { type: "ADD_OVERLAY"; overlay: CanvasOverlay }
+  | { type: "UPDATE_OVERLAY"; id: string; overlay: Partial<CanvasOverlay> }
   | { type: "REMOVE_OVERLAY"; id: string }
   | { type: "ADD_EFFECT"; slotIndex: number; effect: Effect }
   | { type: "REMOVE_EFFECT"; slotIndex: number; effectId: string }
@@ -224,9 +224,9 @@ export function useEditor(initial: Partial<EditorState> = {}) {
     [],
   );
   const reorderSlots = useCallback((slots: Slot[]) => dispatch({ type: "REORDER_SLOTS", slots }), []);
-  const addOverlay = useCallback((overlay: Overlay) => dispatch({ type: "ADD_OVERLAY", overlay }), []);
+  const addOverlay = useCallback((overlay: CanvasOverlay) => dispatch({ type: "ADD_OVERLAY", overlay }), []);
   const updateOverlay = useCallback(
-    (id: string, overlay: Partial<Overlay>) => dispatch({ type: "UPDATE_OVERLAY", id, overlay }),
+    (id: string, overlay: Partial<CanvasOverlay>) => dispatch({ type: "UPDATE_OVERLAY", id, overlay }),
     [],
   );
   const removeOverlay = useCallback((id: string) => dispatch({ type: "REMOVE_OVERLAY", id }), []);

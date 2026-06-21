@@ -111,9 +111,12 @@ def _run_ffmpeg(cmd: List[str], context: str, cwd: Optional[str] = None) -> None
         subprocess.run(cmd, check=True, capture_output=True, cwd=cwd, env=env)
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode("utf-8", errors="replace") if e.stderr else ""
+        log_path = ""
         try:
-            log_path = os.path.join(tempfile.gettempdir(), "ave_ffmpeg_stderr.log")
-            with open(log_path, "a", encoding="utf-8") as f:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".log", prefix="ave_ffmpeg_", delete=False
+            ) as f:
+                log_path = f.name
                 f.write(f"\n--- {context} ---\n")
                 f.write(f"Command: {' '.join(cmd)}\n")
                 f.write(f"Return code: {e.returncode}\n")
@@ -123,6 +126,7 @@ def _run_ffmpeg(cmd: List[str], context: str, cwd: Optional[str] = None) -> None
         raise RuntimeError(
             f"FFmpeg failed during {context}: {e.returncode}\n"
             f"Command: {' '.join(cmd[:20])}...\n"
+            f"Log: {log_path}\n"
             f"Stderr: {stderr[:2000]}"
         ) from e
 

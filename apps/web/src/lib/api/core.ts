@@ -7,7 +7,7 @@ function sleep(ms: number) {
   return new Promise((res) => setTimeout(res, ms));
 }
 
-export type TokenGetter = () => Promise<string | null>;
+export type TokenGetter = (opts?: { skipCache?: boolean }) => Promise<string | null>;
 
 async function fetchWithRetry(
   path: string,
@@ -19,7 +19,8 @@ async function fetchWithRetry(
 
   for (let i = 0; i < attempts; i++) {
     try {
-      const token = await getToken();
+      // Refresh the Clerk token once on a 401 by skipping the cache.
+      const token = await getToken({ skipCache: i > 0 && i === 1 });
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
         ...(init.headers as Record<string, string>),
@@ -34,6 +35,11 @@ async function fetchWithRetry(
         headers,
         signal: init.signal ?? AbortSignal.timeout(15_000),
       });
+
+      if (res.status === 401 && i < attempts - 1) {
+        await sleep(2 ** i * 100);
+        continue;
+      }
 
       if (res.status >= 500 && i < attempts - 1) {
         await sleep(2 ** i * 200);

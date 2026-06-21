@@ -21,6 +21,7 @@ class VideoRenderInput:
     user_id: str
     asset_key_map: Dict[str, str]
     reference_asset_id: Optional[str] = None
+    completion_token: Optional[str] = None
 
 
 @workflow.defn
@@ -97,7 +98,7 @@ class VideoRenderWorkflow:
             # 5. Mark render job complete
             await workflow.execute_activity(
                 "complete_render",
-                args=(render_id, upload_result["asset_id"]),
+                args=(render_id, upload_result["asset_id"], input.completion_token),
                 start_to_close_timeout=timedelta(seconds=30),
                 retry_policy=RetryPolicy(maximum_attempts=5),
             )

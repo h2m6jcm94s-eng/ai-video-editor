@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import type { CutList, Overlay, PreviewEffects, Slot } from "@/types/api";
+import type { CanvasOverlay, CutList, PreviewEffects, Slot } from "@/types/api";
 
 const TRANSITIONS = ["hard_cut", "dissolve", "fade", "wipe_right", "wipe_left", "whip"] as const;
 
@@ -42,10 +42,10 @@ interface InspectorPanelProps {
   selectedSlot: Slot | null;
   selectedSlotIndex: number | null;
   selectedOverlayId: string | null;
-  overlays: Overlay[];
+  overlays: CanvasOverlay[];
   cutList?: CutList | null;
   onUpdateSlot: (index: number, slot: Partial<Slot>) => void;
-  onUpdateOverlay: (id: string, overlay: Partial<Overlay>) => void;
+  onUpdateOverlay: (id: string, overlay: Partial<CanvasOverlay>) => void;
   onSelectOverlay: (id: string | null) => void;
   onUpdateEffects?: (effects: PreviewEffects) => void;
 }

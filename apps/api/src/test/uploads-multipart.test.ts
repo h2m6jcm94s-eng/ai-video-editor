@@ -5,12 +5,13 @@ import {
   abortMultipartUpload,
   completeMultipartUpload,
   createMultipartUpload,
+  headObject,
   presignUploadPart,
 } from "../services/storage";
 
 describe("Multipart Upload Routes", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
   });
 
   const PROJ_ID = "8562dc1a-1493-42ee-ab6e-1075b83c88d6";
@@ -147,10 +148,14 @@ describe("Multipart Upload Routes", () => {
       project: mockProject,
     } as any);
     vi.mocked(completeMultipartUpload).mockResolvedValueOnce({});
-    vi.mocked(db.update).mockReturnValueOnce({
-      set: vi.fn().mockReturnValueOnce({
-        where: vi.fn().mockReturnValueOnce({
-          returning: vi.fn().mockResolvedValueOnce([{ ...mockAsset, sizeBytes: 200 * 1024 * 1024 }]),
+    vi.mocked(headObject).mockResolvedValueOnce({
+      ETag: '"multi-etag"',
+      ContentLength: 200 * 1024 * 1024,
+    } as any);
+    vi.mocked(db.update).mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([{ ...mockAsset, sizeBytes: 200 * 1024 * 1024 }]),
         }),
       }),
     } as any);
@@ -238,7 +243,6 @@ describe("Multipart Upload Routes", () => {
   });
 
   it("POST /api/uploads/:assetId/complete skips etag check for multipart uploads", async () => {
-    const { headObject } = await import("../services/storage");
     vi.mocked(headObject).mockResolvedValueOnce({
       ETag: '"abc123"',
       ContentLength: 1024,
@@ -249,10 +253,10 @@ describe("Multipart Upload Routes", () => {
       metadata: { isMultipart: true },
       project: mockProject,
     } as any);
-    vi.mocked(db.update).mockReturnValueOnce({
-      set: vi.fn().mockReturnValueOnce({
-        where: vi.fn().mockReturnValueOnce({
-          returning: vi.fn().mockResolvedValueOnce([{ ...mockAsset, sizeBytes: 1024 }]),
+    vi.mocked(db.update).mockReturnValue({
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([{ ...mockAsset, sizeBytes: 1024 }]),
         }),
       }),
     } as any);

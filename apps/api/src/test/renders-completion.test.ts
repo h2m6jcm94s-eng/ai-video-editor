@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
 import { db } from "../db";
+import { createCompletionToken } from "../lib/crypto";
 
 describe("Render completion webhook", () => {
   beforeEach(() => {
@@ -25,6 +26,8 @@ describe("Render completion webhook", () => {
     status: "rendering",
   };
 
+  const completionToken = () => createCompletionToken(mockRender.id, mockProject.id);
+
   it("POST /api/renders/:jobId/complete marks job and project complete", async () => {
     vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(mockRender);
 
@@ -41,7 +44,11 @@ describe("Render completion webhook", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/renders/job-1/complete",
-      payload: { status: "complete", outputAssetId: "550e8400-e29b-41d4-a716-446655440001" },
+      payload: {
+        status: "complete",
+        outputAssetId: "550e8400-e29b-41d4-a716-446655440001",
+        completionToken: completionToken(),
+      },
       headers: { "x-internal-token": "test-internal-token-1234567890abcdef" },
     });
 
@@ -55,7 +62,7 @@ describe("Render completion webhook", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/renders/job-1/complete",
-      payload: { status: "unknown" },
+      payload: { status: "unknown", completionToken: completionToken() },
       headers: { "x-internal-token": "test-internal-token-1234567890abcdef" },
     });
     expect(res.statusCode).toBe(422);
@@ -67,7 +74,11 @@ describe("Render completion webhook", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/renders/job-1/complete",
-      payload: { status: "complete" },
+      payload: {
+        status: "complete",
+        outputAssetId: "550e8400-e29b-41d4-a716-446655440001",
+        completionToken: completionToken(),
+      },
     });
     expect(res.statusCode).toBe(401);
     expect(JSON.parse(res.body).code).toBe("UNAUTHORIZED");
@@ -78,7 +89,11 @@ describe("Render completion webhook", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/renders/job-1/complete",
-      payload: { status: "complete" },
+      payload: {
+        status: "complete",
+        outputAssetId: "550e8400-e29b-41d4-a716-446655440001",
+        completionToken: completionToken(),
+      },
       headers: { "x-internal-token": "bad-token" },
     });
     expect(res.statusCode).toBe(401);
@@ -92,7 +107,11 @@ describe("Render completion webhook", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/renders/job-1/complete",
-      payload: { status: "complete" },
+      payload: {
+        status: "complete",
+        outputAssetId: "550e8400-e29b-41d4-a716-446655440001",
+        completionToken: completionToken(),
+      },
       headers: { "x-internal-token": "test-internal-token-1234567890abcdef" },
     });
     expect(res.statusCode).toBe(404);
@@ -106,7 +125,11 @@ describe("Render completion webhook", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/renders/job-1/complete",
-      payload: { status: "complete" },
+      payload: {
+        status: "complete",
+        outputAssetId: "550e8400-e29b-41d4-a716-446655440001",
+        completionToken: completionToken(),
+      },
       headers: { "x-internal-token": "test-internal-token-1234567890abcdef" },
     });
     expect(res.statusCode).toBe(404);
@@ -126,7 +149,7 @@ describe("Render completion webhook", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/renders/job-1/complete",
-      payload: { status: "failed", errorMessage: "Encoder error" },
+      payload: { status: "failed", errorMessage: "Encoder error", completionToken: completionToken() },
       headers: { "x-internal-token": "test-internal-token-1234567890abcdef" },
     });
 

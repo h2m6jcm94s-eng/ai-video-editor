@@ -3,10 +3,10 @@
 "use client";
 
 import React from "react";
-import type { Overlay } from "@/types/api";
+import type { CanvasOverlay } from "@/types/api";
 
 interface ShapeOverlayProps {
-  overlay: Overlay;
+  overlay: CanvasOverlay;
 }
 
 export const ShapeOverlay = React.memo(function ShapeOverlay({ overlay }: ShapeOverlayProps) {

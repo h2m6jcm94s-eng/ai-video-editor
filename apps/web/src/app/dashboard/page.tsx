@@ -15,10 +15,12 @@ export default async function DashboardPage() {
   if (!userId) redirect("/sign-in");
 
   let projects: Awaited<ReturnType<typeof apiServer.projects.list>>["projects"] = [];
+  let loadError = false;
   try {
     const res = await apiServer.projects.list();
     projects = res.projects;
   } catch (err) {
+    loadError = true;
     console.error("Failed to load projects:", err);
   }
 
@@ -27,6 +29,12 @@ export default async function DashboardPage() {
       <DashboardHeader />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16">
+        {loadError && (
+          <div className="mt-6 rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-red-200">
+            <p className="font-medium">Failed to load projects</p>
+            <p className="text-sm opacity-90">Please refresh the page or try again later.</p>
+          </div>
+        )}
         <HeroSection projectCount={projects.length} />
         <StatsSection projects={projects} />
         <div className="mt-10">

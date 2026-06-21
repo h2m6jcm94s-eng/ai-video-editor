@@ -15,7 +15,7 @@ function getIconForCode(code: string) {
 }
 
 export function NotificationPanel({ onClose }: NotificationPanelProps) {
-  const { items, isLoading, ack, ackAll } = useNotifications();
+  const { items, isLoading, error, ack, ackAll, refresh } = useNotifications();
 
   return (
     <div className="absolute right-0 top-full mt-2 w-80 rounded-lg border bg-popover shadow-lg z-50">
@@ -38,7 +38,14 @@ export function NotificationPanel({ onClose }: NotificationPanelProps) {
       </div>
 
       <div className="max-h-72 overflow-y-auto">
-        {isLoading ? (
+        {error ? (
+          <div className="p-4 text-center text-sm text-red-400">
+            <p>{error}</p>
+            <button onClick={refresh} className="mt-2 text-xs underline hover:text-red-300" type="button">
+              Retry
+            </button>
+          </div>
+        ) : isLoading ? (
           <div className="p-4 text-center text-sm text-muted-foreground">Loading...</div>
         ) : items.length === 0 ? (
           <div className="p-4 text-center text-sm text-muted-foreground">No notifications</div>

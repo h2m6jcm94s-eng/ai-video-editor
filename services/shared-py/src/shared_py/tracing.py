@@ -2,6 +2,7 @@
 # Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 
 import os
+import signal
 from functools import wraps
 
 from opentelemetry import trace
@@ -18,6 +19,13 @@ def init_tracing(service_name: str) -> None:
     exporter = OTLPSpanExporter(endpoint=endpoint)
     provider.add_span_processor(BatchSpanProcessor(exporter))
     trace.set_tracer_provider(provider)
+
+    def _flush_and_exit(signum, frame):
+        provider.force_flush()
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGINT, _flush_and_exit)
+    signal.signal(signal.SIGTERM, _flush_and_exit)
 
 
 def traced(name: str | None = None):

@@ -5,6 +5,7 @@
 Tries to use NeMo Guardrails when available, falls back to heuristic checks.
 """
 
+import os
 import re
 import logging
 from pathlib import Path
@@ -53,10 +54,15 @@ PII_PATTERNS = [
 
 # ─── Toxicity / Adult Keywords (simple heuristic) ───────────────────────────
 
-TOXICITY_KEYWORDS = [
+# Allow operators to extend the static keyword list without code changes.
+# A real production deployment should integrate a moderation API; this is a
+# configurable heuristic fallback.
+_default_toxicity = [
     "kill yourself", "suicide", "die in", "hope you die",
     "racist", "nazi", "hitler", "white supremacist",
 ]
+_extra = os.environ.get("GUARDRAILS_TOXICITY_KEYWORDS", "")
+TOXICITY_KEYWORDS = _default_toxicity + [k.strip() for k in _extra.split(",") if k.strip()]
 
 # ─── Data Classes ───────────────────────────────────────────────────────────
 

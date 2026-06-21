@@ -146,15 +146,18 @@ async def upload_render(output_path: str, project_id: str, render_id: str) -> di
 
 
 @activity.defn
-async def complete_render(render_id: str, output_asset_id: str) -> None:
+async def complete_render(render_id: str, output_asset_id: str, completion_token: Optional[str] = None) -> None:
     """Mark the render job as complete."""
+    payload = {
+        "status": "complete",
+        "outputAssetId": output_asset_id,
+    }
+    if completion_token:
+        payload["completionToken"] = completion_token
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{settings.api_base}/renders/{render_id}/complete",
-            json={
-                "status": "complete",
-                "outputAssetId": output_asset_id,
-            },
+            json=payload,
             headers=_internal_headers(),
             timeout=30,
         )

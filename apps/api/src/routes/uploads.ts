@@ -16,6 +16,7 @@ import {
   createMultipartUpload,
   createPresignedDownloadUrl,
   createPresignedUploadUrl,
+  deleteAsset,
   headObject,
   presignUploadPart,
 } from "../services/storage";
@@ -311,6 +312,21 @@ export async function uploadRoutes(app: FastifyInstance) {
 
       await completeMultipartUpload(body.key, body.uploadId, body.parts);
 
+      // Verify the assembled object size matches what the client claimed.
+      const head = await headObject(body.key);
+      const actualSize = head.ContentLength ?? -1;
+      if (actualSize !== body.sizeBytes) {
+        await deleteAsset(body.key).catch((err) =>
+          request.log.error({ err, key: body.key }, "Failed to delete mismatched multipart upload"),
+        );
+        return sendError(
+          reply,
+          422,
+          `Assembled file size ${actualSize} does not match expected ${body.sizeBytes}`,
+          "VALIDATION_ERROR",
+        );
+      }
+
       const storageUrl = await createPresignedDownloadUrl(body.key);
 
       const [asset] = await db
@@ -327,8 +343,8 @@ export async function uploadRoutes(app: FastifyInstance) {
         return sendError(reply, 404, "Asset not found", "NOT_FOUND");
       }
 
-      // Trigger probe workflow for video assets (fire-and-forget)
-      if (["reference_video", "clip", "render"].includes(asset.type)) {
+      // Trigger probe workflow for video/audio assets (fire-and-forget)
+      if (["reference_video", "clip", "render", "song"].includes(asset.type)) {
         startProbeWorkflow(asset.id, asset.storageKey).catch((e) =>
           request.log.error({ err: e, assetId: asset.id }, "probe trigger failed"),
         );

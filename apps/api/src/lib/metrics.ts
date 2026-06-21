@@ -14,7 +14,11 @@
  * - Rate limit hit counter
  */
 
+import { count, inArray } from "drizzle-orm";
 import { Counter, Gauge, Histogram, register } from "prom-client";
+import { db } from "../db";
+import { renders } from "../db/schema";
+import { logger } from "./logger";
 
 function getOrCreateCounter<T extends string>(opts: { name: string; help: string; labelNames?: T[] }) {
   const existing = register.getSingleMetric(opts.name) as Counter<T> | undefined;
@@ -81,6 +85,22 @@ export const rendersTotal = getOrCreateCounter({
   help: "Total renders by outcome",
   labelNames: ["status"],
 });
+
+/**
+ * Sync the active-render gauge to the actual count of queued/running rows in the DB.
+ * Called after every render lifecycle event so the gauge self-corrects and survives restarts.
+ */
+export async function syncRendersActiveGauge() {
+  try {
+    const [row] = await db
+      .select({ count: count() })
+      .from(renders)
+      .where(inArray(renders.status, ["queued", "running"]));
+    rendersActive.set(row?.count ?? 0);
+  } catch (err) {
+    logger.error({ err }, "Failed to sync rendersActive gauge");
+  }
+}
 
 // ─── AI Provider Metrics ────────────────────────────────────────────────────
 

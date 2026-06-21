@@ -7,19 +7,26 @@ import { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { db } from "../db";
 import { projects, renders } from "../db/schema";
+import { createCompletionToken, verifyCompletionToken } from "../lib/crypto";
 import { sendError } from "../lib/errors";
-import { rendersActive, rendersTotal } from "../lib/metrics";
+import { rendersTotal, syncRendersActiveGauge } from "../lib/metrics";
 import { requireInternalToken } from "../middleware/requireInternalToken";
 import { createRenderSchema, validateBody } from "../middleware/validate";
 import { enqueueJob } from "../services/queue";
 import { startRenderWorkflow } from "../services/temporal";
 
-const completeRenderSchema = z.object({
-  status: z.enum(["complete", "failed"]),
-  outputAssetId: z.string().uuid().optional(),
-  previewAssetId: z.string().uuid().optional(),
-  errorMessage: z.string().max(2000).optional(),
-});
+const completeRenderSchema = z
+  .object({
+    status: z.enum(["complete", "failed"]),
+    outputAssetId: z.string().uuid().optional(),
+    previewAssetId: z.string().uuid().optional(),
+    errorMessage: z.string().max(2000).optional(),
+    completionToken: z.string().min(1),
+  })
+  .refine((data) => data.status !== "complete" || !!data.outputAssetId, {
+    message: "outputAssetId is required when status is complete",
+    path: ["outputAssetId"],
+  });
 
 type StartRenderResult =
   | { ok: true; job: typeof renders.$inferSelect; project: typeof projects.$inferSelect }
@@ -127,6 +134,7 @@ export async function renderRoutes(app: FastifyInstance) {
       }
 
       const { job, project } = startResult;
+      const completionToken = createCompletionToken(job.id, project.id);
 
       // Fetch storage keys for all assets used in the render
       const assetIds = [
@@ -185,6 +193,7 @@ export async function renderRoutes(app: FastifyInstance) {
           mode: project.mode,
           userId,
           renderId: job.id,
+          completionToken,
           assetKeyMap,
           styleAnalysis: (project.styleAnalysis as Record<string, unknown>) ?? undefined,
           maskAssetIds,
@@ -211,8 +220,8 @@ export async function renderRoutes(app: FastifyInstance) {
 
       // Only count renders that successfully entered the workflow engine.
       // If Temporal failed above, the render row is marked failed and the gauge is untouched.
-      rendersActive.inc();
       rendersTotal.inc({ status: "started" });
+      await syncRendersActiveGauge();
 
       // Update project status
       await db
@@ -267,7 +276,7 @@ export async function renderRoutes(app: FastifyInstance) {
   // Worker webhook: mark render complete/failed
   app.post(
     "/:jobId/complete",
-    { preHandler: [validateBody(completeRenderSchema), requireInternalToken] },
+    { preHandler: [requireInternalToken, validateBody(completeRenderSchema)] },
     async (request, reply) => {
       const { jobId } = request.params as { jobId: string };
       const body = request.validatedBody as z.infer<typeof completeRenderSchema>;
@@ -285,6 +294,12 @@ export async function renderRoutes(app: FastifyInstance) {
         return sendError(reply, 404, "Project not found", "NOT_FOUND");
       }
 
+      // Verify the render-scoped completion token so a leaked global internal token
+      // cannot mutate arbitrary renders.
+      if (!verifyCompletionToken(body.completionToken, jobId, job.projectId)) {
+        return sendError(reply, 403, "Invalid completion token", "FORBIDDEN");
+      }
+
       const [updated] = await db
         .update(renders)
         .set({
@@ -297,25 +312,21 @@ export async function renderRoutes(app: FastifyInstance) {
         .where(eq(renders.id, jobId))
         .returning();
 
-      // Only adjust the active gauge if the render was actually active before this update.
-      // Duplicate webhook calls would otherwise drive the gauge negative.
-      const wasActive = job.status === "queued" || job.status === "running";
-
       if (body.status === "complete") {
-        if (wasActive) rendersActive.dec();
         rendersTotal.inc({ status: "complete" });
         await db
           .update(projects)
           .set({ status: "complete", updatedAt: new Date(), renderAssetId: body.outputAssetId ?? null })
           .where(eq(projects.id, job.projectId));
       } else {
-        if (wasActive) rendersActive.dec();
         rendersTotal.inc({ status: "failed" });
         await db
           .update(projects)
           .set({ status: "failed", updatedAt: new Date() })
           .where(eq(projects.id, job.projectId));
       }
+
+      await syncRendersActiveGauge();
 
       return { job: updated };
     },

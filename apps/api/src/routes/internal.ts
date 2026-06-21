@@ -29,7 +29,11 @@ const createAssetSchema = z
   .object({
     projectId: z.string().uuid(),
     type: z.enum(["reference_video", "song", "clip", "render", "subtitle", "lut", "sfx", "mask"]),
-    filename: z.string().min(1).max(255),
+    filename: z
+      .string()
+      .min(1)
+      .max(255)
+      .regex(/^[^/\\\\]+$/, "Filename cannot contain path separators"),
     mimeType: z.string().min(1).max(100),
   })
   .strict();

@@ -166,6 +166,19 @@ def main():
 
     args = parser.parse_args()
 
+    reference_path = os.path.abspath(args.reference)
+    song_path = os.path.abspath(args.song)
+    clip_paths = [os.path.abspath(c) for c in args.clips]
+    output_path = os.path.abspath(args.output)
+    temp_dir = os.path.abspath(args.temp_dir)
+
+    for name, path in [("reference", reference_path), ("song", song_path), *[(f"clip", c) for c in clip_paths]]:
+        if not os.path.exists(path):
+            parser.error(f"{name} path does not exist: {path}")
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    os.makedirs(temp_dir, exist_ok=True)
+
     run_pipeline(
         reference_path=args.reference,
         song_path=args.song,

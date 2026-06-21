@@ -66,10 +66,10 @@ export interface PreviewEffects {
   hueRotate: number; // 0-360, default 0
 }
 
-// NOTE: Web Overlay is a canvas UI element (id, geometry, style).
+// NOTE: Web CanvasOverlay is a canvas UI element (id, geometry, style).
 // The API contract overlay (text burn-in spec) lives in shared-types.
 // TODO: reconcile these two overlay concepts post-Phase-1.
-export interface Overlay {
+export interface CanvasOverlay {
   id: string;
   type: "text" | "shape" | "effect";
   text?: string;
@@ -104,7 +104,7 @@ export interface CutListGlobals {
 export interface CutList {
   globals: CutListGlobals;
   slots: Slot[];
-  overlays: Overlay[];
+  overlays: CanvasOverlay[];
   subtitles?: Subtitle[];
   audioTracks?: AudioTrack[];
 }

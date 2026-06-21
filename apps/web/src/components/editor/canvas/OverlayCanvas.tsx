@@ -3,13 +3,13 @@
 "use client";
 
 import { memo } from "react";
-import { TextOverlay } from "./TextOverlay";
-import { ShapeOverlay } from "./ShapeOverlay";
+import type { CanvasOverlay } from "@/types/api";
 import { EffectOverlay } from "./EffectOverlay";
-import type { Overlay } from "@/types/api";
+import { ShapeOverlay } from "./ShapeOverlay";
+import { TextOverlay } from "./TextOverlay";
 
 interface OverlayCanvasProps {
-  overlays: Overlay[];
+  overlays: CanvasOverlay[];
 }
 
 function OverlayCanvasInner({ overlays }: OverlayCanvasProps) {

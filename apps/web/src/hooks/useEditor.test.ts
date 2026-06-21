@@ -1,9 +1,13 @@
 import type { Effect } from "@ai-video-editor/shared-types";
 import { describe, expect, it } from "vitest";
-import type { AudioTrack, CutList, Overlay, Slot } from "@/types/api";
+import type { AudioTrack, CanvasOverlay, CutList, Slot } from "@/types/api";
 import { editorReducer } from "./useEditor";
 
-function makeCutList(slots: Slot[] = [], overlays: Overlay[] = [], audioTracks: AudioTrack[] = []): CutList {
+function makeCutList(
+  slots: Slot[] = [],
+  overlays: CanvasOverlay[] = [],
+  audioTracks: AudioTrack[] = [],
+): CutList {
   return {
     globals: {
       totalDurationS: 30,
@@ -39,7 +43,7 @@ function makeSlot(index: number, overrides: Partial<Slot> = {}): Slot {
   };
 }
 
-function makeOverlay(id: string): Overlay {
+function makeOverlay(id: string): CanvasOverlay {
   return { id, type: "text", text: "hello", startS: 0, endS: 5, x: 0, y: 0, width: 100, height: 50 };
 }
 

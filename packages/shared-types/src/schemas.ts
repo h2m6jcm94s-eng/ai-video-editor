@@ -186,7 +186,17 @@ export const providerEncryptedKeySchema = z
   .string()
   .min(16, "Encrypted key is too short")
   .max(4096, "Encrypted key is too long")
-  .regex(/^[A-Za-z0-9+/=]+$/, "Encrypted key must be base64");
+  .regex(/^(v\d+:)?[A-Za-z0-9+/=]+$/, "Encrypted key must be base64 with an optional vN: prefix");
+
+export const patchTemplateSchema = z
+  .object({
+    name: z.string().min(1).max(255).optional(),
+    description: z.string().max(2000).optional(),
+    cutList: z.unknown().optional(),
+    tags: z.array(z.string().max(50)).max(20).optional(),
+    isPublic: z.boolean().optional(),
+  })
+  .strict();
 
 export const testProviderKeySchema = z
   .object({

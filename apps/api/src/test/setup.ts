@@ -97,6 +97,7 @@ vi.mock("../services/storage", () => ({
   presignUploadPart: vi.fn(async () => "https://r2.example.com/part"),
   completeMultipartUpload: vi.fn(async () => ({ ETag: '"multi-etag"' })),
   abortMultipartUpload: vi.fn(async () => {}),
+  deleteAsset: vi.fn(async () => {}),
   headObject: vi.fn(async () => ({ ETag: '"abc123"', ContentLength: 1024, PartsCount: undefined })),
   s3: {
     send: vi.fn(async (command: any) => {
