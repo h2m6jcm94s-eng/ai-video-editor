@@ -42,7 +42,11 @@ def _find_font() -> str:
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
         "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
         "/System/Library/Fonts/Helvetica.ttc",  # macOS
-        "C:\\Windows\\Fonts\\arial.ttf",  # Windows
+        "C:\\Windows\\Fonts\\segoeuib.ttf",  # Windows
+        "C:\\Windows\\Fonts\\segoeui.ttf",
+        "C:\\Windows\\Fonts\\arial.ttf",
+        "C:\\Windows\\Fonts\\calibri.ttf",
+        "C:\\Windows\\Fonts\\verdana.ttf",
     ]
     for f in candidates:
         if os.path.exists(f):
@@ -147,7 +151,10 @@ def _esc_path(p: str) -> str:
 
 
 def _esc_text(t: str) -> str:
-    return t.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:").replace("%", "\\%")
+    # Inside a single-quoted FFmpeg filter value, a literal single quote is
+    # represented by two single quotes (''). Backslash escapes are not honored
+    # inside single quotes, so we only need to escape '%' (strftime sequences).
+    return t.replace("'", "''").replace("%", "\\%")
 
 
 def _get_param(params, key: str, default):
@@ -162,7 +169,10 @@ def _enable_expr(start_s: float, end_s: float) -> str:
 
     Commas are escaped because the filter chain is comma-separated.
     """
-    return f"between(t\\,{start_s:.3f}\\,{end_s:.3f})"
+    # Commas inside the single-quoted enable expression are literal and must
+    # not be escaped; FFmpeg's filter parser treats \\, inside quotes as an
+    # invalid terminator and fails with EINVAL on Windows.
+    return f"between(t,{start_s:.3f},{end_s:.3f})"
 
 
 def _drawtext_filter(
@@ -369,7 +379,19 @@ def _build_audio_filter(audio_tracks: List[AudioTrack], base_input_count: int, s
     idx = base_input_count
 
     for track in audio_tracks:
-        parts.append(f"[{idx}:a]afade=t=in:ss=0:d={track.fade_in_s},afade=t=out:st={max(0, track.end_s - track.start_s - track.fade_out_s)}:d={track.fade_out_s},volume={track.gain_db}dB[a{idx}]")
+        track_filters = []
+        if track.fade_in_s and track.fade_in_s > 0:
+            track_filters.append(f"afade=t=in:ss=0:d={track.fade_in_s}")
+
+        fade_out = track.fade_out_s or 0.0
+        if fade_out > 0:
+            clip_dur = max(0.0, track.end_s - track.start_s)
+            out_start = max(0.0, clip_dur - fade_out)
+            if out_start > 0:
+                track_filters.append(f"afade=t=out:st={out_start}:d={fade_out}")
+
+        track_filters.append(f"volume={track.gain_db}dB")
+        parts.append(f"[{idx}:a]{','.join(track_filters)}[a{idx}]")
         inputs.append(f"[a{idx}]")
         idx += 1
 
@@ -470,7 +492,7 @@ def compile_timeline(
         if slot.start_s < 0:
             raise ValueError(f"Slot {slot.index} has negative start_s: {slot.start_s}")
 
-        clip_path = clip_paths[clip_id]
+        clip_path = os.path.abspath(clip_paths[clip_id])
         segment_path = os.path.join(temp_dir, f"slot_{slot.index:03d}.mp4")
 
         duration = slot.duration_s
