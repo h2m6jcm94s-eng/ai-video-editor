@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../services/inges
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../services/style-worker/src"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../services/reason-worker/src"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../services/render-worker/src"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../services/segment-worker/src"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../services/shared-py/src"))
 
 from temporalio import activity, workflow
@@ -397,6 +398,7 @@ async def main():
             render_720p,
             upload_to_r2,
             notify_user,
+            segment_subject,
         ],
     )
 

@@ -1,0 +1,15 @@
+[project]
+name = "segment-worker"
+version = "0.1.0"
+description = "SAM3-based segmentation worker for subject isolation and rotobrush masks"
+dependencies = [
+    "shared-py",
+    "numpy>=1.26.0",
+    "pillow>=10.0.0",
+    "opencv-python>=4.9.0",
+    "av>=12.0.0",
+    "huggingface_hub>=0.20.0",
+]
+
+[tool.uv.sources]
+shared-py = { workspace = true }
