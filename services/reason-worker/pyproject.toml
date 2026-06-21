@@ -8,6 +8,7 @@ dependencies = [
     "numpy>=1.26.0",
     "scipy>=1.13.0",
     "twelvelabs>=0.32.0",
+    "google-genai>=2.9.0",
 ]
 
 [tool.uv.sources]

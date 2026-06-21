@@ -7,6 +7,7 @@ import asyncio
 import os
 import sys
 import tempfile
+import uuid
 
 # Add services to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../services/ingest-worker/src"))
@@ -223,6 +224,57 @@ async def generate_cutlist_claude(beats: dict, shots: list, style: dict, tier: s
 
 
 @activity.defn
+async def generate_filler_clip(
+    slot: dict,
+    style_analysis: dict = None,
+    transition_context: str = None,
+    project_id: str = "",
+    aspect_ratio: str = "16:9",
+) -> dict:
+    """Generate a filler/transition clip for a low-confidence slot."""
+    from reason_worker.generative_client import get_generative_provider, download_video_url
+    from reason_worker.filler_prompt import build_filler_prompt
+    from shared_py.models import Slot
+
+    slot_obj = Slot(**slot)
+    prompt = build_filler_prompt(slot_obj, style_analysis, transition_context)
+
+    # Most generative video APIs have a minimum clip length; clamp to a
+    # supported range and let the renderer trim if the slot is shorter.
+    duration = max(3.0, min(10.0, slot_obj.duration_s))
+
+    provider = get_generative_provider()
+    result = provider.generate(prompt, duration, aspect_ratio=aspect_ratio)
+    if not result.ok:
+        activity.logger.warning(
+            f"Filler generation failed for slot {slot_obj.index}: {result.error}"
+        )
+        return {"status": "failed", "error": result.error}
+
+    local_path = result.local_path
+    if not local_path and result.video_url:
+        try:
+            local_path = download_video_url(result.video_url)
+        except Exception as e:
+            return {"status": "failed", "error": f"download failed: {e}"}
+
+    if not local_path or not os.path.exists(local_path):
+        return {"status": "failed", "error": "no video file returned"}
+
+    asset_id = f"gen_{uuid.uuid4().hex[:12]}"
+    storage_key = f"projects/{project_id}/generated/{asset_id}.mp4"
+    upload_file(local_path, storage_key, content_type="video/mp4")
+
+    return {
+        "status": "succeeded",
+        "asset_id": asset_id,
+        "storage_key": storage_key,
+        "provider": result.provider,
+        "prompt": prompt,
+    }
+
+
+@activity.defn
 async def rank_clips_per_slot(cutlist: dict, clip_ids: list, clip_metadata: dict, embeddings: dict = None) -> dict:
     """Rank clips for each slot."""
     from reason_worker.clip_rank import rank_clips_for_slots, select_top_k_per_slot
@@ -341,6 +393,7 @@ async def main():
             embed_user_clips,
             generate_cutlist_claude,
             rank_clips_per_slot,
+            generate_filler_clip,
             render_720p,
             upload_to_r2,
             notify_user,
