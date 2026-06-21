@@ -22,15 +22,17 @@ from reason_worker.cutlist_gen import generate_cutlist_programmatic
 from render_worker.compiler import compile_timeline
 
 
-def create_test_video(path: str, duration: float = 5.0):
+def create_test_video(path: str, duration: float = 5.0, with_audio: bool = True):
     if not shutil.which("ffmpeg"):
         pytest.skip("FFmpeg not available")
-    subprocess.run(
-        ["ffmpeg", "-y", "-f", "lavfi",
-         "-i", f"testsrc=duration={duration}:size=640x480:rate=30",
-         "-pix_fmt", "yuv420p", path],
-        check=True, capture_output=True,
-    )
+    args = [
+        "ffmpeg", "-y", "-f", "lavfi",
+        "-i", f"testsrc=duration={duration}:size=640x480:rate=30",
+    ]
+    if with_audio:
+        args.extend(["-f", "lavfi", "-i", f"sine=frequency=440:duration={duration}"])
+    args.extend(["-pix_fmt", "yuv420p", path])
+    subprocess.run(args, check=True, capture_output=True)
     return path
 
 

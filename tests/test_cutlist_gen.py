@@ -203,6 +203,107 @@ class TestProgrammaticCutlist:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Effects and overlays
+# ──────────────────────────────────────────────────────────────────────────────
+
+class TestEffectsAndOverlays:
+    def test_high_energy_slot_gets_zoom_punch_in(self):
+        """High-energy downbeat slots should include zoom_punch_in."""
+        beats = make_beat_grid(bpm=120)
+        shots = make_shots(n=1)
+        energy = [0.95] * 10
+        available = ["wide", "medium", "close_up"]
+
+        cutlist = generate_cutlist_programmatic(beats, shots, energy, available, total_duration=10.0)
+
+        zoom_count = sum(
+            1 for s in cutlist.slots
+            for e in s.effects
+            if e.type == "zoom_punch_in"
+        )
+        assert zoom_count > 0
+
+    def test_highest_energy_slot_gets_vignette(self):
+        """The single highest-energy slot should receive vignette."""
+        beats = make_beat_grid(bpm=120)
+        shots = make_shots(n=1)
+        energy = [0.2, 0.3, 0.95, 0.4, 0.5]
+        available = ["wide", "medium", "close_up"]
+
+        cutlist = generate_cutlist_programmatic(beats, shots, energy, available, total_duration=10.0)
+
+        vignette_count = sum(
+            1 for s in cutlist.slots
+            for e in s.effects
+            if e.type == "vignette"
+        )
+        assert vignette_count == 1
+
+    def test_section_boundary_gets_film_grain_and_overlay(self):
+        """Section boundaries should add film_grain and a text overlay."""
+        beats = make_beat_grid(
+            bpm=120,
+            segments=[
+                BeatSegment(start=0.0, end=5.0, label="intro"),
+                BeatSegment(start=5.0, end=15.0, label="verse"),
+            ],
+        )
+        shots = make_shots(n=2)
+        energy = [0.8] * 10
+        available = ["wide", "medium", "close_up"]
+
+        cutlist = generate_cutlist_programmatic(beats, shots, energy, available, total_duration=15.0)
+
+        grain_count = sum(
+            1 for s in cutlist.slots
+            for e in s.effects
+            if e.type == "film_grain"
+        )
+        assert grain_count > 0
+        assert any("VERSE" in o.text for o in cutlist.overlays)
+
+    def test_hook_overlay_on_high_energy_open(self):
+        """A high-energy opening should produce a hook overlay."""
+        beats = make_beat_grid(bpm=120)
+        shots = make_shots(n=1)
+        energy = [0.9] * 10
+        available = ["wide", "medium", "close_up"]
+
+        cutlist = generate_cutlist_programmatic(beats, shots, energy, available, total_duration=10.0)
+
+        assert any("LET'S GO" in o.text for o in cutlist.overlays)
+
+    def test_outro_cta_overlay(self):
+        """A long enough edit should produce an outro CTA overlay."""
+        beats = make_beat_grid(bpm=120)
+        shots = make_shots(n=2)
+        energy = [0.5] * 10
+        available = ["wide", "medium", "close_up"]
+
+        cutlist = generate_cutlist_programmatic(beats, shots, energy, available, total_duration=10.0)
+
+        assert any("FOLLOW FOR MORE" in o.text for o in cutlist.overlays)
+
+    def test_effects_capped_at_two_per_slot(self):
+        """No slot should have more than 2 effects."""
+        beats = make_beat_grid(
+            bpm=120,
+            segments=[
+                BeatSegment(start=0.0, end=2.0, label="intro"),
+                BeatSegment(start=2.0, end=10.0, label="drop"),
+            ],
+        )
+        shots = make_shots(n=1)
+        energy = [0.95] * 10
+        available = ["wide", "medium", "close_up"]
+
+        cutlist = generate_cutlist_programmatic(beats, shots, energy, available, total_duration=10.0)
+
+        for slot in cutlist.slots:
+            assert len(slot.effects) <= 2
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # AI provider fallback
 # ──────────────────────────────────────────────────────────────────────────────
 

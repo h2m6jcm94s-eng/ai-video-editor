@@ -54,6 +54,14 @@ export interface StartRenderOptions {
   assetKeyMap?: Record<string, string>;
 }
 
+export interface StartAnalyzeStyleOptions {
+  assetId: string;
+  storageKey: string;
+  shotBoundaries?: Record<string, unknown>[];
+  lutStrength?: number;
+  textSampleFps?: number;
+}
+
 export async function startRenderWorkflow(options: StartRenderOptions) {
   return withTemporalReconnect(async (client) => {
     const handle = await client.workflow.start("VideoRenderWorkflow", {
@@ -73,6 +81,25 @@ export async function startRenderWorkflow(options: StartRenderOptions) {
       workflowId: `render-${options.projectId}-${options.renderId || Date.now()}`,
     });
 
+    return handle.workflowId;
+  });
+}
+
+export async function startAnalyzeStyleWorkflow(options: StartAnalyzeStyleOptions) {
+  return withTemporalReconnect(async (client) => {
+    const handle = await client.workflow.start("AnalyzeStyleWorkflow", {
+      taskQueue: "style",
+      args: [
+        {
+          asset_id: options.assetId,
+          storage_key: options.storageKey,
+          shot_boundaries: options.shotBoundaries || [],
+          lut_strength: options.lutStrength ?? 0.5,
+          text_sample_fps: options.textSampleFps ?? 5.0,
+        },
+      ],
+      workflowId: `style-${options.assetId}`,
+    });
     return handle.workflowId;
   });
 }

@@ -22,12 +22,17 @@ class AIProvider(ABC):
     # ------------------------------------------------------------------
 
     SYSTEM_PROMPT_CUTLIST = (
-        "You are an expert video editor AI. You generate precise, beat-synced cut-lists. "
+        "You are an expert video editor AI for a beat-synced social video editor. "
         "Always return valid JSON matching the provided schema exactly. "
         "Every cut must snap to the nearest beat. Every 4-8 cuts, force a longer shot at the nearest downbeat. "
         "Dramatic transitions (flash, whip, dissolve) only at section boundaries. "
         "Match energy_curve: low energy = wide/establishing shots, high energy = close-ups/action. "
-        "Do not request shot types the user doesn't have. Keep total duration under 60 seconds for the MVP."
+        "Do not request shot types the user doesn't have. Keep total duration under 60 seconds for the MVP. "
+        "Populate slot.effects[] and overlays[] to make the edit feel alive, not like a slideshow. "
+        "Effects: zoom_punch_in on high-energy downbeats, vignette on the highest-energy slot, "
+        "film_grain at section boundaries, focus_pull on long low-energy slots. "
+        "Overlays: add 1-3 short text overlays (hook, section labels, call-to-action) timed to energy peaks. "
+        "Do not stack more than 2 effects per slot."
     )
 
     SYSTEM_PROMPT_SHOT = (
@@ -126,6 +131,20 @@ class AIProvider(ABC):
             "- Dramatic transitions (flash, whip, dissolve) only at section boundaries",
             "- Match energy_curve: low energy = wide/establishing shots, high energy = close-ups/action",
             "- Do not request shot types the user doesn't have",
+            "",
+            "## Effects and Overlays (MANDATORY — do not leave empty)",
+            "For each slot, decide if it needs effects in slot.effects[]:",
+            "- zoom_punch_in: on downbeats where energyLevel > 0.7 (targetScale 1.15-1.3, durationMs 200-300, easing easeOut).",
+            "- focus_pull: on slots where energyLevel < 0.4 and durationS > 1.5 (targetBlur 0→6, durationMs 600-1000).",
+            "- film_grain: on the first slot after a section boundary (intensity 0.15).",
+            "- vignette: on the single highest-energy slot in the song (intensity 0.3-0.5).",
+            "- Do not add more than 2 effects per slot.",
+            "",
+            "Add 1-3 text overlays in overlays[]:",
+            "- Hook: big text in the first 2 seconds if the song starts high-energy.",
+            "- Section label: small text when a section changes (e.g., 'DROP', 'VERSE').",
+            "- Outro CTA: final 2 seconds, e.g., 'FOLLOW FOR MORE'.",
+            "- Use position 'center', 'top', or 'bottom'. fontSizePx 36-72. animation 'fade', 'scale', or 'pop'.",
         ])
 
         return "\n".join(lines)

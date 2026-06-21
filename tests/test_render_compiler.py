@@ -123,6 +123,168 @@ class TestCompileTimeline:
                     os.unlink(p)
 
 
+class TestEffectRendering:
+    """Verify that slot effects accepted by the schema actually render through FFmpeg."""
+
+    def _cutlist_with_effects(self, effects):
+        return CutList(
+            globals=CutListGlobals(total_duration_s=3.0, tempo_bpm=120,
+                                   time_signature="4/4", energy_curve=[0.5],
+                                   section_markers=[], aspect_ratio="16:9"),
+            slots=[Slot(index=0, start_s=0.0, duration_s=3.0, beat_index=0,
+                        section="intro", target_shot_type="wide",
+                        subject_hint="test", motion_hint="static",
+                        energy_level=0.5, required_tags=[], avoid_tags=[],
+                        selected_clip_id="clip_0", effects=effects)],
+        )
+
+    def test_zoom_punch_in_renders(self):
+        if not shutil.which("ffmpeg"):
+            pytest.skip("FFmpeg not available")
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as v:
+            video_path = v.name
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as o:
+            output_path = o.name
+        try:
+            create_test_video(video_path, duration=5.0)
+            cutlist = self._cutlist_with_effects([
+                Effect(type="zoom_punch_in", start_s=0.0, duration_s=0.3,
+                       params={"target_scale": 1.25, "duration_ms": 250}),
+            ])
+            config = RenderConfig(output_path=output_path, width=640, height=480,
+                                  video_preset="ultrafast", video_crf=28)
+            result = compile_timeline(cutlist, {"clip_0": video_path}, output_path, config)
+            assert os.path.exists(result)
+            assert os.path.getsize(result) > 0
+        finally:
+            for p in [video_path, output_path]:
+                if os.path.exists(p):
+                    os.unlink(p)
+
+    def test_focus_pull_renders(self):
+        if not shutil.which("ffmpeg"):
+            pytest.skip("FFmpeg not available")
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as v:
+            video_path = v.name
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as o:
+            output_path = o.name
+        try:
+            create_test_video(video_path, duration=5.0)
+            cutlist = self._cutlist_with_effects([
+                Effect(type="focus_pull", start_s=0.5, duration_s=0.8,
+                       params={"target_blur": 4.0, "duration_ms": 600}),
+            ])
+            config = RenderConfig(output_path=output_path, width=640, height=480,
+                                  video_preset="ultrafast", video_crf=28)
+            result = compile_timeline(cutlist, {"clip_0": video_path}, output_path, config)
+            assert os.path.exists(result)
+            assert os.path.getsize(result) > 0
+        finally:
+            for p in [video_path, output_path]:
+                if os.path.exists(p):
+                    os.unlink(p)
+
+    def test_vignette_and_film_grain_renders(self):
+        if not shutil.which("ffmpeg"):
+            pytest.skip("FFmpeg not available")
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as v:
+            video_path = v.name
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as o:
+            output_path = o.name
+        try:
+            create_test_video(video_path, duration=5.0)
+            cutlist = self._cutlist_with_effects([
+                Effect(type="vignette", start_s=0.0, duration_s=3.0,
+                       params={"intensity": 0.4}),
+                Effect(type="film_grain", start_s=0.0, duration_s=3.0,
+                       params={"intensity": 0.15}),
+            ])
+            config = RenderConfig(output_path=output_path, width=640, height=480,
+                                  video_preset="ultrafast", video_crf=28)
+            result = compile_timeline(cutlist, {"clip_0": video_path}, output_path, config)
+            assert os.path.exists(result)
+            assert os.path.getsize(result) > 0
+        finally:
+            for p in [video_path, output_path]:
+                if os.path.exists(p):
+                    os.unlink(p)
+
+    def test_glitch_and_color_pop_renders(self):
+        if not shutil.which("ffmpeg"):
+            pytest.skip("FFmpeg not available")
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as v:
+            video_path = v.name
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as o:
+            output_path = o.name
+        try:
+            create_test_video(video_path, duration=5.0)
+            cutlist = self._cutlist_with_effects([
+                Effect(type="glitch", start_s=0.5, duration_s=0.5,
+                       params={"intensity": 0.3}),
+                Effect(type="color_pop", start_s=1.0, duration_s=0.5,
+                       params={"saturation": 1.8, "hue_shift": 15.0}),
+            ])
+            config = RenderConfig(output_path=output_path, width=640, height=480,
+                                  video_preset="ultrafast", video_crf=28)
+            result = compile_timeline(cutlist, {"clip_0": video_path}, output_path, config)
+            assert os.path.exists(result)
+            assert os.path.getsize(result) > 0
+        finally:
+            for p in [video_path, output_path]:
+                if os.path.exists(p):
+                    os.unlink(p)
+
+    def test_text_effect_renders(self):
+        if not shutil.which("ffmpeg"):
+            pytest.skip("FFmpeg not available")
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as v:
+            video_path = v.name
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as o:
+            output_path = o.name
+        try:
+            create_test_video(video_path, duration=5.0)
+            cutlist = self._cutlist_with_effects([
+                Effect(type="lower_third", start_s=0.5, duration_s=1.0,
+                       params={"text": "HELLO", "font_size_px": 32}),
+            ])
+            config = RenderConfig(output_path=output_path, width=640, height=480,
+                                  video_preset="ultrafast", video_crf=28)
+            result = compile_timeline(cutlist, {"clip_0": video_path}, output_path, config)
+            assert os.path.exists(result)
+            assert os.path.getsize(result) > 0
+        finally:
+            for p in [video_path, output_path]:
+                if os.path.exists(p):
+                    os.unlink(p)
+
+    def test_unimplemented_effects_warn(self):
+        if not shutil.which("ffmpeg"):
+            pytest.skip("FFmpeg not available")
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as v:
+            video_path = v.name
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as o:
+            output_path = o.name
+        try:
+            create_test_video(video_path, duration=5.0)
+            cutlist = self._cutlist_with_effects([
+                Effect(type="speed_ramp", start_s=0.0, duration_s=1.0,
+                       params={"start_speed": 1.0, "end_speed": 2.0}),
+                Effect(type="freeze_frame", start_s=1.0, duration_s=0.5,
+                       params={"hold_ms": 200}),
+                Effect(type="whoosh_sfx", start_s=2.0, duration_s=0.5, params={}),
+            ])
+            config = RenderConfig(output_path=output_path, width=640, height=480,
+                                  video_preset="ultrafast", video_crf=28)
+            with pytest.warns(UserWarning):
+                result = compile_timeline(cutlist, {"clip_0": video_path}, output_path, config)
+            assert os.path.exists(result)
+            assert os.path.getsize(result) > 0
+        finally:
+            for p in [video_path, output_path]:
+                if os.path.exists(p):
+                    os.unlink(p)
+
+
 class TestRenderEdgeCases:
     def test_empty_cutlist(self):
         cutlist = CutList(

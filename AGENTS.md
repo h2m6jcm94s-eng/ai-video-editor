@@ -520,6 +520,9 @@ Closes #202
 | 2025-06 | Self-hosted LGTM stack | Grafana + Loki + Tempo + Prometheus for logs, traces, metrics |
 | 2025-06 | Frontend structured logger | Batched logger with `/api/log` ingestion and GlitchTip error tracking |
 | 2025-06 | Worker logging unification | `configure_logging(service_name=...)` with Temporal correlation ID binding |
+| 2025-06 | Generative filler clips | Multi-provider generative client (Gemini/Veo preferred, Seedance/Kling fallbacks) for low-confidence slots |
+| 2025-06 | Gemini key format issue | Provided `AQ.*` key returns `ACCESS_TOKEN_TYPE_UNSUPPORTED` with both SDKs; stored in `.env` but provider remains unavailable until key format is clarified |
+| 2025-06 | Style worker trigger | Upload flow now starts `AnalyzeStyleWorkflow` on `style` queue for `reference_video` assets; workflow downloads asset via new `download_reference_video` activity |
 
 ---
 

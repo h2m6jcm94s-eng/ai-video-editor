@@ -3,6 +3,8 @@
 # Commercial SaaS use is prohibited without written permission.
 """Temporal workflow definitions for the AI video editor pipeline."""
 
+import asyncio
+
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 from dataclasses import dataclass
@@ -10,7 +12,7 @@ from typing import List, Dict
 from enum import Enum
 
 with workflow.unsafe.imports_passed_through():
-    from shared_py.models import CutList, BeatGrid, ShotBoundary
+    from shared_py.models import CutList, BeatGrid, ShotBoundary, Slot
 
 
 class RenderStage(str, Enum):
@@ -79,6 +81,55 @@ class VideoRenderWorkflow:
         self._progress = 0
         self._stage = RenderStage.INITIALIZED
 
+    async def _generate_filler_clips_for_low_confidence(
+        self,
+        cutlist: dict,
+        rankings: dict,
+        style_analysis: dict,
+        project_id: str,
+        threshold: float = 0.55,
+    ) -> list:
+        """Generate filler clips for slots whose top ranking score is low."""
+        generated = []
+        tasks = []
+        low_confidence_slots = []
+        aspect_ratio = cutlist.get("globals", {}).get("aspectRatio", "16:9")
+
+        for slot in cutlist.get("slots", []):
+            idx = str(slot.get("index"))
+            scores = rankings.get(idx, [])
+            if not scores:
+                continue
+            top_score = float(scores[0].get("totalScore", scores[0].get("total_score", 0)))
+            if top_score >= threshold:
+                continue
+
+            low_confidence_slots.append(slot)
+            tasks.append(
+                workflow.execute_activity(
+                    "generate_filler_clip",
+                    args=(slot, style_analysis, None, project_id, aspect_ratio),
+                    start_to_close_timeout=600,
+                    retry_policy=RetryPolicy(maximum_attempts=2),
+                )
+            )
+
+        if not tasks:
+            return generated
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for slot, result in zip(low_confidence_slots, results):
+            if isinstance(result, Exception):
+                workflow.logger.warning(
+                    f"Filler generation failed for slot {slot.get('index')}: {result}"
+                )
+                continue
+            if result.get("status") == "succeeded":
+                slot["selectedClipId"] = result["asset_id"]
+                generated.append(result)
+
+        return generated
+
     @workflow.run
     async def run(self, input: VideoRenderInput) -> str:
         # Build per-asset key maps for activities
@@ -127,12 +178,13 @@ class VideoRenderWorkflow:
         # 5. Embed clips
         self._stage = RenderStage.EMBEDDING
         self._progress = 55
-        await workflow.execute_activity(
+        embedding_result = await workflow.execute_activity(
             "embed_user_clips",
             args=(input.clip_asset_ids, input.asset_key_map),
             start_to_close_timeout=300,
             retry_policy=RetryPolicy(maximum_attempts=2),
         )
+        clip_embeddings = embedding_result.get("embeddings") if isinstance(embedding_result, dict) else None
 
         # Compute energy curve from beats (placeholder)
         energy_curve = []
@@ -160,12 +212,22 @@ class VideoRenderWorkflow:
                     "motion_energy": 0.5,
                 }
 
-        await workflow.execute_activity(
+        ranking_result = await workflow.execute_activity(
             "rank_clips_per_slot",
-            args=(cutlist, input.clip_asset_ids, clip_metadata, None),
+            args=(cutlist, input.clip_asset_ids, clip_metadata, clip_embeddings),
             start_to_close_timeout=60,
             retry_policy=RetryPolicy(maximum_attempts=2),
         )
+
+        # Generate filler clips for low-confidence slots.
+        generated_clips = await self._generate_filler_clips_for_low_confidence(
+            cutlist=cutlist,
+            rankings=ranking_result.get("rankings", {}),
+            style_analysis=style,
+            project_id=input.project_id,
+        )
+        for gen in generated_clips:
+            clip_key_map[gen["asset_id"]] = gen["storage_key"]
 
         # If assisted mode, wait for user signal
         if input.mode == "assisted":
@@ -180,9 +242,12 @@ class VideoRenderWorkflow:
         # 8. Render
         self._stage = RenderStage.RENDERING
         self._progress = 85
+        # Include any generated filler clips in the render pool.
+        render_clip_ids = list(clip_key_map.keys())
+
         output_path = await workflow.execute_activity(
             "render_720p",
-            args=(cutlist, input.clip_asset_ids, clip_key_map, style.get("lut_path"), input.song_asset_id, input.asset_key_map),
+            args=(cutlist, render_clip_ids, clip_key_map, style.get("lut_path"), input.song_asset_id, input.asset_key_map),
             start_to_close_timeout=600,
             retry_policy=RetryPolicy(maximum_attempts=2),
         )

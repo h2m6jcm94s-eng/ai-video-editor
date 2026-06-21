@@ -24,7 +24,8 @@ from shared_py.models import Slot, ClipScore
 # Helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
-def make_slot(index=0, shot_type="wide", energy=0.5, duration=2.0):
+def make_slot(index=0, shot_type="wide", energy=0.5, duration=2.0,
+              subject_hint="test", motion_hint="static", required_tags=None):
     return Slot(
         index=index,
         start_s=index * duration,
@@ -32,10 +33,10 @@ def make_slot(index=0, shot_type="wide", energy=0.5, duration=2.0):
         beat_index=index,
         section="intro",
         target_shot_type=shot_type,
-        subject_hint="test",
-        motion_hint="static",
+        subject_hint=subject_hint,
+        motion_hint=motion_hint,
         energy_level=energy,
-        required_tags=[],
+        required_tags=required_tags or [],
         avoid_tags=[],
     )
 
@@ -408,3 +409,67 @@ class TestClipRankEdgeCases:
         }
         rankings = rank_clips_for_slots(slots, clips)
         assert len(rankings[0]) == 1
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Marengo semantic scoring
+# ──────────────────────────────────────────────────────────────────────────────
+
+class FakeMarengoClient:
+    """Stub Marengo client that returns deterministic text embeddings."""
+
+    def __init__(self, available=True, text_embeddings=None):
+        self._available = available
+        self._text_embeddings = text_embeddings or {}
+
+    def available(self):
+        return self._available
+
+    def embed_text(self, text):
+        return self._text_embeddings.get(text)
+
+
+class TestMarengoSemanticScoring:
+    def test_marengo_boosts_matching_clip(self):
+        """When Marengo text/video embeddings align, the matching clip wins."""
+        slots = [make_slot(index=0, shot_type="wide", subject_hint="ocean waves")]
+        clips = {
+            "ocean": make_clip_meta(shot_type="wide"),
+            "city": make_clip_meta(shot_type="wide"),
+        }
+        # Text embedding matches the "ocean" video embedding.
+        embeddings = {
+            "ocean": np.array([1.0, 0.0]),
+            "city": np.array([0.0, 1.0]),
+        }
+        client = FakeMarengoClient(
+            text_embeddings={"wide, ocean waves, static, energy 0.5": np.array([1.0, 0.0])}
+        )
+
+        rankings = rank_clips_for_slots(slots, clips, embeddings, marengo_client=client)
+
+        assert rankings[0][0].clip_id == "ocean"
+        assert rankings[0][0].semantic_score > 0.9
+
+    def test_marengo_unavailable_uses_fallback(self):
+        """When Marengo is unavailable, semantic score stays at the fallback."""
+        slots = [make_slot(index=0, shot_type="wide")]
+        clips = {"C01": make_clip_meta(shot_type="wide")}
+        embeddings = {"C01": np.array([1.0, 0.0])}
+        client = FakeMarengoClient(available=False)
+
+        rankings = rank_clips_for_slots(slots, clips, embeddings, marengo_client=client)
+
+        assert rankings[0][0].semantic_score == pytest.approx(0.7)
+
+    def test_no_video_embeddings_uses_fallback(self):
+        """When clip embeddings are missing, semantic score stays at fallback."""
+        slots = [make_slot(index=0, shot_type="wide")]
+        clips = {"C01": make_clip_meta(shot_type="wide")}
+        client = FakeMarengoClient(
+            text_embeddings={"wide, test, static, energy 0.5": np.array([1.0, 0.0])}
+        )
+
+        rankings = rank_clips_for_slots(slots, clips, {}, marengo_client=client)
+
+        assert rankings[0][0].semantic_score == pytest.approx(0.7)

@@ -193,6 +193,8 @@ class ShotBoundary(BaseModelCamel):
     end_s: float
     is_gradual: bool = False
     confidence: float = 1.0
+    transition_in: str = "hard_cut"
+    transition_out: str = "hard_cut"
 
 
 class BeatSegment(BaseModelCamel):

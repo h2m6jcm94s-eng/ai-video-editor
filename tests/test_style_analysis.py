@@ -60,6 +60,31 @@ class TestSampleFrames:
             sample_frames("/nonexistent/video.mp4", n_samples=10)
 
 
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg not available")
+class TestExtractLut:
+    def test_extracts_cube_from_video(self):
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
+            path = f.name
+        try:
+            create_test_video(path, duration=3.0)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                cube_path, analysis = extract_lut_from_reference(path, tmpdir, strength=0.5)
+                assert cube_path is not None
+                assert os.path.exists(cube_path)
+                assert cube_path.endswith(".cube")
+                assert analysis.lut_extracted is True
+                assert len(analysis.color_palette) > 0
+                assert analysis.lut_storage_key == cube_path
+        finally:
+            os.unlink(path)
+
+    def test_missing_video_raises(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cube_path, analysis = extract_lut_from_reference("/nonexistent/video.mp4", tmpdir)
+            assert cube_path is None
+            assert analysis.lut_extracted is False
+
+
 class TestComputeIoU:
     def test_identical_boxes(self):
         bbox = [[0, 0], [10, 0], [10, 10], [0, 10]]

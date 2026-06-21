@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
 import { db } from "../db";
 import { createPresignedUploadUrl } from "../services/storage";
+import { startAnalyzeStyleWorkflow, startProbeWorkflow } from "../services/temporal";
 
 describe("Upload Routes", () => {
   beforeEach(() => {
@@ -118,6 +119,51 @@ describe("Upload Routes", () => {
     expect(body.asset.sizeBytes).toBe(1024);
   });
 
+  it("POST /api/uploads/:assetId/complete triggers style workflow for reference videos", async () => {
+    const refAsset = { ...mockAsset, type: "reference_video" };
+    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce({ ...refAsset, project: mockProject } as any);
+    vi.mocked(db.update).mockReturnValueOnce({
+      set: vi.fn().mockReturnValueOnce({
+        where: vi.fn().mockReturnValueOnce({
+          returning: vi.fn().mockResolvedValueOnce([{ ...refAsset, sizeBytes: 1024 }]),
+        }),
+      }),
+    } as any);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/uploads/${ASSET_ID}/complete`,
+      payload: { sizeBytes: 1024, etag: '"abc123"' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(startProbeWorkflow).toHaveBeenCalledWith(ASSET_ID, refAsset.storageKey);
+    expect(startAnalyzeStyleWorkflow).toHaveBeenCalledWith({
+      assetId: ASSET_ID,
+      storageKey: refAsset.storageKey,
+    });
+  });
+
+  it("POST /api/uploads/:assetId/complete does not trigger style workflow for clips", async () => {
+    vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce({ ...mockAsset, project: mockProject } as any);
+    vi.mocked(db.update).mockReturnValueOnce({
+      set: vi.fn().mockReturnValueOnce({
+        where: vi.fn().mockReturnValueOnce({
+          returning: vi.fn().mockResolvedValueOnce([{ ...mockAsset, sizeBytes: 1024 }]),
+        }),
+      }),
+    } as any);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/uploads/${ASSET_ID}/complete`,
+      payload: { sizeBytes: 1024, etag: '"abc123"' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(startAnalyzeStyleWorkflow).not.toHaveBeenCalled();
+  });
+
   it("POST /api/uploads/:assetId/complete rejects negative size", async () => {
     const app = await buildApp();
     const res = await app.inject({
@@ -207,7 +253,9 @@ describe("Upload Routes", () => {
     vi.mocked(db.update).mockReturnValueOnce({
       set: vi.fn().mockReturnValueOnce({
         where: vi.fn().mockReturnValueOnce({
-          returning: vi.fn().mockResolvedValueOnce([{ ...mockAsset, durationSec: 30, width: 1920, height: 1080, fps: 30 }]),
+          returning: vi
+            .fn()
+            .mockResolvedValueOnce([{ ...mockAsset, durationSec: 30, width: 1920, height: 1080, fps: 30 }]),
         }),
       }),
     } as any);
