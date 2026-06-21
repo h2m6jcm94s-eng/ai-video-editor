@@ -148,9 +148,32 @@ async def analyze_reference_style(reference_asset_id: str, tier: str, asset_key_
 
 @activity.defn
 async def embed_user_clips(clip_asset_ids: list, asset_key_map: dict) -> dict:
-    """Generate embeddings for user clips."""
-    # TODO: wire to Qdrant / SigLIP-2 when available
-    return {"embedded": len(clip_asset_ids), "status": "skipped"}
+    """Generate Marengo 3.0 embeddings for user clips."""
+    from reason_worker.marengo_client import MarengoClient
+
+    client = MarengoClient()
+    if not client.available():
+        return {
+            "embedded": 0,
+            "status": "skipped",
+            "reason": "marengo_unavailable",
+        }
+
+    embeddings = {}
+    for cid in clip_asset_ids:
+        try:
+            path = _get_asset_path(cid, asset_key_map)
+            emb = client.embed_video_file(path)
+            if emb is not None:
+                embeddings[cid] = emb.tolist()
+        except Exception as e:
+            activity.logger.warning(f"Failed to embed clip {cid}: {e}")
+
+    return {
+        "embedded": len(embeddings),
+        "status": "ready" if embeddings else "skipped",
+        "embeddings": embeddings,
+    }
 
 
 @activity.defn
@@ -203,10 +226,26 @@ async def generate_cutlist_claude(beats: dict, shots: list, style: dict, tier: s
 async def rank_clips_per_slot(cutlist: dict, clip_ids: list, clip_metadata: dict, embeddings: dict = None) -> dict:
     """Rank clips for each slot."""
     from reason_worker.clip_rank import rank_clips_for_slots, select_top_k_per_slot
+    from reason_worker.marengo_client import MarengoClient
     from shared_py.models import Slot, ClipScore
 
     slots = [Slot(**s) for s in cutlist.get("slots", [])]
-    rankings = rank_clips_for_slots(slots, clip_metadata or {}, embeddings)
+
+    # Convert list embeddings back to numpy arrays for the ranker.
+    np_embeddings = None
+    if embeddings:
+        np_embeddings = {
+            cid: np.array(vec, dtype=np.float32)
+            for cid, vec in embeddings.items()
+        }
+
+    client = MarengoClient()
+    rankings = rank_clips_for_slots(
+        slots,
+        clip_metadata or {},
+        np_embeddings,
+        marengo_client=client,
+    )
     top_k = select_top_k_per_slot(rankings, k=3)
 
     return {

@@ -127,12 +127,13 @@ class VideoRenderWorkflow:
         # 5. Embed clips
         self._stage = RenderStage.EMBEDDING
         self._progress = 55
-        await workflow.execute_activity(
+        embedding_result = await workflow.execute_activity(
             "embed_user_clips",
             args=(input.clip_asset_ids, input.asset_key_map),
             start_to_close_timeout=300,
             retry_policy=RetryPolicy(maximum_attempts=2),
         )
+        clip_embeddings = embedding_result.get("embeddings") if isinstance(embedding_result, dict) else None
 
         # Compute energy curve from beats (placeholder)
         energy_curve = []
@@ -162,7 +163,7 @@ class VideoRenderWorkflow:
 
         await workflow.execute_activity(
             "rank_clips_per_slot",
-            args=(cutlist, input.clip_asset_ids, clip_metadata, None),
+            args=(cutlist, input.clip_asset_ids, clip_metadata, clip_embeddings),
             start_to_close_timeout=60,
             retry_policy=RetryPolicy(maximum_attempts=2),
         )
