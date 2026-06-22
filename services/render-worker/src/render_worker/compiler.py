@@ -544,15 +544,23 @@ def compile_timeline(
     temp_dir = tempfile.mkdtemp(prefix="ave_render_")
 
     try:
-        # Copy the system font into the render temp dir up-front so both per-slot
-        # text effects (Stage 1) and global overlays (Stage 2) can reference it
-        # with a relative, colon-free path on Windows.
+        # Copy the system font and LUT into the render temp dir up-front so both
+        # per-slot text effects (Stage 1) and global overlays/LUT (Stage 2) can
+        # reference them with relative, colon-free paths on Windows.
         fontfile = _find_font()
         relative_font = ""
         if fontfile and os.path.exists(fontfile):
             local_font = os.path.join(temp_dir, "font.ttf")
             shutil.copy2(fontfile, local_font)
             relative_font = "font.ttf"
+
+        relative_lut = ""
+        if config.lut_path:
+            lut_path = _safe_path(config.lut_path, must_exist=True)
+            if lut_path and os.path.exists(lut_path):
+                local_lut = os.path.join(temp_dir, "lut" + os.path.splitext(lut_path)[1])
+                shutil.copy2(lut_path, local_lut)
+                relative_lut = os.path.basename(local_lut)
 
         for slot in cutlist.slots:
             clip_id = slot.selected_clip_id
@@ -627,13 +635,12 @@ def compile_timeline(
             current_label = out_label
             current_duration = current_duration + next_slot.duration_s - xfade_duration
 
-        # LUT application if available
-        if config.lut_path and os.path.exists(config.lut_path):
+        # LUT application if available. The LUT file is copied into the render
+        # temp directory so it can be referenced with a relative, colon-free path.
+        if relative_lut:
             lut_label = f"{current_label}_lut"
             filter_parts.append(
-                f"[{current_label}]zscale=transfer=709:range=tv:out_range=pc,"
-                f"lut3d=file={_esc_path(config.lut_path)}:interp=tetrahedral,"
-                f"zscale=range=pc:out_range=tv[{lut_label}]"
+                f"[{current_label}]format=rgb24,lut3d=file={relative_lut}:interp=tetrahedral[{lut_label}]"
             )
             current_label = lut_label
 

@@ -55,4 +55,30 @@ class ProbeAssetWorkflow:
             )
 
         results = await workflow.gather(*futures) if futures else []
+
+        # Phase 3: for reference videos, kick off style analysis as an independent
+        # child workflow once shot boundaries are known. Using PARENT_CLOSE_POLICY_ABANDON
+        # lets the style analysis continue even after this probe workflow finishes.
+        if asset_type == "reference_video":
+            shot_boundaries = []
+            for result in results:
+                if isinstance(result, dict) and "shot_boundaries" in result:
+                    shot_boundaries = result.get("shot_boundaries", [])
+                    break
+
+            await workflow.start_child_workflow(
+                "AnalyzeStyleWorkflow",
+                {
+                    "asset_id": input.asset_id,
+                    "storage_key": input.storage_key,
+                    "project_id": input.project_id or "",
+                    "shot_boundaries": shot_boundaries,
+                    "lut_strength": 0.5,
+                    "text_sample_fps": 5.0,
+                },
+                id=f"style-{input.asset_id}",
+                task_queue="style",
+                parent_close_policy=workflow.ParentClosePolicy.ABANDON,
+            )
+
         return {"probe": probe, "analysis": results}

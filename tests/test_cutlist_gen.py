@@ -510,3 +510,114 @@ class TestCutlistEdgeCases:
         if cutlist.slots:
             last_slot = cutlist.slots[-1]
             assert last_slot.start_s + last_slot.duration_s <= total_duration + 0.01
+
+
+
+class TestShotAndBeatSnapping:
+    """Phase 2: slot starts should snap to shot boundaries and durations quantize to beats."""
+
+    def test_slot_snaps_to_nearby_shot_boundary(self):
+        beats = make_beat_grid(bpm=60)
+        # Shot boundary at 5.0s; a beat exists at 5.0s (60bpm => 1s intervals).
+        shots = [
+            ShotBoundary(start_frame=0, end_frame=150, start_s=0.0, end_s=5.0, is_gradual=False),
+            ShotBoundary(start_frame=150, end_frame=300, start_s=5.0, end_s=10.0, is_gradual=False),
+        ]
+        energy = [0.5] * 12
+        cutlist = generate_cutlist_programmatic(beats, shots, energy, ["wide"], total_duration=10.0)
+
+        # At least one slot should start exactly on a shot boundary (5.0).
+        starts = {round(s.start_s, 2) for s in cutlist.slots}
+        assert 5.0 in starts, f"expected shot boundary 5.0 in starts {starts}"
+
+    def test_slot_duration_lands_on_beat(self):
+        beats = make_beat_grid(bpm=60)
+        shots = [ShotBoundary(start_frame=0, end_frame=300, start_s=0.0, end_s=10.0, is_gradual=False)]
+        energy = [0.5] * 12
+        cutlist = generate_cutlist_programmatic(beats, shots, energy, ["wide"], total_duration=10.0)
+
+        for slot in cutlist.slots:
+            end_s = round(slot.start_s + slot.duration_s, 3)
+            assert any(abs(end_s - round(b, 3)) < 1e-3 for b in beats.beats), (
+                f"slot end {end_s} does not land on a beat"
+            )
+
+    def test_slot_does_not_cross_shot_boundary_end(self):
+        beats = make_beat_grid(bpm=60)
+        shots = [
+            ShotBoundary(start_frame=0, end_frame=150, start_s=0.0, end_s=5.0, is_gradual=False),
+            ShotBoundary(start_frame=150, end_frame=300, start_s=5.0, end_s=10.0, is_gradual=False),
+        ]
+        energy = [0.9] * 12
+        cutlist = generate_cutlist_programmatic(beats, shots, energy, ["wide"], total_duration=10.0)
+
+        for slot in cutlist.slots:
+            end_s = slot.start_s + slot.duration_s
+            shot = next((s for s in shots if s.start_s <= slot.start_s < s.end_s), None)
+            if shot is not None:
+                assert end_s <= shot.end_s + 1e-3, (
+                    f"slot {slot.index} ends at {end_s}, past shot end {shot.end_s}"
+                )
+
+    def test_snapping_preserves_nonzero_duration(self):
+        beats = make_beat_grid(bpm=60)
+        shots = [ShotBoundary(start_frame=0, end_frame=300, start_s=0.0, end_s=10.0, is_gradual=False)]
+        energy = [0.5] * 12
+        cutlist = generate_cutlist_programmatic(beats, shots, energy, ["wide"], total_duration=10.0)
+
+        for slot in cutlist.slots:
+            assert slot.duration_s >= 0.4, f"slot {slot.index} duration collapsed to {slot.duration_s}"
+
+
+
+class TestStyleAnalysisConsumption:
+    """Phase 4: cutlist generation should use style-analysis outputs."""
+
+    def test_detected_transitions_influence_slot_transitions(self):
+        beats = make_beat_grid(bpm=120)
+        shots = make_shots(n=3)
+        energy = [0.6] * 20
+        style = {"detectedTransitions": ["wipe_left", "dissolve", "whip"]}
+        cutlist = generate_cutlist_programmatic(
+            beats, shots, energy, ["wide", "medium", "close_up"], total_duration=10.0, style_analysis=style
+        )
+
+        transitions = [s.transition_in for s in cutlist.slots]
+        assert any(t != "hard_cut" for t in transitions), transitions
+
+    def test_camera_motions_override_motion_hint(self):
+        beats = make_beat_grid(bpm=120)
+        shots = make_shots(n=3)
+        energy = [0.5] * 20
+        style = {"cameraMotions": ["pan_left", "zoom_in", "gimbal"]}
+        cutlist = generate_cutlist_programmatic(
+            beats, shots, energy, ["wide"], total_duration=10.0, style_analysis=style
+        )
+
+        for slot in cutlist.slots:
+            assert slot.motion_hint in ["pan_left", "zoom_in", "gimbal"], slot.motion_hint
+
+    def test_detected_overlays_added_to_cutlist(self):
+        beats = make_beat_grid(bpm=120)
+        shots = make_shots(n=1)
+        energy = [0.5] * 10
+        style = {
+            "detectedOverlays": [
+                {
+                    "text": "SUBSCRIBE",
+                    "startS": 1.0,
+                    "endS": 3.0,
+                    "position": "bottom",
+                    "font": "Inter",
+                    "fontSizePx": 42,
+                    "color": "#FFFFFF",
+                    "stroke": "#000000",
+                    "animation": "fade",
+                }
+            ]
+        }
+        cutlist = generate_cutlist_programmatic(
+            beats, shots, energy, ["wide"], total_duration=10.0, style_analysis=style
+        )
+
+        assert any("SUBSCRIBE" in o.text for o in cutlist.overlays)

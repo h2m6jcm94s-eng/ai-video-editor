@@ -175,4 +175,71 @@ test.describe("E2E render pipeline", () => {
       console.warn("This is a product finding. Fix Pass 5.4 reference pipeline before tagging v0.4.0.");
     }
   });
+
+  test("Scenario C: export preset selection produces the requested output dimensions", async ({ page }) => {
+    // Create project
+    await page.goto("/editor/new");
+    await page.fill('input[id="name"]', "E2E-C-ExportPreset");
+    await page.click('button:has-text("Create Project")');
+
+    // Wait for editor to load
+    await page.waitForURL(/\/editor\/[a-f0-9-]+$/, { timeout: 15_000 });
+
+    // Upload assets
+    await uploadFixture(page, "song", "e2e/fixtures/song.mp3");
+    await uploadFixture(page, "clip", "e2e/fixtures/clip-1.mp4");
+    await uploadFixture(page, "clip", "e2e/fixtures/clip-2.mp4");
+
+    // Wait for ingest spinners to clear
+    await expect(page.locator('[data-state="ingested"]')).toHaveCount(3, { timeout: 180_000 });
+
+    // Open AI Prompt panel and submit a short edit
+    await page.click('button:has-text("AI Prompt")');
+    await page.fill(
+      '[data-testid="prompt-input"]',
+      "Make a 10-second edit using the uploaded clips. Keep it vertical.",
+    );
+    await page.locator('form button[type="submit"]').click();
+    await expect(page.getByText("Applied cutlist").first()).toBeVisible({ timeout: 120_000 });
+
+    // Render with the YouTube 16:9 preset
+    await page.click('button:has-text("Render")');
+    await page.getByRole("combobox").click();
+    await page.getByRole("option", { name: "YouTube 16:9" }).click();
+    await page.click('button:has-text("Start Render")');
+    await expect(page.locator('[data-render-status="complete"]')).toBeVisible({ timeout: 600_000 });
+
+    // Download output
+    const projectRes = await page.request.get("/api/projects?name=E2E-C-ExportPreset");
+    const projectData = await projectRes.json();
+    const projectC = projectData.projects?.[0] || projectData.items?.[0];
+    if (!projectC?.renderAssetId) {
+      throw new Error("Project C has no render asset");
+    }
+
+    const downloadRes = await page.request.get(`/api/uploads/${projectC.renderAssetId}`);
+    const downloadData = await downloadRes.json();
+    const outputUrl = downloadData.asset?.storageUrl;
+    if (!outputUrl) throw new Error("No output URL for project C");
+
+    const outputPath = path.join(OUTPUT_DIR, "output-C.mp4");
+    const videoRes = await page.request.get(outputUrl);
+    await fs.writeFile(outputPath, await videoRes.body());
+
+    // ffprobe assertions
+    const probeResult = await probe(outputPath);
+    expect(probeResult.videoCodec).toBe("h264");
+    expect(probeResult.duration).toBeGreaterThan(0);
+    expect(probeResult.duration).toBeLessThanOrEqual(60);
+    expect(probeResult.width).toBe(1280);
+    expect(probeResult.height).toBe(720);
+    expect(probeResult.sizeBytes).toBeGreaterThan(100_000);
+
+    await writeReport({
+      scenario: "C",
+      outputPath,
+      probe: probeResult,
+      timestamp: new Date().toISOString(),
+    });
+  });
 });

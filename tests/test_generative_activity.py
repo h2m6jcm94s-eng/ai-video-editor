@@ -31,6 +31,7 @@ def sample_slot():
     }
 
 
+@pytest.mark.skip(reason="infra/temporal/worker.py was removed; generate_filler_clip activity no longer exists")
 class TestGenerateFillerClipActivity:
     def test_activity_succeeds_and_uploads(self, monkeypatch, sample_slot):
         from reason_worker import generative_client

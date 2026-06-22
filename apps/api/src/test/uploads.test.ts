@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
 import { db } from "../db";
 import { createPresignedUploadUrl } from "../services/storage";
-import { startAnalyzeStyleWorkflow, startProbeWorkflow } from "../services/temporal";
+import { startProbeWorkflow } from "../services/temporal";
 
 describe("Upload Routes", () => {
   beforeEach(() => {
@@ -119,7 +119,7 @@ describe("Upload Routes", () => {
     expect(body.asset.sizeBytes).toBe(1024);
   });
 
-  it("POST /api/uploads/:assetId/complete triggers style workflow for reference videos", async () => {
+  it("POST /api/uploads/:assetId/complete triggers probe workflow for reference videos", async () => {
     const refAsset = { ...mockAsset, type: "reference_video" };
     vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce({ ...refAsset, project: mockProject } as any);
     vi.mocked(db.update).mockReturnValueOnce({
@@ -138,14 +138,9 @@ describe("Upload Routes", () => {
     });
     expect(res.statusCode).toBe(200);
     expect(startProbeWorkflow).toHaveBeenCalledWith(ASSET_ID, refAsset.storageKey, "reference_video");
-    expect(startAnalyzeStyleWorkflow).toHaveBeenCalledWith({
-      assetId: ASSET_ID,
-      storageKey: refAsset.storageKey,
-      projectId: mockProject.id,
-    });
   });
 
-  it("POST /api/uploads/:assetId/complete does not trigger style workflow for clips", async () => {
+  it("POST /api/uploads/:assetId/complete triggers probe workflow for clips", async () => {
     vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce({ ...mockAsset, project: mockProject } as any);
     vi.mocked(db.update).mockReturnValueOnce({
       set: vi.fn().mockReturnValueOnce({
@@ -162,7 +157,7 @@ describe("Upload Routes", () => {
       payload: { sizeBytes: 1024, etag: '"abc123"' },
     });
     expect(res.statusCode).toBe(200);
-    expect(startAnalyzeStyleWorkflow).not.toHaveBeenCalled();
+    expect(startProbeWorkflow).toHaveBeenCalledWith(ASSET_ID, mockAsset.storageKey, "clip");
   });
 
   it("POST /api/uploads/:assetId/complete rejects negative size", async () => {

@@ -17,8 +17,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "services", "sh
 import warnings
 
 from PIL import Image
-from render_worker.compiler import compile_timeline, render_preview, XFADE_MAP, _get_fontconfig_file
-from shared_py.models import CutList, CutListGlobals, Slot, Overlay, RenderConfig, Effect
+from render_worker.compiler import compile_timeline, render_preview, resolve_render_dimensions, XFADE_MAP, _get_fontconfig_file
+from shared_py.models import CutList, CutListGlobals, Slot, Overlay, RenderConfig, Effect, Subtitle
 
 
 def create_test_video(path: str, duration: float = 5.0, fps: int = 30,
@@ -420,3 +420,220 @@ class TestStyleTierWarnings:
             except ValueError:
                 pass  # clips are absent; warnings are what we care about
         assert not [w for w in caught if "Style tier" in str(w.message)]
+
+    def _base_cutlist_with_clip(self):
+        return CutList(
+            globals=CutListGlobals(
+                total_duration_s=2.0, tempo_bpm=120, time_signature="4/4",
+                energy_curve=[0.5], section_markers=[], aspect_ratio="16:9",
+            ),
+            slots=[Slot(
+                index=0, start_s=0.0, duration_s=2.0, beat_index=0,
+                section="intro", target_shot_type="wide",
+                subject_hint="test", motion_hint="static",
+                energy_level=0.5, required_tags=[], avoid_tags=[],
+                selected_clip_id="clip_0",
+            )],
+        )
+
+    def test_color_grade_warns_on_lut(self):
+        with tempfile.NamedTemporaryFile(suffix=".cube", delete=False) as lf:
+            lut_path = lf.name
+        try:
+            _write_identity_cube(lut_path)
+            cutlist = self._base_cutlist_with_clip()
+            config = RenderConfig(output_path="/tmp/out.mp4", lut_path=lut_path)
+            with pytest.warns(UserWarning, match="does not include LUT"):
+                with pytest.raises(ValueError, match="No valid segments"):
+                    compile_timeline(cutlist, {}, "/tmp/out.mp4", config, style_tier="cuts_only")
+        finally:
+            if os.path.exists(lut_path):
+                os.unlink(lut_path)
+
+    def test_with_text_warns_on_subtitle(self):
+        cutlist = self._base_cutlist_with_clip()
+        cutlist.subtitles = [Subtitle(id="sub-1", text="Hi", start_s=0.0, end_s=1.0)]
+        config = RenderConfig(output_path="/tmp/out.mp4")
+        with pytest.warns(UserWarning, match="does not include subtitles"):
+            with pytest.raises(ValueError, match="No valid segments"):
+                compile_timeline(cutlist, {}, "/tmp/out.mp4", config, style_tier="color_grade")
+
+
+
+def _video_dimensions(path: str) -> tuple[int, int]:
+    """Return (width, height) for a video file using ffprobe."""
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=s=x:p=0",
+            path,
+        ],
+        check=True, capture_output=True, text=True,
+    )
+    width, height = result.stdout.strip().split("x")
+    return int(width), int(height)
+
+
+def _write_identity_cube(path: str, size: int = 2) -> None:
+    """Write a minimal valid 3D LUT in Adobe .cube format."""
+    with open(path, "w", encoding="utf-8") as f:
+        f.write('TITLE "identity"\n')
+        f.write(f"LUT_3D_SIZE {size}\n")
+        f.write("DOMAIN_MIN 0.0 0.0 0.0\n")
+        f.write("DOMAIN_MAX 1.0 1.0 1.0\n")
+        step = 1.0 / (size - 1) if size > 1 else 0.0
+        for b in range(size):
+            for g in range(size):
+                for r in range(size):
+                    f.write(f"{r * step:.6f} {g * step:.6f} {b * step:.6f}\n")
+
+
+class TestResolveRenderDimensions:
+    def test_all_export_presets(self):
+        expected = {
+            "youtube_16_9": (1280, 720),
+            "reels_9_16": (720, 1280),
+            "tiktok_9_16": (720, 1280),
+            "square_1_1": (720, 720),
+        }
+        for preset, dims in expected.items():
+            assert resolve_render_dimensions(preset, None) == dims
+
+    def test_preset_wins_over_aspect_ratio(self):
+        assert resolve_render_dimensions("youtube_16_9", "9:16") == (1280, 720)
+
+    def test_aspect_ratio_fallbacks(self):
+        assert resolve_render_dimensions(None, "16:9") == (1280, 720)
+        assert resolve_render_dimensions(None, "9:16") == (720, 1280)
+        assert resolve_render_dimensions(None, "4:5") == (720, 900)
+        assert resolve_render_dimensions(None, "1:1") == (720, 720)
+
+    def test_unknown_values_fallback_to_vertical(self):
+        assert resolve_render_dimensions("unknown_preset", "unknown_ratio") == (720, 1280)
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg not available")
+class TestExportPresetDimensions:
+    def _compile_preset(self, preset: str):
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as vf:
+            video_path = vf.name
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as of:
+            output_path = of.name
+        try:
+            create_test_video(video_path, duration=3.0)
+            cutlist = CutList(
+                globals=CutListGlobals(
+                    total_duration_s=2.0, tempo_bpm=120, time_signature="4/4",
+                    energy_curve=[0.5], section_markers=[], aspect_ratio="16:9",
+                ),
+                slots=[Slot(
+                    index=0, start_s=0.0, duration_s=2.0, beat_index=0,
+                    section="intro", target_shot_type="wide",
+                    subject_hint="test", motion_hint="static",
+                    energy_level=0.5, required_tags=[], avoid_tags=[],
+                    selected_clip_id="clip_0",
+                )],
+            )
+            width, height = resolve_render_dimensions(preset, None)
+            config = RenderConfig(
+                output_path=output_path, width=width, height=height,
+                video_preset="ultrafast", video_crf=28,
+            )
+            result = compile_timeline(cutlist, {"clip_0": video_path}, output_path, config)
+            assert os.path.exists(result)
+            assert _video_dimensions(result) == (width, height)
+        finally:
+            for p in [video_path, output_path]:
+                if os.path.exists(p):
+                    os.unlink(p)
+
+    def test_compile_youtube_16_9(self):
+        self._compile_preset("youtube_16_9")
+
+    def test_compile_reels_9_16(self):
+        self._compile_preset("reels_9_16")
+
+    def test_compile_tiktok_9_16(self):
+        self._compile_preset("tiktok_9_16")
+
+    def test_compile_square_1_1(self):
+        self._compile_preset("square_1_1")
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg not available")
+class TestSubtitleBurnIn:
+    def test_subtitle_renders(self):
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as vf:
+            video_path = vf.name
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as of:
+            output_path = of.name
+        try:
+            create_test_video(video_path, duration=3.0)
+            cutlist = CutList(
+                globals=CutListGlobals(
+                    total_duration_s=2.0, tempo_bpm=120, time_signature="4/4",
+                    energy_curve=[0.5], section_markers=[], aspect_ratio="16:9",
+                ),
+                slots=[Slot(
+                    index=0, start_s=0.0, duration_s=2.0, beat_index=0,
+                    section="intro", target_shot_type="wide",
+                    subject_hint="test", motion_hint="static",
+                    energy_level=0.5, required_tags=[], avoid_tags=[],
+                    selected_clip_id="clip_0",
+                )],
+                subtitles=[Subtitle(
+                    id="sub-1", text="Hello World", start_s=0.2, end_s=1.0,
+                )],
+            )
+            config = RenderConfig(
+                output_path=output_path, width=640, height=480,
+                video_preset="ultrafast", video_crf=28,
+            )
+            result = compile_timeline(cutlist, {"clip_0": video_path}, output_path, config)
+            assert os.path.exists(result)
+            assert os.path.getsize(result) > 0
+        finally:
+            for p in [video_path, output_path]:
+                if os.path.exists(p):
+                    os.unlink(p)
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg not available")
+class TestLUTApplication:
+    def test_identity_lut_renders(self):
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as vf:
+            video_path = vf.name
+        with tempfile.NamedTemporaryFile(suffix=".cube", delete=False) as lf:
+            lut_path = lf.name
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as of:
+            output_path = of.name
+        try:
+            create_test_video(video_path, duration=3.0)
+            _write_identity_cube(lut_path)
+            cutlist = CutList(
+                globals=CutListGlobals(
+                    total_duration_s=2.0, tempo_bpm=120, time_signature="4/4",
+                    energy_curve=[0.5], section_markers=[], aspect_ratio="16:9",
+                ),
+                slots=[Slot(
+                    index=0, start_s=0.0, duration_s=2.0, beat_index=0,
+                    section="intro", target_shot_type="wide",
+                    subject_hint="test", motion_hint="static",
+                    energy_level=0.5, required_tags=[], avoid_tags=[],
+                    selected_clip_id="clip_0",
+                )],
+            )
+            config = RenderConfig(
+                output_path=output_path, width=640, height=480,
+                video_preset="ultrafast", video_crf=28,
+                lut_path=lut_path,
+            )
+            result = compile_timeline(cutlist, {"clip_0": video_path}, output_path, config)
+            assert os.path.exists(result)
+            assert os.path.getsize(result) > 0
+        finally:
+            for p in [video_path, lut_path, output_path]:
+                if os.path.exists(p):
+                    os.unlink(p)

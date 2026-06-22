@@ -169,3 +169,61 @@ class TestFullPipeline:
         confidence = compute_confidence(rankings)
         assert confidence[0] < 1.0
         assert confidence[0] > 0.0
+
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg not available")
+class TestRenderability:
+    """Phase 5: end-to-end check that a generated cutlist can actually compile."""
+
+    def test_generated_cutlist_compiles_without_empty_slots(self):
+        beat_grid = BeatGrid(
+            bpm=120.0,
+            time_signature="4/4",
+            beats=[0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0],
+            beat_positions=[1, 2, 3, 4] * 3,
+            segments=[BeatSegment(start=0, end=5, label="intro")],
+            downbeats=[0.0, 2.0, 4.0],
+        )
+        shots = [
+            ShotBoundary(start_s=0.0, end_s=2.5, start_frame=0, end_frame=75),
+            ShotBoundary(start_s=2.5, end_s=5.0, start_frame=75, end_frame=150),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            clip_path = os.path.join(tmpdir, "clip.mp4")
+            song_path = os.path.join(tmpdir, "song.wav")
+            output_path = os.path.join(tmpdir, "output.mp4")
+            create_test_video(clip_path, duration=5.0, resolution=(720, 1280), with_audio=False)
+            subprocess.run(
+                ["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=5",
+                 "-ar", "44100", song_path],
+                check=True, capture_output=True,
+            )
+
+            cutlist = generate_cutlist_programmatic(
+                beat_grid, shots, [0.5] * 5, ["wide", "medium", "close_up"], total_duration=5.0
+            )
+            assert cutlist.slots, "cutlist produced no slots"
+
+            # Phase 1 guarantee: even a single clip must fill every slot.
+            clip_metadata = {
+                "clip_0": {"shot_type": "wide", "duration_sec": 5.0, "aesthetic_score": 0.6, "motion_energy": 0.5},
+            }
+            rankings = rank_clips_for_slots(cutlist.slots, clip_metadata, fallback_policy="round_robin")
+            for slot in cutlist.slots:
+                scores = rankings.get(slot.index, [])
+                assert scores, f"slot {slot.index} received no ranking"
+                slot.selected_clip_id = scores[0].clip_id
+
+            config = RenderConfig(
+                output_path=output_path,
+                width=720,
+                height=1280,
+                fps=30.0,
+                song_path=song_path,
+            )
+            compile_timeline(cutlist, {"clip_0": clip_path}, output_path, config, style_tier="full_remix")
+
+            assert os.path.exists(output_path), "render output was not created"
+            assert os.path.getsize(output_path) > 0, "render output is empty"

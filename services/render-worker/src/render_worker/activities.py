@@ -98,20 +98,21 @@ async def compile_render(
                 lut_path = None
 
     # Download segmentation masks and map them by the clip they apply to.
+    # Values in mask_source_map are R2 storage keys (set by the API route).
     mask_paths: Dict[str, str] = {}
     mask_source_map = mask_source_map or {}
-    for clip_id, mask_asset_id in mask_source_map.items():
-        if clip_id not in local_paths or not mask_asset_id:
+    for clip_id, mask_storage_key in mask_source_map.items():
+        if clip_id not in local_paths or not mask_storage_key:
             continue
         try:
             ext = ".png"
             mask_path = os.path.join(
                 tempfile.gettempdir(),
-                f"ave_mask_{mask_asset_id}_{_activity_run_id()}{ext}",
+                f"ave_mask_{clip_id}_{_activity_run_id()}{ext}",
             )
-            mask_paths[clip_id] = download_asset(mask_asset_id, mask_path)
+            mask_paths[clip_id] = download_asset(mask_storage_key, mask_path)
         except Exception as e:
-            activity.logger.warning(f"Failed to download mask {mask_asset_id} for clip {clip_id}: {e}")
+            activity.logger.warning(f"Failed to download mask {mask_storage_key} for clip {clip_id}: {e}")
 
     # Resolve output dimensions from export preset or cut-list aspect ratio.
     width, height = resolve_render_dimensions(

@@ -32,6 +32,58 @@ type StartRenderResult =
   | { ok: true; job: typeof renders.$inferSelect; project: typeof projects.$inferSelect }
   | { ok: false; status: number; message: string; code: string; extra?: Record<string, unknown> };
 
+export interface AssetMaskRow {
+  id: string;
+  storageKey: string;
+  metadata?: unknown;
+}
+
+export interface MaskRowsInput {
+  id: string;
+  storageKey: string;
+}
+
+/**
+ * Collect mask asset IDs referenced by source assets (reference or clips).
+ * Returns the first mask for each source asset and the full list of mask IDs.
+ */
+export function collectMaskAssetIds(assetRows: AssetMaskRow[]): {
+  maskAssetIdMap: Record<string, string>;
+  maskAssetIds: string[];
+} {
+  const maskAssetIdMap: Record<string, string> = {};
+  const maskAssetIds: string[] = [];
+  for (const row of assetRows) {
+    const metadata = (row.metadata as Record<string, unknown> | null) ?? {};
+    const segmentation = (metadata.segmentation as Record<string, unknown> | null) ?? {};
+    const ids = (segmentation.maskAssetIds as string[] | undefined) ?? [];
+    if (ids.length > 0) {
+      maskAssetIdMap[row.id] = ids[0];
+      maskAssetIds.push(...ids);
+    }
+  }
+  return { maskAssetIdMap, maskAssetIds };
+}
+
+/**
+ * Build the mask source map passed to the render worker.
+ * Keys are source asset IDs; values are the corresponding mask R2 storage keys.
+ */
+export function buildMaskSourceMap(
+  maskAssetIdMap: Record<string, string>,
+  maskRows: MaskRowsInput[],
+): Record<string, string> {
+  const maskStorageKeyMap = new Map(maskRows.map((row) => [row.id, row.storageKey]));
+  const maskSourceMap: Record<string, string> = {};
+  for (const [sourceAssetId, maskAssetId] of Object.entries(maskAssetIdMap)) {
+    const storageKey = maskStorageKeyMap.get(maskAssetId);
+    if (storageKey) {
+      maskSourceMap[sourceAssetId] = storageKey;
+    }
+  }
+  return maskSourceMap;
+}
+
 async function startRenderAtomic(
   projectId: string,
   userId: string,
@@ -168,17 +220,7 @@ export async function renderRoutes(app: FastifyInstance) {
       // Collect segmentation masks from any project asset (reference or clips).
       // For each source asset we keep the first mask so the compiler knows which
       // matte belongs to which slot.
-      const maskSourceMap: Record<string, string> = {};
-      const maskAssetIds: string[] = [];
-      for (const row of assetRows) {
-        const metadata = (row.metadata as Record<string, unknown> | null) ?? {};
-        const segmentation = (metadata.segmentation as Record<string, unknown> | null) ?? {};
-        const ids = (segmentation.maskAssetIds as string[] | undefined) ?? [];
-        if (ids.length > 0) {
-          maskSourceMap[row.id] = ids[0];
-          maskAssetIds.push(...ids);
-        }
-      }
+      const { maskAssetIdMap, maskAssetIds } = collectMaskAssetIds(assetRows);
 
       const maskRows =
         (maskAssetIds.length
@@ -187,6 +229,10 @@ export async function renderRoutes(app: FastifyInstance) {
               columns: { id: true, storageKey: true },
             })
           : []) ?? [];
+
+      // The render compiler expects mask_source_map values to be R2 storage keys,
+      // not asset IDs, because it downloads them directly from object storage.
+      const maskSourceMap = buildMaskSourceMap(maskAssetIdMap, maskRows);
 
       const assetKeyMap: Record<string, string> = {};
       for (const row of [...assetRows, ...maskRows]) {

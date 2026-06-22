@@ -20,7 +20,7 @@ import {
   headObject,
   presignUploadPart,
 } from "../services/storage";
-import { startAnalyzeStyleWorkflow, startProbeWorkflow } from "../services/temporal";
+import { startProbeWorkflow } from "../services/temporal";
 
 function normalizeClipAssetIds(value: unknown): string[] {
   if (Array.isArray(value)) return value as string[];
@@ -176,15 +176,6 @@ export async function uploadRoutes(app: FastifyInstance) {
       startProbeWorkflow(asset.id, asset.storageKey, asset.type).catch((e) =>
         request.log.error({ err: e, assetId }, "probe trigger failed"),
       );
-    }
-
-    // Trigger richer style analysis for reference videos (fire-and-forget)
-    if (asset.type === "reference_video") {
-      startAnalyzeStyleWorkflow({
-        assetId: asset.id,
-        storageKey: asset.storageKey,
-        projectId: asset.projectId,
-      }).catch((e) => request.log.error({ err: e, assetId }, "style analysis trigger failed"));
     }
 
     await attachAssetToProject(asset);
@@ -349,15 +340,6 @@ export async function uploadRoutes(app: FastifyInstance) {
         startProbeWorkflow(asset.id, asset.storageKey).catch((e) =>
           request.log.error({ err: e, assetId: asset.id }, "probe trigger failed"),
         );
-      }
-
-      // Trigger richer style analysis for reference videos (fire-and-forget)
-      if (asset.type === "reference_video") {
-        startAnalyzeStyleWorkflow({
-          assetId: asset.id,
-          storageKey: asset.storageKey,
-          projectId: asset.projectId,
-        }).catch((e) => request.log.error({ err: e, assetId: asset.id }, "style analysis trigger failed"));
       }
 
       await attachAssetToProject(asset);

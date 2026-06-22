@@ -102,7 +102,7 @@ describe("Render Routes", () => {
     expect(vi.mocked(startRenderWorkflow)).toHaveBeenCalledWith(expect.objectContaining({ styleAnalysis }));
   });
 
-  it("POST /api/renders passes segmentation mask IDs to workflow", async () => {
+  it("POST /api/renders passes segmentation mask storage keys to workflow", async () => {
     const maskId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
     const referenceAsset = {
       id: mockProject.referenceAssetId,
@@ -144,7 +144,7 @@ describe("Render Routes", () => {
     expect(vi.mocked(startRenderWorkflow)).toHaveBeenCalledWith(
       expect.objectContaining({
         maskAssetIds: [maskId],
-        maskSourceMap: { [mockProject.referenceAssetId]: maskId },
+        maskSourceMap: { [mockProject.referenceAssetId]: maskAsset.storageKey },
         assetKeyMap: expect.objectContaining({
           [mockProject.referenceAssetId]: referenceAsset.storageKey,
           [maskId]: maskAsset.storageKey,

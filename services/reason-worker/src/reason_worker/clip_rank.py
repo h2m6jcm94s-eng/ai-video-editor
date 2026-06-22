@@ -50,11 +50,56 @@ def _semantic_score(
     return 0.7
 
 
+def _score_clip(
+    slot: Slot,
+    clip_id: str,
+    meta: dict,
+    embeddings: Dict[str, np.ndarray],
+    slot_embeddings: Dict[int, np.ndarray],
+    chosen_embeddings: List[np.ndarray],
+) -> ClipScore:
+    """Compute a single ClipScore for a slot/clip pair."""
+    semantic = _semantic_score(slot, clip_id, embeddings, slot_embeddings)
+    shot_type_score = 1.0 if meta.get("shot_type") == slot.target_shot_type else 0.3
+    aesthetic = meta.get("aesthetic_score", 0.5)
+    motion_score = 1.0 - abs(meta.get("motion_energy", 0.5) - slot.energy_level)
+    clip_dur = meta.get("duration_sec", 5.0)
+    duration_diff = abs(clip_dur - slot.duration_s)
+    duration_score = np.exp(-(duration_diff / max(slot.duration_s, 0.1)) ** 2 / 0.5)
+
+    diversity = 0.0
+    if embeddings and clip_id in embeddings and chosen_embeddings:
+        emb = embeddings[clip_id]
+        similarities = [float(_cosine_similarity(emb, ce)) for ce in chosen_embeddings]
+        diversity = max(similarities) if similarities else 0.0
+
+    total = (
+        0.40 * semantic
+        + 0.20 * shot_type_score
+        + 0.15 * aesthetic
+        + 0.15 * motion_score
+        + 0.10 * duration_score
+        - 0.25 * diversity
+    )
+
+    return ClipScore(
+        clip_id=clip_id,
+        semantic_score=semantic,
+        shot_type_score=shot_type_score,
+        aesthetic_score=aesthetic,
+        motion_score=motion_score,
+        duration_score=duration_score,
+        diversity_penalty=diversity,
+        total_score=total,
+    )
+
+
 def rank_clips_for_slots(
     slots: List[Slot],
     clip_metadata: Dict[str, dict],
     embeddings: Dict[str, np.ndarray] = None,
     marengo_client=None,
+    fallback_policy: str = "round_robin",
 ) -> Dict[int, List[ClipScore]]:
     """Rank clips for each slot using weighted scoring.
 
@@ -66,6 +111,10 @@ def rank_clips_for_slots(
         marengo_client: Optional ``MarengoClient`` for generating slot text
             embeddings. When provided and available, semantic scores become
             text-to-video cosine similarities instead of the default heuristic.
+        fallback_policy: How to fill slots that receive no ranking. One of
+            ``round_robin`` (cycle through available clips) or ``best_available``
+            (reuse the globally highest-scoring clip). Empty rankings are left
+            untouched when ``clip_metadata`` is empty.
     """
     embeddings = embeddings or {}
     rankings = {}
@@ -82,53 +131,10 @@ def rank_clips_for_slots(
                 slot_embeddings[slot.index] = emb
 
     for slot in slots:
-        scores = []
-        for clip_id, meta in clip_metadata.items():
-            # Semantic score: real cosine similarity when Marengo is wired.
-            semantic = _semantic_score(slot, clip_id, embeddings, slot_embeddings)
-
-            # Shot type match
-            shot_type_score = 1.0 if meta.get("shot_type") == slot.target_shot_type else 0.3
-
-            # Aesthetic score (placeholder)
-            aesthetic = meta.get("aesthetic_score", 0.5)
-
-            # Motion score
-            motion_score = 1.0 - abs(meta.get("motion_energy", 0.5) - slot.energy_level)
-
-            # Duration score
-            clip_dur = meta.get("duration_sec", 5.0)
-            duration_diff = abs(clip_dur - slot.duration_s)
-            duration_score = np.exp(-(duration_diff / max(slot.duration_s, 0.1)) ** 2 / 0.5)
-
-            # Diversity penalty
-            diversity = 0.0
-            if embeddings and clip_id in embeddings and chosen_embeddings:
-                emb = embeddings[clip_id]
-                similarities = []
-                for ce in chosen_embeddings:
-                    similarities.append(float(_cosine_similarity(emb, ce)))
-                diversity = max(similarities) if similarities else 0.0
-
-            total = (
-                0.40 * semantic
-                + 0.20 * shot_type_score
-                + 0.15 * aesthetic
-                + 0.15 * motion_score
-                + 0.10 * duration_score
-                - 0.25 * diversity
-            )
-
-            scores.append(ClipScore(
-                clip_id=clip_id,
-                semantic_score=semantic,
-                shot_type_score=shot_type_score,
-                aesthetic_score=aesthetic,
-                motion_score=motion_score,
-                duration_score=duration_score,
-                diversity_penalty=diversity,
-                total_score=total,
-            ))
+        scores = [
+            _score_clip(slot, clip_id, meta, embeddings, slot_embeddings, chosen_embeddings)
+            for clip_id, meta in clip_metadata.items()
+        ]
 
         # Sort by total score descending
         scores.sort(key=lambda x: x.total_score, reverse=True)
@@ -140,6 +146,28 @@ def rank_clips_for_slots(
             chosen_clip_ids.append(top.clip_id)
             if embeddings and top.clip_id in embeddings:
                 chosen_embeddings.append(embeddings[top.clip_id])
+
+    # Fallback: ensure no slot is left without at least one candidate when clips exist.
+    if clip_metadata:
+        available_clip_ids = list(clip_metadata.keys())
+        for slot in slots:
+            if rankings.get(slot.index):
+                continue
+            if fallback_policy == "round_robin":
+                fallback_id = available_clip_ids[slot.index % len(available_clip_ids)]
+            elif fallback_policy == "best_available":
+                all_scores = [s for scores in rankings.values() for s in scores]
+                if all_scores:
+                    fallback_id = max(all_scores, key=lambda s: s.total_score).clip_id
+                else:
+                    fallback_id = available_clip_ids[0]
+            else:
+                continue
+            meta = clip_metadata[fallback_id]
+            fallback_score = _score_clip(
+                slot, fallback_id, meta, embeddings, slot_embeddings, chosen_embeddings
+            )
+            rankings[slot.index] = [fallback_score]
 
     return rankings
 

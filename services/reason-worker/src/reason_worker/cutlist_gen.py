@@ -5,7 +5,7 @@
 
 import json
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 # Add shared-py to path
 import sys
@@ -107,6 +107,94 @@ CUTLIST_SCHEMA = {
 }
 
 
+def _snap_time_to_shot_boundary(time_s: float, shot_boundaries: List[ShotBoundary], tolerance: float = 0.25) -> float:
+    """Return the nearest shot-boundary start within ``tolerance`` seconds."""
+    best = None
+    best_dist = tolerance
+    for shot in shot_boundaries:
+        dist = abs(shot.start_s - time_s)
+        if dist < best_dist:
+            best_dist = dist
+            best = shot.start_s
+    return best if best is not None else time_s
+
+
+def _next_beat_at_or_after(time_s: float, beats: List[float], eps: float = 1e-4) -> float:
+    for beat in beats:
+        if beat + eps >= time_s:
+            return beat
+    return beats[-1] if beats else time_s
+
+
+def _shot_for_time(time_s: float, shot_boundaries: List[ShotBoundary]) -> Optional[ShotBoundary]:
+    for shot in shot_boundaries:
+        if shot.start_s <= time_s < shot.end_s:
+            return shot
+    return shot_boundaries[-1] if shot_boundaries else None
+
+
+def _snap_slots_to_shots_and_beats(
+    slots: List[Slot],
+    shot_boundaries: List[ShotBoundary],
+    beat_grid: BeatGrid,
+    content_end: float,
+) -> None:
+    """Snap slot starts to the nearest shot boundary, then quantize duration to beats."""
+    if not slots or not beat_grid.beats:
+        return
+
+    beats = beat_grid.beats
+    beat_interval = 60.0 / beat_grid.bpm if beat_grid.bpm else 0.5
+
+    for slot in slots:
+        new_start = _snap_time_to_shot_boundary(slot.start_s, shot_boundaries)
+
+        # Ensure we land on a beat grid line if the boundary moved us off it.
+        closest_beat = min(beats, key=lambda b: abs(b - new_start))
+        if abs(closest_beat - new_start) < 1e-3:
+            new_start = closest_beat
+
+        # Find the first beat that is strictly after the new start.
+        next_beat = _next_beat_at_or_after(new_start + 1e-4, beats)
+        duration = next_beat - new_start
+
+        # Clamp duration to the end of the current shot and the content.
+        shot = _shot_for_time(new_start, shot_boundaries)
+        max_end = content_end
+        if shot is not None:
+            max_end = min(max_end, shot.end_s)
+
+        # Extend by whole beat intervals while we stay inside the shot and below 2.5s.
+        while (
+            new_start + duration + beat_interval <= max_end + 1e-4
+            and duration + beat_interval <= 2.5
+        ):
+            duration += beat_interval
+
+        duration = min(duration, max_end - new_start)
+        duration = max(duration, beat_interval)
+
+        slot.start_s = round(new_start, 3)
+        slot.duration_s = round(duration, 3)
+
+        # Update beat_index to reflect the new start time.
+        for i, beat in enumerate(beats):
+            if abs(beat - slot.start_s) < 1e-3:
+                slot.beat_index = i
+                break
+
+        # Keep effects inside the adjusted slot bounds.
+        for effect in slot.effects:
+            if effect.start_s < slot.start_s:
+                effect.start_s = slot.start_s
+            max_dur = slot.start_s + slot.duration_s - effect.start_s
+            effect.duration_s = max(0.0, min(effect.duration_s, max_dur))
+
+    # Final safety clamp on the last slot.
+    if slots:
+        slots[-1].duration_s = min(slots[-1].duration_s, content_end - slots[-1].start_s)
+
+
 def generate_cutlist(
     beat_grid: BeatGrid,
     shot_boundaries: List[ShotBoundary],
@@ -127,7 +215,7 @@ def generate_cutlist(
     for name in names:
         if name == "programmatic":
             return generate_cutlist_programmatic(
-                beat_grid, shot_boundaries, energy_curve, available_shot_types, total_duration
+                beat_grid, shot_boundaries, energy_curve, available_shot_types, total_duration, style_analysis
             )
 
         try:
@@ -142,7 +230,7 @@ def generate_cutlist(
 
     logger.warning("All AI providers exhausted, falling back to programmatic")
     return generate_cutlist_programmatic(
-        beat_grid, shot_boundaries, energy_curve, available_shot_types, total_duration
+        beat_grid, shot_boundaries, energy_curve, available_shot_types, total_duration, style_analysis
     )
 
 
@@ -152,8 +240,26 @@ def generate_cutlist_programmatic(
     energy_curve: List[float],
     available_shot_types: List[str],
     total_duration: float = 30.0,
+    style_analysis: Optional[Dict[str, Any]] = None,
 ) -> CutList:
     """Generate a cut-list programmatically without LLM."""
+    style_analysis = style_analysis or {}
+    detected_transitions = (
+        style_analysis.get("detectedTransitions")
+        or style_analysis.get("detected_transitions")
+        or []
+    )
+    camera_motions = (
+        style_analysis.get("cameraMotions")
+        or style_analysis.get("camera_motions")
+        or []
+    )
+    detected_overlays = (
+        style_analysis.get("detectedOverlays")
+        or style_analysis.get("detected_overlays")
+        or []
+    )
+
     # Bound the cutlist to the actual available shot content, not an arbitrary
     # total_duration that may exceed the source clips.
     max_shot_end = max((s.end_s for s in shot_boundaries), default=total_duration)
@@ -209,6 +315,9 @@ def generate_cutlist_programmatic(
         shot_rotation += 1
 
         transition_in = "hard_cut"
+        if detected_transitions and energy > 0.4:
+            transition_in = detected_transitions[len(slots) % len(detected_transitions)]
+
         transition_out = "hard_cut"
 
         next_section = "intro"
@@ -222,6 +331,8 @@ def generate_cutlist_programmatic(
             transition_out = "flash"
         elif is_downbeat and energy > 0.6:
             transition_out = "dissolve"
+        elif detected_transitions and transition_out == "hard_cut" and energy > 0.5:
+            transition_out = detected_transitions[(len(slots) + 1) % len(detected_transitions)]
 
         # Build effects for this slot
         effects = []
@@ -247,6 +358,11 @@ def generate_cutlist_programmatic(
                 params={"intensity": 0.15},
             ))
 
+        if camera_motions:
+            motion_hint = camera_motions[len(slots) % len(camera_motions)]
+        else:
+            motion_hint = "static" if energy < 0.3 else "handheld" if energy > 0.8 else "gimbal"
+
         slot = Slot(
             index=len(slots),
             start_s=beat_time,
@@ -257,7 +373,7 @@ def generate_cutlist_programmatic(
             transition_out=transition_out,
             target_shot_type=target,
             subject_hint=f"{section} section, energy {energy:.1f}",
-            motion_hint="static" if energy < 0.3 else "handheld" if energy > 0.8 else "gimbal",
+            motion_hint=motion_hint,
             energy_level=energy,
             required_tags=[],
             avoid_tags=[],
@@ -290,6 +406,10 @@ def generate_cutlist_programmatic(
 
     if slots:
         slots[-1].duration_s = min(slots[-1].duration_s, content_end - slots[-1].start_s)
+
+    # Phase 2: snap slot starts to reference shot boundaries and re-quantize
+    # durations so clip boundaries land on musical beats.
+    _snap_slots_to_shots_and_beats(slots, shot_boundaries, beat_grid, content_end)
 
     # Overlays must not extend past the actual rendered content.
     actual_content_end = max(s.start_s + s.duration_s for s in slots) if slots else content_end
@@ -333,6 +453,23 @@ def generate_cutlist_programmatic(
             stroke="#000000",
             animation="fade",
         ))
+
+    # Add detected reference overlays (e.g., text/titles from the source video).
+    for overlay in detected_overlays:
+        if isinstance(overlay, Overlay):
+            overlays.append(overlay)
+        elif isinstance(overlay, dict):
+            overlays.append(Overlay(
+                text=overlay.get("text", ""),
+                start_s=overlay.get("startS") or overlay.get("start_s", 0.0),
+                end_s=overlay.get("endS") or overlay.get("end_s", actual_content_end),
+                position=overlay.get("position", "center"),
+                font=overlay.get("font") or overlay.get("fontFamily", "Inter"),
+                font_size_px=overlay.get("fontSizePx") or overlay.get("font_size_px", 48),
+                color=overlay.get("color", "#FFFFFF"),
+                stroke=overlay.get("stroke", "#000000"),
+                animation=overlay.get("animation", "fade"),
+            ))
 
     # Clamp all overlays to actual content bounds
     for overlay in overlays:

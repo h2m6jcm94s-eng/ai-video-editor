@@ -161,8 +161,16 @@ async def rank_clips_activity(
     cutlist_raw: dict,
     clip_asset_ids: List[str],
     clip_metadata: Dict[str, dict],
+    fallback_policy: str = "round_robin",
 ) -> dict:
-    """Rank user clips for each slot in the cutlist."""
+    """Rank user clips for each slot in the cutlist.
+
+    Falls back to ``fallback_policy`` if a slot receives no ranking, so the
+    generated cutlist is always renderable as long as at least one clip exists.
+    """
+    if not clip_asset_ids:
+        raise ValueError("MISSING_CLIPS: at least one clip is required to generate a renderable cutlist")
+
     cutlist = CutList(**cutlist_raw)
 
     # Ensure every clip has a metadata entry with sensible defaults.
@@ -176,7 +184,11 @@ async def rank_clips_activity(
             "duration_sec": meta.get("durationSec") or meta.get("duration_sec") or 5.0,
         }
 
-    rankings = rank_clips_for_slots(cutlist.slots, populated_metadata)
+    rankings = rank_clips_for_slots(
+        cutlist.slots,
+        populated_metadata,
+        fallback_policy=fallback_policy,
+    )
 
     for slot in cutlist.slots:
         scores = rankings.get(slot.index, [])

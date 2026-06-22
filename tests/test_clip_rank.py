@@ -473,3 +473,48 @@ class TestMarengoSemanticScoring:
         rankings = rank_clips_for_slots(slots, clips, {}, marengo_client=client)
 
         assert rankings[0][0].semantic_score == pytest.approx(0.7)
+
+
+
+class TestFallbackRanking:
+    """Ensure slots always receive a candidate when clips exist."""
+
+    def test_round_robin_fallback_fills_empty_slot(self):
+        slots = [
+            make_slot(index=0, shot_type="wide"),
+            make_slot(index=1, shot_type="close_up"),
+        ]
+        # Only one wide clip; slot 1 (close_up) would otherwise have no good match.
+        clips = {
+            "C01": make_clip_meta(shot_type="wide", duration=2.0),
+        }
+
+        rankings = rank_clips_for_slots(slots, clips, fallback_policy="round_robin")
+
+        assert len(rankings[0]) == 1
+        assert rankings[0][0].clip_id == "C01"
+        assert len(rankings[1]) == 1
+        assert rankings[1][0].clip_id == "C01"
+
+    def test_best_available_fallback_uses_top_global_clip(self):
+        slots = [
+            make_slot(index=0, shot_type="wide"),
+            make_slot(index=1, shot_type="close_up"),
+        ]
+        clips = {
+            "C01": make_clip_meta(shot_type="wide", duration=2.0, aesthetic=0.9),
+            "C02": make_clip_meta(shot_type="medium", duration=2.0, aesthetic=0.3),
+        }
+
+        rankings = rank_clips_for_slots(slots, clips, fallback_policy="best_available")
+
+        # Both slots get a candidate.
+        assert len(rankings[0]) == 2
+        assert len(rankings[1]) == 2
+        # The globally best clip should be the fallback for slot 1.
+        assert rankings[1][0].clip_id == "C01"
+
+    def test_empty_clip_library_leaves_rankings_empty(self):
+        slots = [make_slot(index=0)]
+        rankings = rank_clips_for_slots(slots, {}, fallback_policy="round_robin")
+        assert rankings[0] == []
