@@ -77,6 +77,7 @@ export function TimelinePanel({
       requiredTags: [],
       avoidTags: [],
       selectedClipId: assetId,
+      maskEnabled: true,
       effects: [],
       rankedClipIds: undefined,
       confidence: undefined,

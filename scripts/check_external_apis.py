@@ -60,11 +60,12 @@ def main() -> int:
             headers={"xi-api-key": key},
         ))
 
-    if key := os.getenv("GEMINI_API_KEY"):
+    gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if gemini_key:
         results.append(check(
-            "Gemini",
+            "Gemini / Google",
             "GET",
-            f"https://generativelanguage.googleapis.com/v1beta/models?key={key}",
+            f"https://generativelanguage.googleapis.com/v1beta/models?key={gemini_key}",
         ))
 
     if key := os.getenv("GROQ_API_KEY"):

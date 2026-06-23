@@ -147,6 +147,44 @@ class TestCompileTimeline:
                 if os.path.exists(p):
                     os.unlink(p)
 
+    def test_slot_mask_disabled_is_skipped(self):
+        if not shutil.which("ffmpeg"):
+            pytest.skip("FFmpeg not available")
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as vf:
+            video_path = vf.name
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as mf:
+            mask_path = mf.name
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as of:
+            output_path = of.name
+        try:
+            create_test_video(video_path, duration=5.0)
+            Image.new("L", (640, 480), 255).save(mask_path)
+            cutlist = CutList(
+                globals=CutListGlobals(total_duration_s=2.0, tempo_bpm=120,
+                                       time_signature="4/4", energy_curve=[0.5],
+                                       section_markers=[], aspect_ratio="16:9"),
+                slots=[Slot(index=0, start_s=0.0, duration_s=2.0, beat_index=0,
+                            section="intro", target_shot_type="wide",
+                            subject_hint="test", motion_hint="static",
+                            energy_level=0.5, required_tags=[], avoid_tags=[],
+                            selected_clip_id="clip_0", mask_enabled=False)],
+            )
+            config = RenderConfig(
+                output_path=output_path,
+                width=640,
+                height=480,
+                video_preset="ultrafast",
+                video_crf=28,
+                slot_mask_paths={0: mask_path},
+            )
+            result = compile_timeline(cutlist, {"clip_0": video_path}, output_path, config)
+            assert os.path.exists(result)
+            assert os.path.getsize(result) > 0
+        finally:
+            for p in [video_path, mask_path, output_path]:
+                if os.path.exists(p):
+                    os.unlink(p)
+
     def test_compile_multiple_slots(self):
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
             video_path = f.name

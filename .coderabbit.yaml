@@ -44,7 +44,7 @@ reviews:
         [requireAuth, requireProjectOwnership (if project-scoped), validateBody(schema)]
 
         KNOWN SCHEMAS (from middleware/validate.ts):
-        - createProjectSchema: name (string 1-255), styleTier (full_style|style_transfer|no_style),
+        - createProjectSchema: name (string 1-255), styleTier (cuts_only|color_grade|with_text|with_effects|full_remix),
           mode (auto|assisted)
         - patchProjectSchema: name (string 1-255) optional — status/userId/renderAssetId are
           server-set and must NEVER be patchable via this route
@@ -87,7 +87,7 @@ reviews:
                  renders_project_idx (projectId)
 
         Projects.status enum: uploading | processing | complete | failed
-        Projects.styleTier enum: full_style | style_transfer | no_style
+        Projects.styleTier enum: cuts_only | color_grade | with_text | with_effects | full_remix
         Projects.mode enum: auto | assisted
         Assets.type enum: reference | song | clip
         Renders.status enum: queued | running | complete | failed

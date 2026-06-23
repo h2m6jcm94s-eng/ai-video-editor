@@ -35,6 +35,7 @@ const baseCutList: CutList = {
       energyLevel: 0.5,
       requiredTags: [],
       avoidTags: [],
+      maskEnabled: true,
       effects: [],
     },
   ],

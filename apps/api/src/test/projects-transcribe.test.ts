@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
 import { db } from "../db";
 
@@ -12,7 +12,7 @@ describe("Project Transcribe Route", () => {
     name: "Test Project",
     status: "uploading",
     userId: "test-user-id",
-    styleTier: "full_style",
+    styleTier: "full_remix",
     mode: "auto",
     referenceAssetId: null,
     songAssetId: null,
@@ -44,16 +44,19 @@ describe("Project Transcribe Route", () => {
     vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(mockProject);
     vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce(mockAsset);
 
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
-      json: async () => ({
-        segments: [
-          { text: "Hello", start: 0, end: 1 },
-          { text: "World", start: 1.5, end: 3 },
-        ],
-      }),
-      ok: true,
-      status: 200,
-    } as any));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        json: async () => ({
+          segments: [
+            { text: "Hello", start: 0, end: 1 },
+            { text: "World", start: 1.5, end: 3 },
+          ],
+        }),
+        ok: true,
+        status: 200,
+      } as any),
+    );
     vi.stubEnv("OPENAI_API_KEY", "sk-openai-test");
 
     const app = await buildApp();
@@ -126,11 +129,14 @@ describe("Project Transcribe Route", () => {
     vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(mockProject);
     vi.mocked(db.query.assets.findFirst).mockResolvedValueOnce(mockAsset);
 
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
-      ok: false,
-      status: 429,
-      text: async () => "Rate limited",
-    } as any));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        text: async () => "Rate limited",
+      } as any),
+    );
     vi.stubEnv("OPENAI_API_KEY", "sk-openai-test");
 
     const app = await buildApp();

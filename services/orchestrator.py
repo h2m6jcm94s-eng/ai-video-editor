@@ -27,9 +27,9 @@ from style_worker.text_extract import extract_text_overlays
 from style_worker.camera_motion import analyze_camera_motion
 from reason_worker.cutlist_gen import generate_cutlist
 from reason_worker.clip_rank import rank_clips_for_slots, select_top_k_per_slot, compute_confidence
-from render_worker.compiler import compile_timeline, render_preview
+from render_worker.compiler import compile_timeline
 from shared_py.logging_config import StructuredLogger, configure_logging
-from shared_py.models import CutList, RenderConfig
+from shared_py.models import RenderConfig
 
 logger = StructuredLogger("orchestrator")
 
@@ -39,7 +39,7 @@ def run_pipeline(
     song_path: str,
     clip_paths: list,
     output_path: str,
-    style_tier: str = "full_style",
+    style_tier: str = "full_remix",
     mode: str = "auto",
     temp_dir: str = str(Path(tempfile.gettempdir()) / "ai-video-editor"),
 ):
@@ -67,20 +67,20 @@ def run_pipeline(
     style_analysis = {}
     lut_path = None
 
-    if style_tier in ("with_color", "full_style"):
+    if style_tier in ("color_grade", "with_text", "with_effects", "full_remix"):
         logger.info("Extracting color grade (LUT)", phase="style", step=4)
         lut_path, style_analysis = extract_lut_from_reference(
             reference_path, temp_dir
         )
         logger.info("LUT extracted", lut_extracted=lut_path is not None)
 
-    if style_tier in ("with_text", "full_style"):
+    if style_tier in ("with_text", "with_effects", "full_remix"):
         logger.info("Extracting text overlays", phase="style", step=5)
         overlays = extract_text_overlays(reference_path)
         logger.info("Text overlays extracted", overlay_count=len(overlays))
         style_analysis["detected_overlays"] = [o.model_dump(by_alias=True) for o in overlays]
 
-    if style_tier == "full_style":
+    if style_tier in ("with_effects", "full_remix"):
         logger.info("Analyzing camera motion", phase="style", step=6)
         motions = analyze_camera_motion(reference_path, shots)
         logger.info("Camera motion analyzed", motions=list(set(motions)))
@@ -160,7 +160,7 @@ def main():
     parser.add_argument("--song", required=True, help="Song/audio path")
     parser.add_argument("--clips", required=True, nargs="+", help="User clip paths")
     parser.add_argument("--output", default="output.mp4", help="Output path")
-    parser.add_argument("--tier", default="full_style", choices=["cuts_only", "with_color", "with_text", "full_style"])
+    parser.add_argument("--tier", default="full_remix", choices=["cuts_only", "color_grade", "with_text", "with_effects", "full_remix"])
     parser.add_argument("--mode", default="auto", choices=["auto", "assisted"])
     parser.add_argument("--temp-dir", default=str(Path(tempfile.gettempdir()) / "ai-video-editor"))
 
@@ -172,7 +172,7 @@ def main():
     output_path = os.path.abspath(args.output)
     temp_dir = os.path.abspath(args.temp_dir)
 
-    for name, path in [("reference", reference_path), ("song", song_path), *[(f"clip", c) for c in clip_paths]]:
+    for name, path in [("reference", reference_path), ("song", song_path), *(("clip", c) for c in clip_paths)]:
         if not os.path.exists(path):
             parser.error(f"{name} path does not exist: {path}")
 

@@ -20,7 +20,7 @@ describe("Project generation routes", () => {
     referenceAssetId: "ref-1",
     songAssetId: "song-1",
     clipAssetIds: [],
-    styleTier: "full_style",
+    styleTier: "full_remix",
     mode: "auto",
     styleAnalysis: null,
   };

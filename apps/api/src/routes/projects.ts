@@ -355,6 +355,7 @@ export async function projectRoutes(app: FastifyInstance) {
           referenceAssetId: project.referenceAssetId,
           songAssetId: project.songAssetId!,
           clipAssetIds: (project.clipAssetIds as string[]) || [],
+          styleTier: project.styleTier,
           styleAnalysis,
           assetKeyMap,
           completionToken,

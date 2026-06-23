@@ -9,10 +9,7 @@ import tempfile
 import subprocess
 import warnings
 from typing import List, Optional, Dict
-import numpy as np
-from PIL import ImageFont
-
-from shared_py.models import CutList, Slot, Overlay, RenderConfig, Effect, AudioTrack, Subtitle
+from shared_py.models import CutList, Slot, RenderConfig, AudioTrack
 
 
 # Ordered from least to most capability. Used for tier-gating warnings only in M1.
@@ -288,6 +285,7 @@ def _apply_video_effects(
     temp_dir: str,
     relative_font: str,
     config: RenderConfig,
+    style_tier: str = "full_remix",
 ) -> str:
     """Apply video effects to a slot's filter chain.
 
@@ -296,6 +294,11 @@ def _apply_video_effects(
     a relative window for timeline-enabled filters.
     """
     filters = [base_vf] if base_vf else []
+
+    if _tier_index(style_tier) < _tier_index("with_effects"):
+        if slot.effects:
+            _warn_if_below(style_tier, "with_effects", f"slot effects ({slot.index})")
+        return ",".join(filters)
 
     for effect in slot.effects or []:
         etype = effect.type
@@ -519,20 +522,25 @@ def compile_timeline(
     if not cutlist.slots:
         raise ValueError("Cut list has no slots")
 
-    # M1: warn when the cutlist requests features above the purchased style tier.
-    #     Hard cuts are allowed at every tier; everything else is gated.
-    if config.lut_path:
+    # M1: enforce style tier gating. Hard cuts are allowed at every tier;
+    # everything else is gated and silently dropped when below the required tier.
+    enable_color_grade = _tier_index(style_tier) >= _tier_index("color_grade")
+    enable_text = _tier_index(style_tier) >= _tier_index("with_text")
+    enable_effects = _tier_index(style_tier) >= _tier_index("with_effects")
+    enable_audio = _tier_index(style_tier) >= _tier_index("full_remix")
+
+    if config.lut_path and not enable_color_grade:
         _warn_if_below(style_tier, "color_grade", "LUT / color grade")
-    if cutlist.overlays:
+    if cutlist.overlays and not enable_text:
         _warn_if_below(style_tier, "with_text", "text overlays")
-    if cutlist.subtitles:
+    if cutlist.subtitles and not enable_text:
         _warn_if_below(style_tier, "with_text", "subtitles")
-    if cutlist.audio_tracks or config.song_path:
+    if (cutlist.audio_tracks or config.song_path) and not enable_audio:
         _warn_if_below(style_tier, "full_remix", "audio tracks / song")
     for slot in cutlist.slots:
-        if slot.effects:
+        if slot.effects and not enable_effects:
             _warn_if_below(style_tier, "with_effects", f"slot effects ({slot.index})")
-        if slot.transition_out != "hard_cut" or slot.transition_in != "hard_cut":
+        if (slot.transition_out != "hard_cut" or slot.transition_in != "hard_cut") and not enable_effects:
             _warn_if_below(style_tier, "with_effects", f"transitions ({slot.index})")
 
     # Sanitize input/output paths before handing them to FFmpeg.
@@ -582,7 +590,7 @@ def compile_timeline(
                 f"pad={config.width}:{config.height}:(ow-iw)/2:(oh-ih)/2"
             )
 
-            vf = _apply_video_effects(slot, base_vf, temp_dir, relative_font, config)
+            vf = _apply_video_effects(slot, base_vf, temp_dir, relative_font, config, style_tier=style_tier)
 
             cmd = [
                 "ffmpeg", "-y",
@@ -597,8 +605,15 @@ def compile_timeline(
             ]
             _run_ffmpeg(cmd, f"segment extraction for slot {slot.index}", cwd=temp_dir)
 
-            # If this clip has a segmentation mask, composite the subject over black.
-            raw_mask_path = config.mask_paths.get(clip_id) if config.mask_paths else None
+            # If this slot (or its clip) has a segmentation mask and masks are
+            # enabled for the slot, composite the subject over black. Per-slot
+            # masks take precedence over per-clip masks.
+            raw_mask_path = None
+            if getattr(slot, "mask_enabled", True):
+                if config.slot_mask_paths and slot.index in config.slot_mask_paths:
+                    raw_mask_path = config.slot_mask_paths[slot.index]
+                elif config.mask_paths and clip_id in config.mask_paths:
+                    raw_mask_path = config.mask_paths[clip_id]
             mask_path = raw_mask_path and _safe_path(raw_mask_path, must_exist=True)
             if mask_path and os.path.exists(mask_path):
                 masked_segment_path = os.path.join(temp_dir, f"slot_{slot.index:03d}_masked.mp4")
@@ -624,7 +639,7 @@ def compile_timeline(
         for i in range(len(slot_segments) - 1):
             slot = slot_segments[i]["slot"]
             next_slot = slot_segments[i + 1]["slot"]
-            transition = XFADE_MAP.get(slot.transition_out, "fade")
+            transition = XFADE_MAP.get(slot.transition_out if enable_effects else "hard_cut", "fade")
             xfade_duration = min(0.3, slot.duration_s * 0.5, next_slot.duration_s * 0.5)
             offset = max(0.0, current_duration - xfade_duration)
 
@@ -635,18 +650,16 @@ def compile_timeline(
             current_label = out_label
             current_duration = current_duration + next_slot.duration_s - xfade_duration
 
-        # LUT application if available. The LUT file is copied into the render
-        # temp directory so it can be referenced with a relative, colon-free path.
-        if relative_lut:
+        # LUT application if available and tier allows it.
+        if relative_lut and enable_color_grade:
             lut_label = f"{current_label}_lut"
             filter_parts.append(
                 f"[{current_label}]format=rgb24,lut3d=file={relative_lut}:interp=tetrahedral[{lut_label}]"
             )
             current_label = lut_label
 
-        # Text overlays (clamp to final rendered duration with small buffer).
-        # The system font was already copied into the render temp dir in Stage 1.
-        for overlay in cutlist.overlays:
+        # Text overlays (only when tier allows).
+        for overlay in (cutlist.overlays if enable_text else []):
             start_s = round(max(0.0, overlay.start_s), 3)
             end_s = round(min(overlay.end_s, current_duration - 0.05), 3)
             if start_s >= current_duration or end_s <= start_s:
@@ -673,8 +686,8 @@ def compile_timeline(
             )
             current_label = text_label
 
-        # Subtitles (timed text segments) burned on top of everything.
-        for subtitle in cutlist.subtitles:
+        # Subtitles (only when tier allows).
+        for subtitle in (cutlist.subtitles if enable_text else []):
             start_s = round(max(0.0, subtitle.start_s), 3)
             end_s = round(min(subtitle.end_s, current_duration - 0.05), 3)
             if start_s >= current_duration or end_s <= start_s or not subtitle.text.strip():
@@ -703,10 +716,12 @@ def compile_timeline(
         for seg in slot_segments:
             input_args.extend(["-i", seg["path"]])
 
-        # Audio inputs
-        audio_tracks = list(cutlist.audio_tracks) if hasattr(cutlist, "audio_tracks") else []
-        if not audio_tracks and config.song_path and os.path.exists(config.song_path or ""):
-            audio_tracks = [AudioTrack(asset_id="song", start_s=0.0, end_s=1e9, gain_db=0.0)]
+        # Audio inputs (only when tier allows remixing audio).
+        audio_tracks: List[AudioTrack] = []
+        if enable_audio:
+            audio_tracks = list(cutlist.audio_tracks) if hasattr(cutlist, "audio_tracks") else []
+            if not audio_tracks and config.song_path and os.path.exists(config.song_path or ""):
+                audio_tracks = [AudioTrack(asset_id="song", start_s=0.0, end_s=1e9, gain_db=0.0)]
 
         for track in audio_tracks:
             path = sanitized_clip_paths.get(track.asset_id) or (config.song_path and _safe_path(config.song_path, must_exist=True))

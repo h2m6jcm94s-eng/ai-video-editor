@@ -47,6 +47,8 @@ export function buildInitialCutList(assets: AssetLike[]): CutList {
       avoidTags: [],
       selectedClipId: clip?.id,
       rankedClipIds: clip ? [clip.id] : undefined,
+      maskAssetId: undefined,
+      maskEnabled: true,
       effects: [],
     };
   });

@@ -3,7 +3,6 @@
 # Commercial SaaS use is prohibited without written permission.
 """Generate cut-list using AI Provider abstraction layer."""
 
-import json
 import os
 from typing import List, Dict, Any, Optional
 
@@ -195,6 +194,16 @@ def _snap_slots_to_shots_and_beats(
         slots[-1].duration_s = min(slots[-1].duration_s, content_end - slots[-1].start_s)
 
 
+STYLE_TIERS = ("cuts_only", "color_grade", "with_text", "with_effects", "full_remix")
+
+
+def _tier_index(tier: str) -> int:
+    try:
+        return STYLE_TIERS.index(tier)
+    except ValueError:
+        return len(STYLE_TIERS) - 1
+
+
 def generate_cutlist(
     beat_grid: BeatGrid,
     shot_boundaries: List[ShotBoundary],
@@ -202,6 +211,7 @@ def generate_cutlist(
     energy_curve: List[float],
     available_shot_types: List[str],
     total_duration: float = 30.0,
+    style_tier: str = "full_remix",
 ) -> CutList:
     """Generate a cut-list using the configured AI provider chain.
 
@@ -215,7 +225,7 @@ def generate_cutlist(
     for name in names:
         if name == "programmatic":
             return generate_cutlist_programmatic(
-                beat_grid, shot_boundaries, energy_curve, available_shot_types, total_duration, style_analysis
+                beat_grid, shot_boundaries, energy_curve, available_shot_types, total_duration, style_analysis, style_tier
             )
 
         try:
@@ -230,7 +240,7 @@ def generate_cutlist(
 
     logger.warning("All AI providers exhausted, falling back to programmatic")
     return generate_cutlist_programmatic(
-        beat_grid, shot_boundaries, energy_curve, available_shot_types, total_duration, style_analysis
+        beat_grid, shot_boundaries, energy_curve, available_shot_types, total_duration, style_analysis, style_tier
     )
 
 
@@ -241,8 +251,11 @@ def generate_cutlist_programmatic(
     available_shot_types: List[str],
     total_duration: float = 30.0,
     style_analysis: Optional[Dict[str, Any]] = None,
+    style_tier: str = "full_remix",
 ) -> CutList:
     """Generate a cut-list programmatically without LLM."""
+    enable_text = _tier_index(style_tier) >= _tier_index("with_text")
+    enable_effects = _tier_index(style_tier) >= _tier_index("with_effects")
     style_analysis = style_analysis or {}
     detected_transitions = (
         style_analysis.get("detectedTransitions")
@@ -315,7 +328,7 @@ def generate_cutlist_programmatic(
         shot_rotation += 1
 
         transition_in = "hard_cut"
-        if detected_transitions and energy > 0.4:
+        if enable_effects and detected_transitions and energy > 0.4:
             transition_in = detected_transitions[len(slots) % len(detected_transitions)]
 
         transition_out = "hard_cut"
@@ -327,36 +340,38 @@ def generate_cutlist_programmatic(
                 break
 
         is_section_boundary = section != next_section
-        if is_section_boundary and energy > 0.7:
-            transition_out = "flash"
-        elif is_downbeat and energy > 0.6:
-            transition_out = "dissolve"
-        elif detected_transitions and transition_out == "hard_cut" and energy > 0.5:
-            transition_out = detected_transitions[(len(slots) + 1) % len(detected_transitions)]
+        if enable_effects:
+            if is_section_boundary and energy > 0.7:
+                transition_out = "flash"
+            elif is_downbeat and energy > 0.6:
+                transition_out = "dissolve"
+            elif detected_transitions and transition_out == "hard_cut" and energy > 0.5:
+                transition_out = detected_transitions[(len(slots) + 1) % len(detected_transitions)]
 
-        # Build effects for this slot
+        # Build effects for this slot (only when tier allows effects)
         effects = []
-        if is_downbeat and energy > 0.7:
-            effects.append(Effect(
+        if enable_effects:
+            if is_downbeat and energy > 0.7:
+                effects.append(Effect(
                 type="zoom_punch_in",
                 start_s=beat_time,
                 duration_s=min(0.3, duration),
                 params={"target_scale": 1.25, "duration_ms": 250, "easing": "easeOut"},
             ))
-        if energy < 0.4 and duration > 1.5:
-            effects.append(Effect(
-                type="focus_pull",
-                start_s=beat_time + duration * 0.2,
-                duration_s=min(0.8, duration * 0.6),
-                params={"target_blur": 4.0, "duration_ms": 600, "easing": "easeInOut"},
-            ))
-        if is_section_boundary:
-            effects.append(Effect(
-                type="film_grain",
-                start_s=beat_time,
-                duration_s=duration,
-                params={"intensity": 0.15},
-            ))
+            if energy < 0.4 and duration > 1.5:
+                effects.append(Effect(
+                    type="focus_pull",
+                    start_s=beat_time + duration * 0.2,
+                    duration_s=min(0.8, duration * 0.6),
+                    params={"target_blur": 4.0, "duration_ms": 600, "easing": "easeInOut"},
+                ))
+            if is_section_boundary:
+                effects.append(Effect(
+                    type="film_grain",
+                    start_s=beat_time,
+                    duration_s=duration,
+                    params={"intensity": 0.15},
+                ))
 
         if camera_motions:
             motion_hint = camera_motions[len(slots) % len(camera_motions)]
@@ -385,8 +400,8 @@ def generate_cutlist_programmatic(
         if max_energy_slot is None or energy > max_energy_slot.energy_level:
             max_energy_slot = slot
 
-        # Section-boundary overlay
-        if is_section_boundary and (not section_change_beats or section_change_beats[-1]["label"] != next_section):
+        # Section-boundary overlay (only when tier allows text)
+        if enable_text and is_section_boundary and (not section_change_beats or section_change_beats[-1]["label"] != next_section):
             section_change_beats.append({"label": next_section.upper(), "start_s": next_beat})
             overlays.append(Overlay(
                 text=next_section.upper(),
@@ -414,8 +429,8 @@ def generate_cutlist_programmatic(
     # Overlays must not extend past the actual rendered content.
     actual_content_end = max(s.start_s + s.duration_s for s in slots) if slots else content_end
 
-    # Add vignette to the highest-energy slot
-    if max_energy_slot is not None:
+    # Add vignette to the highest-energy slot (only when tier allows effects)
+    if enable_effects and max_energy_slot is not None:
         max_energy_slot.effects.append(Effect(
             type="vignette",
             start_s=max_energy_slot.start_s,
@@ -427,7 +442,7 @@ def generate_cutlist_programmatic(
             max_energy_slot.effects = max_energy_slot.effects[:2]
 
     # Hook overlay at the very beginning if first slot is high-energy
-    if slots and slots[0].energy_level > 0.6:
+    if enable_text and slots and slots[0].energy_level > 0.6:
         overlays.insert(0, Overlay(
             text="LET'S GO",
             start_s=0.0,
@@ -441,7 +456,7 @@ def generate_cutlist_programmatic(
         ))
 
     # Outro CTA overlay in the final 2 seconds of actual content
-    if slots and actual_content_end > 3.0:
+    if enable_text and slots and actual_content_end > 3.0:
         overlays.append(Overlay(
             text="FOLLOW FOR MORE",
             start_s=max(0.0, actual_content_end - 2.0),
@@ -455,7 +470,7 @@ def generate_cutlist_programmatic(
         ))
 
     # Add detected reference overlays (e.g., text/titles from the source video).
-    for overlay in detected_overlays:
+    for overlay in (detected_overlays if enable_text else []):
         if isinstance(overlay, Overlay):
             overlays.append(overlay)
         elif isinstance(overlay, dict):

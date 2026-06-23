@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { effectSchema } from "./effects";
-import { ASSET_TYPE, EDIT_MODE, STYLE_TIER } from "./enums";
+import { ASSET_TYPE, EDIT_MODE, EXPORT_PRESETS, STYLE_TIER } from "./enums";
 
 export const ALLOWED_MIMES = [
   "video/mp4",
@@ -86,6 +86,8 @@ export const slotSchema = z
     selectedClipId: z.string().optional(),
     rankedClipIds: z.array(z.string()).optional(),
     confidence: z.number().min(0).max(1).optional(),
+    maskAssetId: z.string().optional(),
+    maskEnabled: z.boolean().default(true),
     effects: z.array(effectSchema).default([]),
   })
   .strict();

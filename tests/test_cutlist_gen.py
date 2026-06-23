@@ -185,6 +185,52 @@ class TestProgrammaticCutlist:
         transitions = [s.transition_out for s in cutlist.slots]
         assert any(t != "hard_cut" for t in transitions) or len(cutlist.slots) <= 1
 
+    def test_cuts_only_tier_has_no_effects_or_overlays(self):
+        """Lower style tiers should not generate effects, transitions, or overlays."""
+        beats = make_beat_grid(
+            bpm=120,
+            segments=[
+                BeatSegment(start=0.0, end=2.0, label="intro"),
+                BeatSegment(start=2.0, end=10.0, label="drop"),
+            ],
+        )
+        shots = make_shots(n=2)
+        energy = [0.9] * 10
+        available = ["wide", "medium", "close_up"]
+
+        cutlist = generate_cutlist_programmatic(
+            beats, shots, energy, available, total_duration=10.0, style_tier="cuts_only"
+        )
+
+        for slot in cutlist.slots:
+            assert slot.transition_in == "hard_cut"
+            assert slot.transition_out == "hard_cut"
+            assert not slot.effects
+        assert not cutlist.overlays
+
+    def test_with_text_tier_has_overlays_but_no_effects(self):
+        """Text tier should generate overlays but not slot effects/transitions."""
+        beats = make_beat_grid(
+            bpm=120,
+            segments=[
+                BeatSegment(start=0.0, end=2.0, label="intro"),
+                BeatSegment(start=2.0, end=10.0, label="drop"),
+            ],
+        )
+        shots = make_shots(n=2)
+        energy = [0.9] * 10
+        available = ["wide", "medium", "close_up"]
+
+        cutlist = generate_cutlist_programmatic(
+            beats, shots, energy, available, total_duration=10.0, style_tier="with_text"
+        )
+
+        for slot in cutlist.slots:
+            assert slot.transition_in == "hard_cut"
+            assert slot.transition_out == "hard_cut"
+            assert not slot.effects
+        assert cutlist.overlays
+
     def test_globals_section_markers(self):
         beats = make_beat_grid()
         shots = make_shots(n=3)

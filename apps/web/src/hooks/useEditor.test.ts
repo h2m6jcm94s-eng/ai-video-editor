@@ -38,6 +38,7 @@ function makeSlot(index: number, overrides: Partial<Slot> = {}): Slot {
     energyLevel: 0.5,
     requiredTags: [],
     avoidTags: [],
+    maskEnabled: true,
     effects: [],
     ...overrides,
   };

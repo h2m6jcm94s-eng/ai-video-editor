@@ -11,6 +11,7 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from segment_worker.activities import segment_subject
+from segment_worker.workflows import SegmentSubjectWorkflow
 
 
 async def main() -> None:
@@ -21,6 +22,7 @@ async def main() -> None:
         client,
         task_queue="segment",
         activities=[segment_subject],
+        workflows=[SegmentSubjectWorkflow],
     )
 
     print("Segment worker started, polling task queue: segment")

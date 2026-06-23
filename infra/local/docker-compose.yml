@@ -29,7 +29,8 @@ services:
       - POSTGRES_PWD=ave
       - POSTGRES_SEEDS=postgres
     ports: ["7233:7233", "8233:8233"]
-    depends_on: [postgres]
+    depends_on:
+      postgres: { condition: service_healthy }
 
   temporal-ui:
     image: temporalio/ui:2.32.0

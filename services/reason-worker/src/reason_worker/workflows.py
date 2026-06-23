@@ -19,6 +19,7 @@ class GenerateFromReferenceInput:
     song_asset_id: str
     clip_asset_ids: List[str] = field(default_factory=list)
     reference_asset_id: Optional[str] = None
+    style_tier: str = "full_remix"
     style_analysis: Optional[dict] = None
     asset_key_map: Dict[str, str] = field(default_factory=dict)
     completion_token: str = ""
@@ -106,6 +107,7 @@ class GenerateFromReferenceWorkflow:
                     input.style_analysis,
                     beat_result["energy_curve"],
                     total_duration,
+                    input.style_tier,
                 ),
                 start_to_close_timeout=timedelta(seconds=300),
                 retry_policy=RetryPolicy(maximum_attempts=2),

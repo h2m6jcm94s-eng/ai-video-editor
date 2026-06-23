@@ -2,7 +2,7 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import { renderOptionsSchema } from "@ai-video-editor/shared-types";
+import { EXPORT_PRESETS, renderOptionsSchema } from "@ai-video-editor/shared-types";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Film, Loader2 } from "lucide-react";
 import { useForm } from "react-hook-form";
@@ -15,13 +15,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useApi } from "@/lib/api/client";
 import { APIError } from "@/lib/api/error";
 import { mapApiValidationErrors } from "@/lib/api/formErrors";
-
-const EXPORT_PRESETS = [
-  { value: "youtube_16_9", label: "YouTube 16:9" },
-  { value: "reels_9_16", label: "Instagram Reels 9:16" },
-  { value: "tiktok_9_16", label: "TikTok 9:16" },
-  { value: "square_1_1", label: "Square 1:1" },
-];
 
 type RenderForm = z.infer<typeof renderOptionsSchema>;
 

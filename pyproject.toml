@@ -100,3 +100,8 @@ style-worker = { workspace = true }
 upscale-worker = { workspace = true }
 guardrails = { workspace = true }
 segment-worker = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.15",
+]

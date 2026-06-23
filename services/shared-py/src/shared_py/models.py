@@ -155,6 +155,8 @@ class Slot(BaseModelCamel):
     selected_clip_id: Optional[str] = None
     ranked_clip_ids: Optional[List[str]] = None
     confidence: Optional[float] = None
+    mask_asset_id: Optional[str] = None
+    mask_enabled: bool = True
     effects: List[Effect] = Field(default_factory=list)
 
 
@@ -269,4 +271,5 @@ class RenderConfig(BaseModelCamel):
     lut_path: Optional[str] = None
     song_path: Optional[str] = None
     mask_paths: Dict[str, str] = Field(default_factory=dict)
+    slot_mask_paths: Dict[int, str] = Field(default_factory=dict)
     audio_tracks: List[AudioTrack] = Field(default_factory=list)

@@ -23,6 +23,20 @@ def _internal_headers() -> Dict[str, str]:
     return {"x-internal-token": token}
 
 
+async def _resolve_mask_storage_key(mask_asset_id: str) -> Optional[str]:
+    """Fetch the R2 storage key for a mask asset via the internal API."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{settings.api_base}/internal/assets/{mask_asset_id}",
+            headers=_internal_headers(),
+            timeout=30,
+        )
+    resp.raise_for_status()
+    data = resp.json()
+    asset = data.get("asset") or data
+    return asset.get("storageKey")
+
+
 @activity.defn
 async def fetch_project(project_id: str) -> dict:
     """Fetch project details from the internal API."""
@@ -67,6 +81,7 @@ async def compile_render(
     style_analysis: Optional[dict] = None,
     mask_source_map: Optional[Dict[str, str]] = None,
     export_preset: Optional[str] = None,
+    style_tier: str = "full_remix",
 ) -> str:
     """Compile the cut-list into a final MP4."""
     cutlist_obj = CutList(**cutlist)
@@ -97,18 +112,54 @@ async def compile_render(
                 activity.logger.warning(f"Failed to download LUT {lut_storage_key}: {e}")
                 lut_path = None
 
-    # Download segmentation masks and map them by the clip they apply to.
-    # Values in mask_source_map are R2 storage keys (set by the API route).
+    # Download segmentation masks. We support two resolution strategies:
+    # 1. Per-slot masks: a slot can reference a specific mask asset id; these
+    #    take precedence and are keyed by slot index.
+    # 2. Per-clip masks: the legacy path uses the first mask found on a source
+    #    asset and applies it to every slot that uses that clip.
     mask_paths: Dict[str, str] = {}
+    slot_mask_paths: Dict[int, str] = {}
     mask_source_map = mask_source_map or {}
+
+    # Collect per-slot mask asset ids from the cut-list.
+    slot_mask_asset_ids: Dict[int, str] = {}
+    for slot in cutlist_obj.slots:
+        if slot.mask_asset_id:
+            slot_mask_asset_ids[slot.index] = slot.mask_asset_id
+
+    # Resolve storage keys for per-slot masks. mask_source_map may already
+    # contain asset_id -> storage_key entries added by the API; if not, we try
+    # to download the asset by its id using the internal storage layer.
+    for slot_index, mask_asset_id in slot_mask_asset_ids.items():
+        mask_storage_key = mask_source_map.get(mask_asset_id)
+        if not mask_storage_key:
+            try:
+                mask_storage_key = await _resolve_mask_storage_key(mask_asset_id)
+            except Exception as e:
+                activity.logger.warning(f"Could not resolve storage key for mask {mask_asset_id}: {e}")
+                continue
+        if not mask_storage_key:
+            continue
+        try:
+            mask_path = os.path.join(
+                tempfile.gettempdir(),
+                f"ave_mask_slot_{slot_index}_{mask_asset_id}_{_activity_run_id()}.png",
+            )
+            slot_mask_paths[slot_index] = download_asset(mask_storage_key, mask_path)
+        except Exception as e:
+            activity.logger.warning(f"Failed to download mask {mask_storage_key} for slot {slot_index}: {e}")
+
+    # Legacy per-clip masks (keyed by clip_id).
     for clip_id, mask_storage_key in mask_source_map.items():
+        # Skip entries that are actually slot mask asset ids, not clip ids.
+        if clip_id in slot_mask_asset_ids.values():
+            continue
         if clip_id not in local_paths or not mask_storage_key:
             continue
         try:
-            ext = ".png"
             mask_path = os.path.join(
                 tempfile.gettempdir(),
-                f"ave_mask_{clip_id}_{_activity_run_id()}{ext}",
+                f"ave_mask_{clip_id}_{_activity_run_id()}.png",
             )
             mask_paths[clip_id] = download_asset(mask_storage_key, mask_path)
         except Exception as e:
@@ -139,9 +190,10 @@ async def compile_render(
         song_path=song_path,
         lut_path=lut_path,
         mask_paths=mask_paths,
+        slot_mask_paths=slot_mask_paths,
     )
 
-    compile_timeline(cutlist_obj, clip_paths, output_path, config)
+    compile_timeline(cutlist_obj, clip_paths, output_path, config, style_tier=style_tier)
     return output_path
 
 

@@ -61,7 +61,7 @@ describe("Internal Routes", () => {
       referenceAssetId: ASSET_ID,
       songAssetId: null,
       clipAssetIds: [],
-      styleTier: "full_style",
+      styleTier: "full_remix",
       mode: "auto",
     };
 
@@ -220,7 +220,7 @@ describe("Internal Routes", () => {
       referenceAssetId: null,
       songAssetId: null,
       clipAssetIds: [],
-      styleTier: "full_style",
+      styleTier: "full_remix",
       mode: "auto",
       cutList: null,
       createdAt: new Date(),

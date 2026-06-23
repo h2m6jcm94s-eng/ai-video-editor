@@ -92,6 +92,7 @@ class VideoRenderWorkflow:
                     input.style_analysis,
                     input.mask_source_map,
                     export_preset,
+                    input.style_tier,
                 ),
                 start_to_close_timeout=timedelta(seconds=600),
                 retry_policy=RetryPolicy(maximum_attempts=2),

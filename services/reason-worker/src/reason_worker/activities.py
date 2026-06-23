@@ -4,7 +4,7 @@
 """Temporal activities for the reason worker."""
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import httpx
 from shared_py.config import settings
@@ -128,6 +128,7 @@ async def generate_cutlist_activity(
     style_analysis: Optional[dict],
     energy_curve: List[float],
     total_duration: float,
+    style_tier: str = "full_remix",
 ) -> dict:
     """Generate a cutlist from beats, shots, and style analysis."""
     beat_grid = BeatGrid(**beat_grid_raw)
@@ -152,6 +153,7 @@ async def generate_cutlist_activity(
         energy_curve,
         available_shot_types,
         total_duration=total_duration,
+        style_tier=style_tier,
     )
     return cutlist.model_dump(by_alias=True)
 

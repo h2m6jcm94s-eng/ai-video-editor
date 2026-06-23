@@ -161,6 +161,7 @@ export interface StartGenerateOptions {
   referenceAssetId?: string | null;
   songAssetId: string;
   clipAssetIds: string[];
+  styleTier: string;
   styleAnalysis?: Record<string, unknown> | null;
   assetKeyMap: Record<string, string>;
   completionToken: string;
@@ -179,6 +180,7 @@ export async function startGenerateCutlistWorkflow(options: StartGenerateOptions
           reference_asset_id: options.referenceAssetId,
           song_asset_id: options.songAssetId,
           clip_asset_ids: options.clipAssetIds,
+          style_tier: options.styleTier,
           style_analysis: options.styleAnalysis || null,
           asset_key_map: options.assetKeyMap,
           completion_token: options.completionToken,

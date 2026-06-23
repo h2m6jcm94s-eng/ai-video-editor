@@ -645,7 +645,7 @@ const mockProject = {
   name: "Test Project",
   status: "uploading",
   userId: "test-user-id",
-  styleTier: "full_style",
+  styleTier: "full_remix",
   mode: "auto",
   referenceAssetId: null,
   songAssetId: null,
