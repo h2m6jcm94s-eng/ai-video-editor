@@ -50,6 +50,34 @@
       "when": 1781170361505,
       "tag": "0006_allow_rendering_status",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1781170361506,
+      "tag": "0007_add_style_analysis",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1781170361507,
+      "tag": "0008_add_mask_asset_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1781170361508,
+      "tag": "0009_render_options",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1781170361509,
+      "tag": "0010_generation_jobs",
+      "breakpoints": true
     }
   ]
 }
