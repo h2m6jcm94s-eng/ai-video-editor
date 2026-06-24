@@ -53,6 +53,8 @@ async def extract_lut(
     project_id: str = "",
 ) -> dict:
     """Extract a .cube LUT from a reference video and persist it to R2."""
+    if not output_dir:
+        output_dir = tempfile.mkdtemp(prefix="ave_style_")
     cube_path, analysis = extract_lut_from_reference(video_path, output_dir, strength)
     lut_storage_key = analysis.lut_storage_key
 

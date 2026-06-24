@@ -16,6 +16,7 @@ from style_worker.activities import (
     detect_text_overlays,
     analyze_motion,
     classify_shot_transitions,
+    cleanup_style_assets,
 )
 from style_worker.workflows import AnalyzeStyleWorkflow
 
@@ -34,6 +35,7 @@ async def main() -> None:
             detect_text_overlays,
             analyze_motion,
             classify_shot_transitions,
+            cleanup_style_assets,
         ],
     )
 

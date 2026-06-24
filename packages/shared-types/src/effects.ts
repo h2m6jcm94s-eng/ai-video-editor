@@ -24,7 +24,7 @@ export const EASING = ["linear", "easeIn", "easeOut", "easeInOut"] as const;
 export type Easing = (typeof EASING)[number];
 
 const baseEffectSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.string().uuid().nullish(),
   startS: z.number().min(0),
   durationS: z.number().min(0),
 });

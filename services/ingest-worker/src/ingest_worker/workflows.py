@@ -3,6 +3,7 @@
 # Commercial SaaS use is prohibited without written permission.
 """Temporal workflow definitions for the ingest worker."""
 
+import asyncio
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -54,7 +55,7 @@ class ProbeAssetWorkflow:
                 )
             )
 
-        results = await workflow.gather(*futures) if futures else []
+        results = await asyncio.gather(*futures) if futures else []
 
         # Phase 3: for reference videos, kick off style analysis as an independent
         # child workflow once shot boundaries are known. Using PARENT_CLOSE_POLICY_ABANDON
@@ -71,7 +72,7 @@ class ProbeAssetWorkflow:
                 {
                     "asset_id": input.asset_id,
                     "storage_key": input.storage_key,
-                    "project_id": input.project_id or "",
+                    "project_id": getattr(input, "project_id", None) or "",
                     "shot_boundaries": shot_boundaries,
                     "lut_strength": 0.5,
                     "text_sample_fps": 5.0,

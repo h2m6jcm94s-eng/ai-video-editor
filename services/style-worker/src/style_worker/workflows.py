@@ -4,8 +4,6 @@
 """Temporal workflow definitions for the style-analysis worker."""
 
 import asyncio
-import os
-import tempfile
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import List, Optional
@@ -66,13 +64,11 @@ class AnalyzeStyleWorkflow:
             retry_policy=retry,
         )
 
-        output_dir = tempfile.mkdtemp(prefix="ave_style_")
-
         try:
             # LUT extraction is independent of motion/transitions/text — run in parallel
             lut_future = workflow.execute_activity(
                 "extract_lut",
-                args=(reference_video_path, output_dir, input.lut_strength, input.project_id),
+                args=(reference_video_path, "", input.lut_strength, input.project_id),
                 start_to_close_timeout=timeout,
                 retry_policy=retry,
             )
@@ -120,7 +116,7 @@ class AnalyzeStyleWorkflow:
         finally:
             await workflow.execute_activity(
                 "cleanup_style_assets",
-                args=(reference_video_path, output_dir),
+                args=(reference_video_path, ""),
                 start_to_close_timeout=timedelta(seconds=60),
                 retry_policy=RetryPolicy(maximum_attempts=2),
             )

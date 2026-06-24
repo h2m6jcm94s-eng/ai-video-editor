@@ -10,6 +10,7 @@ export const ALLOWED_MIMES = [
   "audio/wav",
   "audio/aac",
   "audio/ogg",
+  "audio/flac",
   "application/vnd.adobe.cube",
   "application/octet-stream",
 ];
@@ -60,10 +61,10 @@ export const cutListGlobalsSchema = z
     totalDurationS: z.number().min(0),
     tempoBpm: z.number().min(0),
     timeSignature: z.string().default("4/4"),
-    key: z.string().optional(),
+    key: z.string().nullish(),
     energyCurve: z.array(z.number()).default([]),
     sectionMarkers: z.array(sectionMarkerSchema).default([]),
-    colorGradeRef: z.string().optional(),
+    colorGradeRef: z.string().nullish(),
     aspectRatio: z.string().default("9:16"),
   })
   .strict();
@@ -86,7 +87,7 @@ export const slotSchema = z
     selectedClipId: z.string().optional(),
     rankedClipIds: z.array(z.string()).optional(),
     confidence: z.number().min(0).max(1).optional(),
-    maskAssetId: z.string().optional(),
+    maskAssetId: z.string().nullish(),
     maskEnabled: z.boolean().default(true),
     effects: z.array(effectSchema).default([]),
   })
