@@ -6,7 +6,7 @@
 import os
 import shutil
 import tempfile
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import httpx
 from temporalio import activity
@@ -56,7 +56,10 @@ async def extract_lut(
     if not output_dir:
         output_dir = tempfile.mkdtemp(prefix="ave_style_")
     cube_path, analysis = extract_lut_from_reference(video_path, output_dir, strength)
-    lut_storage_key = analysis.lut_storage_key
+    # Only advertise a LUT storage key once it has been uploaded to R2.  The
+    # local cube_path is useless to downstream render workers, which need an
+    # object-storage key they can download.
+    lut_storage_key: Optional[str] = None
 
     if cube_path and project_id:
         try:
@@ -92,6 +95,7 @@ async def extract_lut(
                 lut_storage_key = asset_storage_key
         except Exception as e:
             activity.logger.warning(f"Failed to upload LUT to R2: {e}")
+            lut_storage_key = None
 
     return {
         "cube_path": cube_path,

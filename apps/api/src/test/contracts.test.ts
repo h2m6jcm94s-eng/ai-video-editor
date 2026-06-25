@@ -222,4 +222,92 @@ describe("Contract tests — cutList camelCase invariant", () => {
     };
     expect(cutListSchema.safeParse(withExtra).success).toBe(false);
   });
+
+  it("accepts a realistic cutlist with effects", () => {
+    const realistic = {
+      globals: {
+        totalDurationS: 8.8,
+        tempoBpm: 120,
+        timeSignature: "4/4",
+        key: "C",
+        energyCurve: [0.3, 0.6, 0.9],
+        sectionMarkers: [{ name: "intro", startS: 0, endS: 8.8 }],
+        colorGradeRef: null,
+        aspectRatio: "9:16",
+      },
+      slots: [
+        {
+          index: 0,
+          startS: 0,
+          durationS: 2.5,
+          beatIndex: 0,
+          section: "intro",
+          transitionIn: "hard_cut",
+          transitionOut: "dissolve",
+          targetShotType: "wide",
+          subjectHint: "subject",
+          motionHint: "static",
+          energyLevel: 0.3,
+          requiredTags: [],
+          avoidTags: [],
+          selectedClipId: "clip-1",
+          effects: [
+            {
+              type: "zoom_punch_in",
+              startS: 0,
+              durationS: 0.3,
+              params: { targetScale: 1.25, durationMs: 250, easing: "easeOut" },
+            },
+          ],
+        },
+        {
+          index: 1,
+          startS: 2.5,
+          durationS: 2.5,
+          beatIndex: 5,
+          section: "intro",
+          transitionIn: "dissolve",
+          transitionOut: "hard_cut",
+          targetShotType: "close_up",
+          subjectHint: "subject",
+          motionHint: "handheld",
+          energyLevel: 0.9,
+          requiredTags: [],
+          avoidTags: [],
+          effects: [
+            {
+              type: "vignette",
+              startS: 2.5,
+              durationS: 2.5,
+              params: { intensity: 0.4, color: "#000000" },
+            },
+          ],
+        },
+      ],
+      overlays: [
+        {
+          text: "INTRO",
+          startS: 0,
+          endS: 1.5,
+          position: "top",
+          font: "Inter",
+          fontSizePx: 48,
+          color: "#FFFFFF",
+          animation: "fade",
+        },
+      ],
+      audioTracks: [
+        {
+          assetId: "song-1",
+          gainDb: 0,
+          startS: 0,
+          endS: 8.8,
+          fadeInS: 0,
+          fadeOutS: 0,
+        },
+      ],
+    };
+    const result = cutListSchema.safeParse(realistic);
+    expect(result.success).toBe(true);
+  });
 });

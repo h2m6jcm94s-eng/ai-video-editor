@@ -10,17 +10,21 @@ test.describe("Chaos — Upload misuse", () => {
     await applyAuthBypass(context);
   });
 
-  test("Uploading a wrong file type shows a graceful error", async ({ page }) => {
+  async function createProject(page: ReturnType<typeof test.fixtures.page>) {
     await page.goto("/editor/new");
-    const nameInput = page.locator('input[id="name"]').or(page.locator("input#project-name")).first();
-    if (await nameInput.isVisible().catch(() => false)) {
-      await nameInput.fill("Upload Misuse Test");
-    }
-    await page
-      .getByRole("button", { name: /create project/i })
-      .first()
-      .click();
+    await page.waitForLoadState("networkidle");
+
+    const nameInput = page.getByRole("textbox", { name: "Project Name" }).first();
+    await nameInput.fill("Upload Misuse Test");
+
+    const submit = page.getByRole("button", { name: /create project/i }).first();
+    await expect(submit).toBeEnabled({ timeout: 5000 });
+    await submit.click();
     await page.waitForURL(/\/editor\/[a-f0-9-]+/, { timeout: 15_000 });
+  }
+
+  test("Uploading a wrong file type shows a graceful error", async ({ page }) => {
+    await createProject(page);
 
     // Create a temporary text file and try to upload it as a clip.
     const badFile = path.join(FIXTURES_DIR, "not-a-video.txt");
@@ -38,16 +42,7 @@ test.describe("Chaos — Upload misuse", () => {
   });
 
   test("Canceling and re-selecting an upload works", async ({ page }) => {
-    await page.goto("/editor/new");
-    const nameInput = page.locator('input[id="name"]').or(page.locator("input#project-name")).first();
-    if (await nameInput.isVisible().catch(() => false)) {
-      await nameInput.fill("Re-upload Test");
-    }
-    await page
-      .getByRole("button", { name: /create project/i })
-      .first()
-      .click();
-    await page.waitForURL(/\/editor\/[a-f0-9-]+/, { timeout: 15_000 });
+    await createProject(page);
 
     const songInput = page.locator('[data-testid="upload-song"]').first();
     if (await songInput.isVisible().catch(() => false)) {

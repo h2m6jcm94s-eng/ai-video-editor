@@ -55,13 +55,18 @@ class VideoRenderWorkflow:
         asset_key_map = {a["id"]: a["storageKey"] for a in project_info.get("assets", [])}
         asset_key_map.update(input.asset_key_map)
 
-        # Gather clip and song asset IDs needed for the render (deterministic order)
+        # Gather clip, audio-track, song, and reference asset IDs needed for the render.
         slot_clip_ids = {
             slot.get("selectedClipId")
             for slot in cutlist.get("slots", [])
             if slot.get("selectedClipId")
         }
-        required_asset_ids = sorted(slot_clip_ids)
+        audio_track_ids = {
+            track.get("assetId") or track.get("asset_id")
+            for track in cutlist.get("audioTracks", [])
+            if track.get("assetId") or track.get("asset_id")
+        }
+        required_asset_ids = sorted(slot_clip_ids | audio_track_ids)
         if project.get("songAssetId"):
             required_asset_ids.append(project["songAssetId"])
         if project.get("referenceAssetId"):

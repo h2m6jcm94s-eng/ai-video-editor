@@ -69,16 +69,14 @@ def _build_identity_lut_image(lut_size: int = LUT_SIZE) -> np.ndarray:
     Shape: (lut_size, lut_size * lut_size, 3). Each row holds all combinations
     of G and B for a fixed R; columns sweep through G first, then B.
     """
-    identity = np.zeros((lut_size, lut_size * lut_size, 3), dtype=np.float32)
-    for r in range(lut_size):
-        for g in range(lut_size):
-            for b in range(lut_size):
-                identity[r, g * lut_size + b] = [
-                    r / (lut_size - 1) * 255.0,
-                    g / (lut_size - 1) * 255.0,
-                    b / (lut_size - 1) * 255.0,
-                ]
-    return identity
+    grid = np.arange(lut_size, dtype=np.float32).reshape(lut_size, 1, 1) / (lut_size - 1) * 255.0
+    # r varies across rows, g varies across the lut_size blocks within a row,
+    # b varies within each block.
+    r = np.broadcast_to(grid, (lut_size, lut_size, lut_size))
+    g = np.broadcast_to(grid.transpose(1, 0, 2), (lut_size, lut_size, lut_size))
+    b = np.broadcast_to(grid.transpose(2, 0, 1), (lut_size, lut_size, lut_size))
+    identity = np.stack([r, g, b], axis=-1)
+    return identity.reshape(lut_size, lut_size * lut_size, 3)
 
 
 def _lut_image_to_cube(lut_image: np.ndarray, lut_size: int = LUT_SIZE) -> np.ndarray:
@@ -145,15 +143,9 @@ def _extract_lut_reinhard(
     """Fallback LUT extraction using a simple Reinhard-style mean/std transfer."""
     median_frame = np.median(np.stack(frames), axis=0).astype(np.uint8)
 
-    identity_lut = np.zeros((lut_size, lut_size, lut_size, 3), dtype=np.float32)
-    for r in range(lut_size):
-        for g in range(lut_size):
-            for b in range(lut_size):
-                identity_lut[r, g, b] = [
-                    r / (lut_size - 1) * 255.0,
-                    g / (lut_size - 1) * 255.0,
-                    b / (lut_size - 1) * 255.0,
-                ]
+    identity_lut = _build_identity_lut_image(lut_size).reshape(
+        lut_size, lut_size, lut_size, 3
+    )
 
     frames_arr = np.stack(frames).reshape(-1, 3).astype(np.float32)
     sample_idx = np.random.choice(len(frames_arr), min(100000, len(frames_arr)), replace=False)

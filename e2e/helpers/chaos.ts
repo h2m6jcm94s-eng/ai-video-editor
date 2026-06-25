@@ -3,27 +3,32 @@ import type { Page } from "@playwright/test";
 /**
  * Helpers for "chaotic user" e2e tests — interactions that simulate a real
  * user clicking around without knowing the exact DOM structure.
+ *
+ * All helpers use short action timeouts and swallow recoverable errors so that
+ * a single stuck element cannot hang the whole chaos suite.
  */
+
+const CLICK_TIMEOUT = 3000;
 
 /** Click the first clickable element matching a human-readable label. */
 export async function clickByLabel(page: Page, label: string): Promise<void> {
   const locator = page
-    .locator("button, a, [role='button'], [role='link']")
+    .locator("button:not([disabled]), a, [role='button']:not([disabled]), [role='link']")
     .filter({ hasText: new RegExp(label, "i") })
     .first();
-  if (await locator.isVisible().catch(() => false)) {
-    await locator.click();
-  }
+  await locator.click({ timeout: CLICK_TIMEOUT }).catch(() => {});
 }
 
-/** Click any visible element by partial text (buttons, links, menu items). */
+/** Click any visible actionable element by partial text (buttons, links, menu items). */
 export async function clickAnywhereWithText(page: Page, text: string): Promise<boolean> {
-  const locator = page.getByText(text, { exact: false }).first();
-  if (await locator.isVisible().catch(() => false)) {
-    await locator.click();
-    return true;
-  }
-  return false;
+  const locator = page
+    .locator("button:not([disabled]), a, [role='button']:not([disabled]), [role='link']")
+    .filter({ hasText: new RegExp(text, "i") })
+    .first();
+  const visible = await locator.isVisible().catch(() => false);
+  if (!visible) return false;
+  await locator.click({ timeout: CLICK_TIMEOUT }).catch(() => {});
+  return true;
 }
 
 /** Try to open and close every dialog/popover the user can reach. */
@@ -38,14 +43,13 @@ export async function closeAnyOpenDialog(page: Page): Promise<boolean> {
 
   const cancel = page
     .locator("[role='dialog']")
-    .locator("button")
+    .locator("button:not([disabled])")
     .filter({ hasText: /cancel|close|done|×/i })
     .first();
-  if (await cancel.isVisible().catch(() => false)) {
-    await cancel.click();
-    return true;
-  }
-  return false;
+  const visible = await cancel.isVisible().catch(() => false);
+  if (!visible) return false;
+  await cancel.click({ timeout: CLICK_TIMEOUT }).catch(() => {});
+  return true;
 }
 
 /** Perform a small set of random, safe clicks inside the editor. */

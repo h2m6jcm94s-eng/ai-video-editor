@@ -254,6 +254,7 @@ class ClipScore(BaseModelCamel):
     motion_score: float = 0.0
     duration_score: float = 0.0
     diversity_penalty: float = 0.0
+    repetition_penalty: float = 0.0
     total_score: float = 0.0
 
 
@@ -273,3 +274,4 @@ class RenderConfig(BaseModelCamel):
     mask_paths: Dict[str, str] = Field(default_factory=dict)
     slot_mask_paths: Dict[int, str] = Field(default_factory=dict)
     audio_tracks: List[AudioTrack] = Field(default_factory=list)
+    audio_paths: Dict[str, str] = Field(default_factory=dict)

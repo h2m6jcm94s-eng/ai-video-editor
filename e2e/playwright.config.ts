@@ -22,6 +22,11 @@ export default defineConfig({
     video: "on-first-retry",
     screenshot: "only-on-failure",
     headless: process.env.E2E_HEADED !== "1",
+    // Guard against infinitely retrying actions on non-actionable or detached
+    // elements. The 15-minute per-test timeout is still available for long
+    // render/pipeline specs, but individual clicks/fills must resolve quickly.
+    actionTimeout: 10_000,
+    navigationTimeout: 15_000,
   },
   projects: [
     { name: "setup", testMatch: /auth\.setup\.ts$/ },

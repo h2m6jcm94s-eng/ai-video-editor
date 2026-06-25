@@ -1,4 +1,4 @@
-﻿# Copyright (c) 2025 Devayan Dewri. All rights reserved.
+# Copyright (c) 2025 Devayan Dewri. All rights reserved.
 # Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 # Commercial SaaS use is prohibited without written permission.
 """Startup validation for Python workers."""
@@ -17,6 +17,11 @@ REQUIRED = {
     "R2_BUCKET_NAME": "R2 bucket name",
     "REDIS_URL": "Redis connection URL",
     "DATABASE_URL": "PostgreSQL connection URL",
+    "INTERNAL_WORKER_TOKEN": "internal API token used by workers",
+}
+
+OPTIONAL_BUT_RECOMMENDED = {
+    "TWELVELABS_API_KEY": "Twelve Labs / Marengo API key (clip semantic scoring)",
 }
 
 AI_PROVIDER_KEYS = {
@@ -39,6 +44,13 @@ def validate_startup(worker_name: str) -> None:
             hint="Copy infra/.env.example → .env and fill values",
         )
         sys.exit(1)
+
+    missing_optional = [f"{k} ({desc})" for k, desc in OPTIONAL_BUT_RECOMMENDED.items() if not os.environ.get(k)]
+    if missing_optional:
+        logger.warning(
+            f"WORKER '{worker_name}' starting without recommended env vars",
+            missing=missing_optional,
+        )
 
     # Warn about AI provider chain
     provider_chain = os.environ.get("AI_PROVIDER", "programmatic").split(",")

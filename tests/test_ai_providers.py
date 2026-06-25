@@ -34,7 +34,8 @@ class TestProviderFactory:
             assert hasattr(provider, "classify_shot")
             assert hasattr(provider, "analyze_style")
 
-    def test_default_provider(self):
+    def test_default_provider(self, monkeypatch):
+        monkeypatch.setenv("AI_PROVIDER", "programmatic")
         provider = get_ai_provider()
         assert provider is not None
         assert isinstance(provider, AIProvider)

@@ -164,25 +164,25 @@ R2_BUCKET_NAME=ai-video-editor
 pnpm --filter @ai-video-editor/api db:migrate
 ```
 
-### 5. Start Workers
+### 5. Start the Full Dev Stack
 
-You need the ingest and render workers running for uploads and renders to complete.
-
-```bash
-# Terminal 1 — ingest worker
-uv run python -m ingest_worker
-
-# Terminal 2 — render worker
-uv run python -m render_worker
-```
-
-Workers read environment variables from `apps/api/.env.local`. Make sure the file is sourced or variables are exported in your shell.
-
-### 6. Start Development
+One command starts the workers, API, and web frontend in a single terminal. It also brings up Docker infrastructure and runs migrations if they haven't been done yet.
 
 ```bash
-pnpm dev
+pnpm dev:full
 ```
+
+- API: http://localhost:4000
+- Web: http://localhost:3000
+- Temporal UI: http://localhost:8080
+
+Press `Ctrl+C` to stop everything gracefully. If you ever need to force-stop:
+
+```bash
+pnpm dev:stop
+```
+
+> **Why one command?** Previously you had to open separate terminals for workers (`pnpm workers`) and the dev server (`pnpm dev`). `pnpm dev:full` runs everything together, color-codes the logs, and writes per-service logs to `.tmp/dev-logs/` for quiet inspection.
 
 Open `http://localhost:3000`, sign in with Clerk, and add your AI provider keys in **Settings → API Keys**.
 
@@ -285,19 +285,27 @@ ai_video_editor/
 ### Running the Application
 
 ```bash
-pnpm infra:up      # Start local infrastructure (Postgres, Redis, Temporal, MinIO)
-pnpm dev           # Start web + api + shared-types watch
+pnpm dev:full      # Start infrastructure, workers, API, and web in one command
+pnpm dev:stop      # Stop the full stack
 pnpm obs:up        # Start observability stack (Grafana, Loki, Tempo, etc.)
 ```
 
+`pnpm dev:full` also handles `pnpm infra:up` and migrations if they haven't been run yet.
+
 ### Running Workers
 
-```bash
-# Ingest worker — probes uploaded media
-uv run python -m ingest_worker
+The full dev stack already starts all workers. To run them separately:
 
-# Render worker — compiles and uploads final videos
+```bash
+# Start all workers under one supervisor (recommended)
+pnpm workers
+
+# Or run individual workers
+uv run python -m ingest_worker
+uv run python -m reason_worker
 uv run python -m render_worker
+uv run python -m style_worker
+uv run python -m segment_worker
 ```
 
 ### Running Tests
@@ -347,8 +355,7 @@ Local E2E tests cover two scenarios:
 Run order:
 ```bash
 pnpm infra:up
-uv run python -m ingest_worker
-uv run python -m render_worker
+pnpm workers
 pnpm e2e:headed
 ```
 
@@ -456,10 +463,9 @@ pnpm infra:up
 # Verify Temporal UI at http://localhost:8080
 ```
 
-Make sure the ingest and render workers are running and registered on their task queues:
+Make sure the workers are running and registered on their task queues:
 ```bash
-uv run python -m ingest_worker
-uv run python -m render_worker
+pnpm workers
 ```
 
 ### "Rate limit exceeded during development"
@@ -476,10 +482,9 @@ Make sure `apps/api/.env.local` is sourced before starting workers. Required var
 - `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`
 - `API_BASE` or inferred API URL
 
-Start workers with `uv run` from the repo root:
+Start workers with the supervisor (loads `apps/api/.env.local` automatically):
 ```bash
-uv run python -m ingest_worker
-uv run python -m render_worker
+pnpm workers
 ```
 
 **More issues:** See [`docs/DEVELOPMENT.md`](./docs/DEVELOPMENT.md)

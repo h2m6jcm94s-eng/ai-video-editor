@@ -96,6 +96,13 @@ async def compile_render(
     # Resolve song path if available
     song_path = local_paths.get(song_asset_id) if song_asset_id else None
 
+    # Resolve explicit audio tracks (independent of the legacy song path).
+    audio_paths: Dict[str, str] = {}
+    for track in cutlist_obj.audio_tracks:
+        path = local_paths.get(track.asset_id)
+        if path:
+            audio_paths[track.asset_id] = path
+
     # Download LUT if the project style analysis references one stored in R2.
     lut_path: Optional[str] = None
     if style_analysis:
@@ -188,6 +195,8 @@ async def compile_render(
         audio_bitrate="192k",
         pix_fmt="yuv420p",
         song_path=song_path,
+        audio_tracks=cutlist_obj.audio_tracks,
+        audio_paths=audio_paths,
         lut_path=lut_path,
         mask_paths=mask_paths,
         slot_mask_paths=slot_mask_paths,

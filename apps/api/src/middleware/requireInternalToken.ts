@@ -11,7 +11,7 @@ import { sendError } from "../lib/errors";
 
 export async function requireInternalToken(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   // Read the token at request time so config changes do not require a restart.
-  const internalToken = env.INTERNAL_WORKER_TOKEN;
+  const internalToken = process.env.INTERNAL_WORKER_TOKEN;
   const token = request.headers["x-internal-token"];
 
   if (!internalToken) {

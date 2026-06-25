@@ -240,6 +240,9 @@ Current coverage: **86.79% statements, 76.67% branches**
 | CI workflows | `.github/workflows/` |
 | Test mocks | `apps/api/src/test/setup.ts` |
 | API tests | `apps/api/src/test/*.test.ts` |
+| Dev stack launcher | `scripts/dev-stack.py` |
+| Dev stack stopper | `scripts/stop-dev-stack.py` |
+| Worker supervisor | `scripts/run-workers.py` |
 | Documentation | `docs/{ARCHITECTURE,API,DEVELOPMENT,TESTING,DEPLOYMENT}.md` |
 
 ---
@@ -427,6 +430,53 @@ vi.mock("../db", () => ({
 
 ---
 
+## Local Development Stack
+
+The repo now uses a one-command local development launcher:
+
+```bash
+pnpm dev:full
+```
+
+This command (backed by `uv run python scripts/dev-stack.py`) starts, in order:
+1. Docker infrastructure (`pnpm infra:up`) if not already running, plus DB migrations
+2. All Python Temporal workers via `pnpm workers` (ingest, reason, render, style, segment)
+3. Fastify API dev server on `http://localhost:4000`
+4. Next.js web dev server on `http://localhost:3000`
+
+Logs are color-coded by service in the terminal and written to `.tmp/dev-logs/` for quiet inspection.
+
+Stop the stack with `Ctrl+C`, or force-stop with:
+
+```bash
+pnpm dev:stop
+```
+
+### Ports used locally
+
+| Service | Port |
+|---|---|
+| Web | 3000 |
+| API | 4000 |
+| Postgres | 5432 |
+| Redis | 6379 |
+| Temporal frontend (gRPC) | 7233 |
+| Temporal UI | 8080 |
+| MinIO API | 9000 |
+| MinIO console | 9001 |
+
+### Run pieces separately
+
+If you need to run only part of the stack:
+
+```bash
+pnpm workers              # workers only
+pnpm --filter @ai-video-editor/api dev       # API only
+pnpm --filter @ai-video-editor/web dev       # web only
+pnpm infra:up             # Docker infra only
+pnpm infra:down           # tear down Docker infra
+```
+
 ## Workflow Norms
 
 ### Issue-First Development
@@ -526,6 +576,7 @@ Closes #202
 | 2025-06 | Style analysis persistence | Added `style_analysis` JSONB column to `projects`; `GET /projects/:id/style` queries Temporal style workflow and caches result; render workflow skips re-analysis when cached analysis is passed |
 | 2025-06 | Windows fontconfig warning | Render worker generates a minimal `fonts.conf` and sets `FONTCONFIG_FILE` before FFmpeg calls to suppress drawtext/fontconfig warnings on Windows |
 | 2025-06 | Chaos E2E tests | Added Playwright chaos tests that simulate real users: random navigation, rapid clicks, wrong file uploads, refresh mid-flow, and double-submit |
+| 2025-06 | One-command dev stack | `pnpm dev:full` starts Docker infra, migrations, workers, API, and web in a single terminal; `pnpm dev:stop` tears it down. Eliminates the need for multiple terminal windows during local development |
 
 
 ---

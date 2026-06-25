@@ -4,13 +4,12 @@
 """Entry point for the render Temporal worker."""
 
 import asyncio
-import os
 
 from shared_py.startup import validate_startup
-from temporalio.client import Client
-from temporalio.worker import Worker
+from shared_py.worker_runner import run_worker
 
 from render_worker.activities import (
+    cleanup_render_assets,
     compile_render,
     complete_render,
     download_render_assets,
@@ -21,11 +20,8 @@ from render_worker.workflows import VideoRenderWorkflow
 
 
 async def main() -> None:
-    validate_startup("render-worker")
-
-    client = await Client.connect(os.environ.get("TEMPORAL_HOST", "localhost:7233"))
-    worker = Worker(
-        client,
+    await run_worker(
+        worker_name="render-worker",
         task_queue="video-render-queue",
         workflows=[VideoRenderWorkflow],
         activities=[
@@ -34,11 +30,10 @@ async def main() -> None:
             compile_render,
             upload_render,
             complete_render,
+            cleanup_render_assets,
         ],
+        validate=validate_startup,
     )
-
-    print("Render worker started, polling task queue: video-render-queue")
-    await worker.run()
 
 
 if __name__ == "__main__":

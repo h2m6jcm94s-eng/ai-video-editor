@@ -57,8 +57,13 @@ def _score_clip(
     embeddings: Dict[str, np.ndarray],
     slot_embeddings: Dict[int, np.ndarray],
     chosen_embeddings: List[np.ndarray],
+    repeat_count: int = 0,
 ) -> ClipScore:
-    """Compute a single ClipScore for a slot/clip pair."""
+    """Compute a single ClipScore for a slot/clip pair.
+
+    Applies a repetition penalty so that clips already chosen for previous
+    slots are less likely to win again, even when no embeddings are available.
+    """
     semantic = _semantic_score(slot, clip_id, embeddings, slot_embeddings)
     shot_type_score = 1.0 if meta.get("shot_type") == slot.target_shot_type else 0.3
     aesthetic = meta.get("aesthetic_score", 0.5)
@@ -73,13 +78,17 @@ def _score_clip(
         similarities = [float(_cosine_similarity(emb, ce)) for ce in chosen_embeddings]
         diversity = max(similarities) if similarities else 0.0
 
+    # Repetition penalty grows with each prior selection of this clip.
+    repetition_penalty = 0.15 * repeat_count
+
     total = (
         0.40 * semantic
         + 0.20 * shot_type_score
         + 0.15 * aesthetic
         + 0.15 * motion_score
         + 0.10 * duration_score
-        - 0.25 * diversity
+        - 0.40 * diversity
+        - repetition_penalty
     )
 
     return ClipScore(
@@ -90,6 +99,7 @@ def _score_clip(
         motion_score=motion_score,
         duration_score=duration_score,
         diversity_penalty=diversity,
+        repetition_penalty=repetition_penalty,
         total_score=total,
     )
 
@@ -117,9 +127,9 @@ def rank_clips_for_slots(
             untouched when ``clip_metadata`` is empty.
     """
     embeddings = embeddings or {}
-    rankings = {}
-    chosen_embeddings = []
-    chosen_clip_ids = []
+    rankings: Dict[int, List[ClipScore]] = {}
+    chosen_embeddings: List[np.ndarray] = []
+    chosen_clip_counts: Dict[str, int] = {}
 
     # Precompute slot text embeddings via Marengo when available.
     slot_embeddings: Dict[int, np.ndarray] = {}
@@ -132,7 +142,15 @@ def rank_clips_for_slots(
 
     for slot in slots:
         scores = [
-            _score_clip(slot, clip_id, meta, embeddings, slot_embeddings, chosen_embeddings)
+            _score_clip(
+                slot,
+                clip_id,
+                meta,
+                embeddings,
+                slot_embeddings,
+                chosen_embeddings,
+                repeat_count=chosen_clip_counts.get(clip_id, 0),
+            )
             for clip_id, meta in clip_metadata.items()
         ]
 
@@ -140,10 +158,10 @@ def rank_clips_for_slots(
         scores.sort(key=lambda x: x.total_score, reverse=True)
         rankings[slot.index] = scores
 
-        # Add top choice to chosen for diversity
+        # Add top choice to chosen for diversity and repetition tracking
         if scores:
             top = scores[0]
-            chosen_clip_ids.append(top.clip_id)
+            chosen_clip_counts[top.clip_id] = chosen_clip_counts.get(top.clip_id, 0) + 1
             if embeddings and top.clip_id in embeddings:
                 chosen_embeddings.append(embeddings[top.clip_id])
 
@@ -165,7 +183,13 @@ def rank_clips_for_slots(
                 continue
             meta = clip_metadata[fallback_id]
             fallback_score = _score_clip(
-                slot, fallback_id, meta, embeddings, slot_embeddings, chosen_embeddings
+                slot,
+                fallback_id,
+                meta,
+                embeddings,
+                slot_embeddings,
+                chosen_embeddings,
+                repeat_count=chosen_clip_counts.get(fallback_id, 0),
             )
             rankings[slot.index] = [fallback_score]
 
@@ -189,10 +213,10 @@ def compute_confidence(rankings: Dict[int, List[ClipScore]]) -> Dict[int, float]
         if len(scores) >= 4:
             # Compare top choice against 4th choice for a more conservative gap
             gap = scores[0].total_score - scores[3].total_score
-            confidences[slot_idx] = min(0.99, gap * 1.5)
+            confidences[slot_idx] = max(0.0, min(1.0, gap * 1.5))
         elif len(scores) > 1:
             gap = scores[0].total_score - scores[-1].total_score
-            confidences[slot_idx] = min(1.0, gap * 2.0)
+            confidences[slot_idx] = max(0.0, min(1.0, gap * 2.0))
         else:
             confidences[slot_idx] = 0.5
     return confidences

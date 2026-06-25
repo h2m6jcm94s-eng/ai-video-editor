@@ -176,10 +176,17 @@ export const renderOptionsSchema = z
   })
   .strict();
 
+export const generationOptionsSchema = z
+  .object({
+    durationSec: z.number().min(1).max(300).optional(),
+  })
+  .strict()
+  .optional();
+
 export const generateFromReferenceSchema = z
   .object({
     prompt: z.string().min(1).max(2000).optional(),
-    options: z.record(z.unknown()).optional(),
+    options: generationOptionsSchema,
   })
   .strict();
 

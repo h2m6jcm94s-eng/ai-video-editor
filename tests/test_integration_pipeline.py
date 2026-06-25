@@ -22,7 +22,6 @@ from shared_py.models import (
 )
 from ingest_worker.probe import probe_video
 from ingest_worker.beat_detect import detect_beats_librosa, compute_energy_curve
-from ingest_worker.shot_detect import detect_shot_boundaries_pyscenedetect
 from reason_worker.cutlist_gen import generate_cutlist_programmatic
 from reason_worker.clip_rank import rank_clips_for_slots, select_top_k_per_slot, compute_confidence
 from render_worker.compiler import compile_timeline
@@ -227,3 +226,106 @@ class TestRenderability:
 
             assert os.path.exists(output_path), "render output was not created"
             assert os.path.getsize(output_path) > 0, "render output is empty"
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg not available")
+class TestEndToEndSmoke:
+    """Happy-path smoke test for the full generate → rank → render pipeline.
+
+    Guards against the most common pilot failures:
+    - only one clip is used
+    - hard-coded text overlays appear
+    - uploaded song is dropped
+    """
+
+    def test_full_pipeline_uses_multiple_clips_audio_and_no_bogus_overlays(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            reference_path = os.path.join(tmpdir, "reference.mp4")
+            clip_a_path = os.path.join(tmpdir, "clip_a.mp4")
+            clip_b_path = os.path.join(tmpdir, "clip_b.mp4")
+            song_path = os.path.join(tmpdir, "song.wav")
+            output_path = os.path.join(tmpdir, "output.mp4")
+
+            # Reference: 5s vertical video.
+            create_test_video(reference_path, duration=5.0, resolution=(720, 1280), with_audio=False)
+            # Two clips with visibly different content so the compiler truly mixes sources.
+            create_test_video(clip_a_path, duration=5.0, resolution=(720, 1280), with_audio=False)
+            create_test_video(clip_b_path, duration=5.0, resolution=(720, 1280), with_audio=False)
+            # Song with a clear audio tone.
+            subprocess.run(
+                ["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=5",
+                 "-ar", "44100", song_path],
+                check=True, capture_output=True,
+            )
+
+            # Step 1: detect beats from song.
+            beat_grid = detect_beats_librosa(song_path)
+            energy_curve = compute_energy_curve(song_path, n_points=10)
+
+            # Step 2: define shot boundaries for the reference.
+            # Use explicit boundaries so the test does not depend on the shot
+            # detector finding cuts in synthetic footage.
+            shots = [
+                ShotBoundary(start_s=0.0, end_s=2.5, start_frame=0, end_frame=75),
+                ShotBoundary(start_s=2.5, end_s=5.0, start_frame=75, end_frame=150),
+            ]
+
+            # Step 3: generate cutlist, explicitly attaching the song.
+            cutlist = generate_cutlist_programmatic(
+                beat_grid,
+                shots,
+                energy_curve,
+                ["wide", "medium", "close_up"],
+                total_duration=5.0,
+                song_asset_id="song_1",
+            )
+            assert cutlist.slots, "cutlist produced no slots"
+            assert cutlist.audio_tracks, "cutlist dropped the song audio track"
+            assert cutlist.audio_tracks[0].asset_id == "song_1"
+
+            # Step 4: rank clips and assign winners.
+            clip_metadata = {
+                "clip_a": {"shot_type": "wide", "duration_sec": 5.0, "aesthetic_score": 0.6, "motion_energy": 0.3},
+                "clip_b": {"shot_type": "close_up", "duration_sec": 5.0, "aesthetic_score": 0.7, "motion_energy": 0.7},
+            }
+            rankings = rank_clips_for_slots(cutlist.slots, clip_metadata)
+            for slot in cutlist.slots:
+                scores = rankings.get(slot.index, [])
+                assert scores, f"slot {slot.index} received no ranking"
+                slot.selected_clip_id = scores[0].clip_id
+
+            selected_clips = {s.selected_clip_id for s in cutlist.slots}
+            assert len(selected_clips) >= 2, f"expected multiple clips, got {selected_clips}"
+
+            # Step 5: compile and assert output.
+            config = RenderConfig(
+                output_path=output_path,
+                width=720,
+                height=1280,
+                fps=30.0,
+                song_path=song_path,
+            )
+            compile_timeline(
+                cutlist,
+                {"clip_a": clip_a_path, "clip_b": clip_b_path},
+                output_path,
+                config,
+                style_tier="with_effects",
+            )
+
+            assert os.path.exists(output_path), "render output was not created"
+            assert os.path.getsize(output_path) > 0, "render output is empty"
+
+            # Verify audio stream exists.
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-select_streams", "a",
+                 "-show_entries", "stream=codec_type", "-of",
+                 "default=noprint_wrappers=1", output_path],
+                capture_output=True, text=True,
+            )
+            assert "audio" in probe.stdout.lower(), "output has no audio stream"
+
+            # Verify no hard-coded overlays.
+            for overlay in cutlist.overlays:
+                assert "LET'S GO" not in overlay.text
+                assert "FOLLOW FOR MORE" not in overlay.text

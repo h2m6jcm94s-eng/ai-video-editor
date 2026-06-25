@@ -1,6 +1,11 @@
-﻿# Copyright (c) 2025 Devayan Dewri. All rights reserved.
+# Copyright (c) 2025 Devayan Dewri. All rights reserved.
 # Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 # Commercial SaaS use is prohibited without written permission.
+from shared_py.logging_config import configure_logging
+
+configure_logging(service_name="style-worker")
+
+
 # Lazy imports to avoid loading heavy ML dependencies on module init
 def __getattr__(name):
     if name == "extract_lut_from_reference":
@@ -16,4 +21,3 @@ def __getattr__(name):
         from style_worker.camera_motion import analyze_camera_motion
         return analyze_camera_motion
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-

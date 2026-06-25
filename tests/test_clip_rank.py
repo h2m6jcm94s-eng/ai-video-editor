@@ -148,9 +148,37 @@ class TestRankClipsForSlots:
             0.15 * score.aesthetic_score +
             0.15 * score.motion_score +
             0.10 * score.duration_score -
-            0.25 * score.diversity_penalty
+            0.40 * score.diversity_penalty -
+            score.repetition_penalty
         )
         assert abs(score.total_score - expected) < 0.001
+
+    def test_multi_clip_diversity_without_embeddings(self):
+        """When multiple clips exist, different slots should pick different clips
+        even without Marengo embeddings."""
+        slots = [
+            make_slot(index=0, shot_type="wide", energy=0.3),
+            make_slot(index=1, shot_type="medium", energy=0.5),
+            make_slot(index=2, shot_type="close_up", energy=0.8),
+            make_slot(index=3, shot_type="wide", energy=0.4),
+            make_slot(index=4, shot_type="medium", energy=0.6),
+        ]
+        clips = {
+            "C01": make_clip_meta(shot_type="wide", motion_energy=0.3, duration=2.0, aesthetic=0.6),
+            "C02": make_clip_meta(shot_type="medium", motion_energy=0.5, duration=2.0, aesthetic=0.7),
+            "C03": make_clip_meta(shot_type="close_up", motion_energy=0.8, duration=2.0, aesthetic=0.8),
+        }
+
+        rankings = rank_clips_for_slots(slots, clips)
+        selected = [rankings[i][0].clip_id for i in range(len(slots))]
+        distinct = set(selected)
+
+        assert len(distinct) >= 2, f"Expected multiple clips, got {selected}"
+        # Best matching clip per slot should win the first time, but repetition
+        # penalty should rotate choices for similar slots.
+        assert selected.count("C01") < len(slots)
+        assert selected.count("C02") < len(slots)
+        assert selected.count("C03") < len(slots)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -511,8 +539,11 @@ class TestFallbackRanking:
         # Both slots get a candidate.
         assert len(rankings[0]) == 2
         assert len(rankings[1]) == 2
-        # The globally best clip should be the fallback for slot 1.
-        assert rankings[1][0].clip_id == "C01"
+        # Slot 0 picks the globally best clip (C01).
+        assert rankings[0][0].clip_id == "C01"
+        # Slot 1 should prefer a different clip because C01 already won slot 0,
+        # demonstrating the repetition-penalty/diversity behavior.
+        assert rankings[1][0].clip_id == "C02"
 
     def test_empty_clip_library_leaves_rankings_empty(self):
         slots = [make_slot(index=0)]

@@ -15,7 +15,10 @@ if shared_py_path not in sys.path:
 
 from shared_py.ai_providers.factory import get_ai_provider
 from shared_py.logging_config import StructuredLogger
-from shared_py.models import CutList, CutListGlobals, Slot, Overlay, Effect, BeatGrid, ShotBoundary, SectionMarker
+from shared_py.models import (
+    CutList, CutListGlobals, Slot, Overlay, Effect, BeatGrid, ShotBoundary, SectionMarker, AudioTrack,
+    ZoomPunchInParams, FocusPullParams, FilmGrainParams, VignetteParams,
+)
 
 logger = StructuredLogger("reason_worker.cutlist_gen")
 
@@ -138,43 +141,28 @@ def _snap_slots_to_shots_and_beats(
     beat_grid: BeatGrid,
     content_end: float,
 ) -> None:
-    """Snap slot starts to the nearest shot boundary, then quantize duration to beats."""
+    """Snap slot starts to shot boundaries and ensure slots do not overlap or exceed content."""
     if not slots or not beat_grid.beats:
         return
 
     beats = beat_grid.beats
     beat_interval = 60.0 / beat_grid.bpm if beat_grid.bpm else 0.5
 
+    # Snap starts and drop anything that falls past the content.
+    snapped = []
     for slot in slots:
         new_start = _snap_time_to_shot_boundary(slot.start_s, shot_boundaries)
 
-        # Ensure we land on a beat grid line if the boundary moved us off it.
+        # Prefer the nearest beat if it is close to the snapped start.
         closest_beat = min(beats, key=lambda b: abs(b - new_start))
         if abs(closest_beat - new_start) < 1e-3:
             new_start = closest_beat
 
-        # Find the first beat that is strictly after the new start.
-        next_beat = _next_beat_at_or_after(new_start + 1e-4, beats)
-        duration = next_beat - new_start
+        new_start = round(max(0.0, min(new_start, content_end)), 3)
+        if new_start >= content_end - 1e-4:
+            continue
 
-        # Clamp duration to the end of the current shot and the content.
-        shot = _shot_for_time(new_start, shot_boundaries)
-        max_end = content_end
-        if shot is not None:
-            max_end = min(max_end, shot.end_s)
-
-        # Extend by whole beat intervals while we stay inside the shot and below 2.5s.
-        while (
-            new_start + duration + beat_interval <= max_end + 1e-4
-            and duration + beat_interval <= 2.5
-        ):
-            duration += beat_interval
-
-        duration = min(duration, max_end - new_start)
-        duration = max(duration, beat_interval)
-
-        slot.start_s = round(new_start, 3)
-        slot.duration_s = round(duration, 3)
+        slot.start_s = new_start
 
         # Update beat_index to reflect the new start time.
         for i, beat in enumerate(beats):
@@ -182,16 +170,41 @@ def _snap_slots_to_shots_and_beats(
                 slot.beat_index = i
                 break
 
+        snapped.append(slot)
+
+    slots[:] = snapped
+    if not slots:
+        return
+
+    # Sort by start time and make slots contiguous up to the next slot or
+    # content end, while respecting shot boundaries and a 4.0s max slot length.
+    slots.sort(key=lambda s: s.start_s)
+    for i, slot in enumerate(slots):
+        # Indices must reflect the final sorted order so downstream code (clip
+        # ranking, mask lookup, etc.) can rely on index == position.
+        slot.index = i
+
+        next_start = slots[i + 1].start_s if i + 1 < len(slots) else content_end
+        max_end = min(content_end, next_start)
+
+        shot = _shot_for_time(slot.start_s, shot_boundaries)
+        if shot is not None:
+            max_end = min(max_end, shot.end_s)
+
+        # Extend the slot to fill the available contiguous region up to the next
+        # slot, content end, or shot boundary — whichever comes first, but keep
+        # it at least one beat long and no longer than 4.0s.
+        available = max_end - slot.start_s
+        duration = max(beat_interval, min(available, 4.0))
+        duration = min(duration, available)
+        slot.duration_s = round(duration, 3)
+
         # Keep effects inside the adjusted slot bounds.
         for effect in slot.effects:
             if effect.start_s < slot.start_s:
                 effect.start_s = slot.start_s
             max_dur = slot.start_s + slot.duration_s - effect.start_s
             effect.duration_s = max(0.0, min(effect.duration_s, max_dur))
-
-    # Final safety clamp on the last slot.
-    if slots:
-        slots[-1].duration_s = min(slots[-1].duration_s, content_end - slots[-1].start_s)
 
 
 STYLE_TIERS = ("cuts_only", "color_grade", "with_text", "with_effects", "full_remix")
@@ -212,6 +225,7 @@ def generate_cutlist(
     available_shot_types: List[str],
     total_duration: float = 30.0,
     style_tier: str = "full_remix",
+    song_asset_id: Optional[str] = None,
 ) -> CutList:
     """Generate a cut-list using the configured AI provider chain.
 
@@ -225,7 +239,8 @@ def generate_cutlist(
     for name in names:
         if name == "programmatic":
             return generate_cutlist_programmatic(
-                beat_grid, shot_boundaries, energy_curve, available_shot_types, total_duration, style_analysis, style_tier
+                beat_grid, shot_boundaries, energy_curve, available_shot_types, total_duration,
+                style_analysis, style_tier, song_asset_id,
             )
 
         try:
@@ -233,14 +248,24 @@ def generate_cutlist(
             context = provider._build_cutlist_context(
                 beat_grid, shot_boundaries, style_analysis, energy_curve, available_shot_types, total_duration
             )
-            return provider.generate_cutlist(context, CUTLIST_SCHEMA)
+            cutlist = provider.generate_cutlist(context, CUTLIST_SCHEMA)
+            # Attach the song to AI-generated cutlists too.
+            if song_asset_id and not cutlist.audio_tracks:
+                cutlist.audio_tracks = [AudioTrack(
+                    asset_id=song_asset_id,
+                    start_s=0.0,
+                    end_s=cutlist.globals.total_duration_s,
+                    gain_db=0.0,
+                )]
+            return cutlist
         except Exception as e:
             logger.warning("AI provider failed, trying next", provider=name, error=str(e))
             continue
 
     logger.warning("All AI providers exhausted, falling back to programmatic")
     return generate_cutlist_programmatic(
-        beat_grid, shot_boundaries, energy_curve, available_shot_types, total_duration, style_analysis, style_tier
+        beat_grid, shot_boundaries, energy_curve, available_shot_types, total_duration,
+        style_analysis, style_tier, song_asset_id,
     )
 
 
@@ -252,6 +277,7 @@ def generate_cutlist_programmatic(
     total_duration: float = 30.0,
     style_analysis: Optional[Dict[str, Any]] = None,
     style_tier: str = "full_remix",
+    song_asset_id: Optional[str] = None,
 ) -> CutList:
     """Generate a cut-list programmatically without LLM."""
     enable_text = _tier_index(style_tier) >= _tier_index("with_text")
@@ -291,6 +317,10 @@ def generate_cutlist_programmatic(
     last_cut_was_downbeat = False
     max_energy_slot = None
     section_change_beats = []  # track section boundaries for overlays/film_grain
+    previous_slot_end = -1.0
+    beat_interval = 60.0 / beat_grid.bpm if beat_grid.bpm else 0.5
+    # Aim for roughly one cut every 1-2.5 seconds instead of every single beat.
+    min_slot_gap = max(beat_interval * 2, 1.0)
 
     while beat_idx < len(beats) - 1 and beats[beat_idx] < content_end:
         beat_time = beats[beat_idx]
@@ -301,6 +331,34 @@ def generate_cutlist_programmatic(
             if seg.start <= beat_time < seg.end:
                 section = seg.label
                 break
+
+        next_section = "intro"
+        for seg in segments:
+            if seg.start <= next_beat < seg.end:
+                next_section = seg.label
+                break
+
+        is_section_boundary = section != next_section
+
+        # Always add section-boundary overlays, even when we skip a slot here.
+        if enable_text and is_section_boundary and (not section_change_beats or section_change_beats[-1]["label"] != next_section):
+            section_change_beats.append({"label": next_section.upper(), "start_s": next_beat})
+            overlays.append(Overlay(
+                text=next_section.upper(),
+                start_s=max(0.0, next_beat - 0.2),
+                end_s=min(content_end, next_beat + 1.5),
+                position="top",
+                font="Inter",
+                font_size_px=48,
+                color="#FFFFFF",
+                stroke="#000000",
+                animation="fade",
+            ))
+
+        # Skip beats that are too close to the previous cut to avoid tiny slots.
+        if beat_time < previous_slot_end + min_slot_gap - 1e-4 and beat_time > 0:
+            beat_idx += 1
+            continue
 
         progress = beat_time / content_end if content_end > 0 else 0.0
         energy_idx = min(int(progress * len(energy_curve)), len(energy_curve) - 1)
@@ -333,13 +391,6 @@ def generate_cutlist_programmatic(
 
         transition_out = "hard_cut"
 
-        next_section = "intro"
-        for seg in segments:
-            if seg.start <= next_beat < seg.end:
-                next_section = seg.label
-                break
-
-        is_section_boundary = section != next_section
         if enable_effects:
             if is_section_boundary and energy > 0.7:
                 transition_out = "flash"
@@ -352,25 +403,29 @@ def generate_cutlist_programmatic(
         effects = []
         if enable_effects:
             if is_downbeat and energy > 0.7:
-                effects.append(Effect(
-                type="zoom_punch_in",
-                start_s=beat_time,
-                duration_s=min(0.3, duration),
-                params={"target_scale": 1.25, "duration_ms": 250, "easing": "easeOut"},
-            ))
+                effects.append(
+                    Effect(
+                        type="zoom_punch_in",
+                        start_s=beat_time,
+                        duration_s=min(0.3, duration),
+                        params=ZoomPunchInParams(
+                            target_scale=1.25, duration_ms=250, easing="easeOut"
+                        ).model_dump(by_alias=True),
+                    )
+                )
             if energy < 0.4 and duration > 1.5:
                 effects.append(Effect(
                     type="focus_pull",
                     start_s=beat_time + duration * 0.2,
                     duration_s=min(0.8, duration * 0.6),
-                    params={"target_blur": 4.0, "duration_ms": 600, "easing": "easeInOut"},
+                    params=FocusPullParams(target_blur=4.0, duration_ms=600, easing="easeInOut").model_dump(by_alias=True),
                 ))
             if is_section_boundary:
                 effects.append(Effect(
                     type="film_grain",
                     start_s=beat_time,
                     duration_s=duration,
-                    params={"intensity": 0.15},
+                    params=FilmGrainParams(intensity=0.15).model_dump(by_alias=True),
                 ))
 
         if camera_motions:
@@ -395,25 +450,11 @@ def generate_cutlist_programmatic(
             effects=effects[:2],  # cap at 2 effects per slot
         )
         slots.append(slot)
+        previous_slot_end = beat_time + duration
 
         # Track highest-energy slot for vignette
         if max_energy_slot is None or energy > max_energy_slot.energy_level:
             max_energy_slot = slot
-
-        # Section-boundary overlay (only when tier allows text)
-        if enable_text and is_section_boundary and (not section_change_beats or section_change_beats[-1]["label"] != next_section):
-            section_change_beats.append({"label": next_section.upper(), "start_s": next_beat})
-            overlays.append(Overlay(
-                text=next_section.upper(),
-                start_s=max(0.0, next_beat - 0.2),
-                end_s=min(content_end, next_beat + 1.5),
-                position="top",
-                font="Inter",
-                font_size_px=48,
-                color="#FFFFFF",
-                stroke="#000000",
-                animation="fade",
-            ))
 
         beat_idx += 1
         if beat_time + duration >= content_end:
@@ -435,41 +476,16 @@ def generate_cutlist_programmatic(
             type="vignette",
             start_s=max_energy_slot.start_s,
             duration_s=max_energy_slot.duration_s,
-            params={"intensity": 0.4},
+            params=VignetteParams(intensity=0.4).model_dump(by_alias=True),
         ))
         # Re-apply cap in case we pushed it over 2
         if len(max_energy_slot.effects) > 2:
             max_energy_slot.effects = max_energy_slot.effects[:2]
 
-    # Hook overlay at the very beginning if first slot is high-energy
-    if enable_text and slots and slots[0].energy_level > 0.6:
-        overlays.insert(0, Overlay(
-            text="LET'S GO",
-            start_s=0.0,
-            end_s=min(1.5, actual_content_end),
-            position="center",
-            font="Inter",
-            font_size_px=64,
-            color="#FFFFFF",
-            stroke="#000000",
-            animation="scale",
-        ))
-
-    # Outro CTA overlay in the final 2 seconds of actual content
-    if enable_text and slots and actual_content_end > 3.0:
-        overlays.append(Overlay(
-            text="FOLLOW FOR MORE",
-            start_s=max(0.0, actual_content_end - 2.0),
-            end_s=actual_content_end,
-            position="bottom",
-            font="Inter",
-            font_size_px=42,
-            color="#FFFFFF",
-            stroke="#000000",
-            animation="fade",
-        ))
-
     # Add detected reference overlays (e.g., text/titles from the source video).
+    # Hard-coded promotional overlays like "LET'S GO" or "FOLLOW FOR MORE" are
+    # intentionally omitted; they are not derived from the reference or user
+    # intent and degrade every render.
     for overlay in (detected_overlays if enable_text else []):
         if isinstance(overlay, Overlay):
             overlays.append(overlay)
@@ -491,9 +507,26 @@ def generate_cutlist_programmatic(
         overlay.start_s = max(0.0, min(overlay.start_s, actual_content_end))
         overlay.end_s = max(overlay.start_s, min(overlay.end_s, actual_content_end))
 
+    # Build audio track for the uploaded song so the render compiler always
+    # receives an explicit audio track instead of relying on side-channel config.
+    audio_tracks: List[AudioTrack] = []
+    if song_asset_id:
+        audio_tracks.append(AudioTrack(
+            asset_id=song_asset_id,
+            start_s=0.0,
+            end_s=actual_content_end,
+            gain_db=0.0,
+            fade_in_s=0.0,
+            fade_out_s=0.0,
+        ))
+
+    # The rendered output length is determined by the actual slot content, not the
+    # requested target. Clamp to the requested cap so we never exceed user intent.
+    final_duration_s = min(actual_content_end, total_duration)
+
     return CutList(
         globals=CutListGlobals(
-            total_duration_s=total_duration,
+            total_duration_s=final_duration_s,
             tempo_bpm=beat_grid.bpm,
             time_signature="4/4",
             energy_curve=energy_curve,
@@ -505,4 +538,5 @@ def generate_cutlist_programmatic(
         ),
         slots=slots,
         overlays=overlays,
+        audio_tracks=audio_tracks,
     )

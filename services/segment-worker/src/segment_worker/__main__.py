@@ -4,29 +4,22 @@
 """Entry point for the standalone SAM3 segmentation Temporal worker."""
 
 import asyncio
-import os
 
 from shared_py.startup import validate_startup
-from temporalio.client import Client
-from temporalio.worker import Worker
+from shared_py.worker_runner import run_worker
 
 from segment_worker.activities import segment_subject
 from segment_worker.workflows import SegmentSubjectWorkflow
 
 
 async def main() -> None:
-    validate_startup("segment-worker")
-
-    client = await Client.connect(os.environ.get("TEMPORAL_HOST", "localhost:7233"))
-    worker = Worker(
-        client,
+    await run_worker(
+        worker_name="segment-worker",
         task_queue="segment",
-        activities=[segment_subject],
         workflows=[SegmentSubjectWorkflow],
+        activities=[segment_subject],
+        validate=validate_startup,
     )
-
-    print("Segment worker started, polling task queue: segment")
-    await worker.run()
 
 
 if __name__ == "__main__":

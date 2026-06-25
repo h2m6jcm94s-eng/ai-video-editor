@@ -28,22 +28,40 @@ class JsonFormatter(logging.Formatter):
             obj["correlationId"] = record.correlationId
         if hasattr(record, "requestId"):
             obj["requestId"] = record.requestId
-        if record.exc_info:
+        if record.exc_info and record.exc_info[0] is not None:
             obj["error"] = self.formatException(record.exc_info)
+        # Source location is useful for production debugging.
+        obj.update(
+            {
+                "module": record.module,
+                "funcName": record.funcName,
+                "lineno": record.lineno,
+            }
+        )
         return json.dumps(obj, default=str)
 
 
 def configure_logging(level: str | None = None, service_name: str | None = None) -> None:
-    """Configure root logger for structured JSON output."""
+    """Configure root logger for structured JSON output.
+
+    Idempotent: repeated calls are ignored so importing one worker package from
+    another does not clobber the existing logging configuration.
+    """
+    if getattr(configure_logging, "_configured", False):
+        return
+
     log_level = (level or os.environ.get("LOG_LEVEL", "INFO")).upper()
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter())
     root = logging.getLogger()
+    # Close non-stdout/stderr handlers to avoid leaking file descriptors.
+    for h in list(root.handlers):
+        if getattr(h, "stream", None) not in (sys.stdout, sys.stderr):
+            h.close()
     root.handlers.clear()
     root.addHandler(handler)
     root.setLevel(getattr(logging, log_level, logging.INFO))
-    if service_name:
-        root.name = service_name
+    configure_logging._configured = True
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -62,7 +80,7 @@ class StructuredLogger:
         extra: dict[str, Any] = {"extra": kwargs} if kwargs else {}
         if self._correlation_id:
             extra["correlationId"] = self._correlation_id
-        getattr(self._logger, method)(msg, extra=extra)
+        getattr(self._logger, method)(msg, extra=extra, stacklevel=3)
 
     def debug(self, msg: str, **kwargs: Any) -> None:
         self._log("debug", msg, **kwargs)
@@ -80,7 +98,7 @@ class StructuredLogger:
         extra: dict[str, Any] = {"extra": kwargs} if kwargs else {}
         if self._correlation_id:
             extra["correlationId"] = self._correlation_id
-        self._logger.exception(msg, extra=extra)
+        self._logger.exception(msg, extra=extra, stacklevel=3)
 
     def bind(self, correlation_id: str | None = None) -> "StructuredLogger":
         """Return a new logger bound to a correlation ID."""

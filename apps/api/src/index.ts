@@ -22,6 +22,52 @@ process.on("uncaughtException", (err) => {
   process.exit(1);
 });
 
+/** Best-effort cleanup of a previous dev server still holding `port`.
+ *
+ * This is only used in non-production environments to keep `tsx watch` and
+ * `node --watch` restarts from failing with EADDRINUSE on Windows.
+ */
+async function killProcessOnPort(port: number): Promise<void> {
+  const currentPid = process.pid;
+  try {
+    const { execSync } = await import("child_process");
+    if (process.platform === "win32") {
+      const output = execSync(`netstat -ano | findstr ":${port} "`, { encoding: "utf-8" });
+      const pids = new Set<string>();
+      for (const line of output.split("\n")) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 5 && parts[1].includes(`:${port}`) && parts[3] === "LISTENING") {
+          pids.add(parts[4]);
+        }
+      }
+      if (pids.size > 0) {
+        console.log(`[dev] cleaning up previous listeners on port ${port}: ${Array.from(pids).join(", ")}`);
+      }
+      for (const pid of pids) {
+        if (Number(pid) === currentPid) continue;
+        try {
+          execSync(`taskkill /F /PID ${pid}`);
+          console.log(`[dev] killed stale listener ${pid}`);
+        } catch {
+          // ignore: process may have exited between netstat and taskkill
+        }
+      }
+    } else {
+      try {
+        const pid = execSync(`lsof -ti tcp:${port}`, { encoding: "utf-8" }).trim();
+        if (pid && Number(pid) !== currentPid) {
+          console.log(`[dev] cleaning up previous listener on port ${port}: ${pid}`);
+          execSync(`kill -9 ${pid}`);
+        }
+      } catch {
+        // ignore: nothing using the port
+      }
+    }
+  } catch (err) {
+    console.log(`[dev] port cleanup failed:`, (err as Error).message);
+  }
+}
+
 async function main() {
   // Startup probes
   try {
@@ -47,8 +93,45 @@ async function main() {
 
   const app = await buildApp();
   const port = env.API_PORT;
-  await app.listen({ port, host: "0.0.0.0" });
+
+  // Retry bind so dev watchers (tsx watch, node --watch) can restart on
+  // Windows without EADDRINUSE. In non-production mode we also try to clean
+  // up a lingering previous listener on each attempt.
+  const maxBindRetries = 30;
+  const bindRetryDelayMs = 300;
+  for (let attempt = 1; attempt <= maxBindRetries; attempt++) {
+    if (process.env.NODE_ENV !== "production") {
+      await killProcessOnPort(port);
+    }
+    try {
+      await app.listen({ port, host: "0.0.0.0" });
+      break;
+    } catch (err) {
+      const isAddrInUse = (err as NodeJS.ErrnoException)?.code === "EADDRINUSE";
+      if (!isAddrInUse || attempt === maxBindRetries) {
+        throw err;
+      }
+      app.log.warn(`Port ${port} in use, retrying (${attempt}/${maxBindRetries})...`);
+      await new Promise((resolve) => setTimeout(resolve, bindRetryDelayMs));
+    }
+  }
   app.log.info(`API server running on port ${port}`);
+
+  // Graceful shutdown so dev watchers (tsx watch, nodemon, etc.) can restart
+  // without EADDRINUSE from a lingering server socket.
+  const closeServer = async (signal: string) => {
+    app.log.info(`Received ${signal}, shutting down...`);
+    try {
+      await app.close();
+      app.log.info("Server closed gracefully");
+    } catch (err) {
+      app.log.error({ err }, "Error during graceful shutdown");
+    }
+    process.exit(0);
+  };
+
+  process.on("SIGINT", () => closeServer("SIGINT"));
+  process.on("SIGTERM", () => closeServer("SIGTERM"));
 
   // Startup beacon — fire-and-forget, intentionally silent
   // Unauthorized production copies will ping this URL, giving visibility into deployment count

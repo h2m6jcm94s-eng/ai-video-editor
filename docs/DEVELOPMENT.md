@@ -136,33 +136,46 @@ Workers read the same file, so keep all storage and worker token variables there
 pnpm --filter @ai-video-editor/api db:migrate
 ```
 
-### 7. Start Workers
+### 7. Start the Full Dev Stack
 
-Uploads and renders require Temporal workers. Run each in a separate terminal (from the repo root):
-
-```bash
-# Ingest worker — task queue `ingest`
-uv run python -m ingest_worker
-
-# Segment worker — task queue `segment`
-uv run python -m segment_worker
-
-# Render worker — task queue `video-render-queue`
-uv run python -m render_worker
-```
-
-Ensure `apps/api/.env.local` is sourced or its variables are exported in the shell.
-
-### 8. Start the Development Servers
+One command starts the workers, API, and web frontend together. It also brings up Docker infrastructure and runs migrations if needed.
 
 ```bash
-pnpm dev
+pnpm dev:full
 ```
 
 This starts:
-- Web frontend at `http://localhost:3000`
-- API backend at `http://localhost:4000`
-- Shared types watch mode
+- Docker infrastructure (if not already running)
+- Database migrations
+- Python Temporal workers (ingest, reason, render, style, segment)
+- Fastify API backend at `http://localhost:4000`
+- Next.js web frontend at `http://localhost:3000`
+
+Logs are color-coded by service in the terminal and also written to `.tmp/dev-logs/` for quiet inspection.
+
+Press `Ctrl+C` to stop everything gracefully. If you need to force-stop:
+
+```bash
+pnpm dev:stop
+```
+
+### 8. Start Individual Development Servers (Optional)
+
+If you prefer to run pieces separately:
+
+```bash
+# Workers only
+pnpm workers
+
+# API only
+pnpm --filter @ai-video-editor/api dev
+
+# Web only
+pnpm --filter @ai-video-editor/web dev
+
+# Shared types watch only
+pnpm --filter @ai-video-editor/shared-types dev
+```
 
 ### 9. Verify Everything Works
 

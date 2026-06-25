@@ -4,11 +4,9 @@
 """Entry point for the ingest Temporal worker."""
 
 import asyncio
-import os
 
 from shared_py.startup import validate_startup
-from temporalio.client import Client
-from temporalio.worker import Worker
+from shared_py.worker_runner import run_worker
 
 from ingest_worker.activities import (
     detect_beats_activity,
@@ -19,11 +17,8 @@ from ingest_worker.workflows import ProbeAssetWorkflow
 
 
 async def main() -> None:
-    validate_startup("ingest-worker")
-
-    client = await Client.connect(os.environ.get("TEMPORAL_HOST", "localhost:7233"))
-    worker = Worker(
-        client,
+    await run_worker(
+        worker_name="ingest-worker",
         task_queue="ingest",
         workflows=[ProbeAssetWorkflow],
         activities=[
@@ -31,10 +26,8 @@ async def main() -> None:
             detect_beats_activity,
             detect_shot_boundaries_activity,
         ],
+        validate=validate_startup,
     )
-
-    print("Ingest worker started, polling task queue: ingest")
-    await worker.run()
 
 
 if __name__ == "__main__":

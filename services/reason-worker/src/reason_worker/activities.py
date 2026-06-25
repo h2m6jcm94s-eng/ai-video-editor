@@ -13,7 +13,7 @@ from shared_py.models import BeatGrid, CutList, ShotBoundary
 from shared_py.storage import download_asset
 from temporalio import activity
 
-from reason_worker.clip_rank import rank_clips_for_slots
+from reason_worker.clip_rank import compute_confidence, rank_clips_for_slots
 from reason_worker.cutlist_gen import generate_cutlist
 
 logger = StructuredLogger("reason_worker.activities")
@@ -129,6 +129,7 @@ async def generate_cutlist_activity(
     energy_curve: List[float],
     total_duration: float,
     style_tier: str = "full_remix",
+    song_asset_id: Optional[str] = None,
 ) -> dict:
     """Generate a cutlist from beats, shots, and style analysis."""
     beat_grid = BeatGrid(**beat_grid_raw)
@@ -154,6 +155,7 @@ async def generate_cutlist_activity(
         available_shot_types,
         total_duration=total_duration,
         style_tier=style_tier,
+        song_asset_id=song_asset_id,
     )
     return cutlist.model_dump(by_alias=True)
 
@@ -192,12 +194,14 @@ async def rank_clips_activity(
         fallback_policy=fallback_policy,
     )
 
+    confidences = compute_confidence(rankings)
     for slot in cutlist.slots:
         scores = rankings.get(slot.index, [])
         if scores:
             slot.selected_clip_id = scores[0].clip_id
             slot.ranked_clip_ids = [s.clip_id for s in scores[:3]]
-            slot.confidence = min(0.99, scores[0].total_score)
+            # Clamp confidence to the valid API range [0, 0.99].
+            slot.confidence = max(0.0, min(0.99, confidences.get(slot.index, 0.5)))
 
     return cutlist.model_dump(by_alias=True)
 

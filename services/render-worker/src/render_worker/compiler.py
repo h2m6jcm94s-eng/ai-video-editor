@@ -219,10 +219,22 @@ def _esc_text(t: str) -> str:
 
 
 def _get_param(params, key: str, default):
-    """Read an effect parameter whether params is a dict or a pydantic model."""
+    """Read an effect parameter whether params is a dict or a pydantic model.
+
+    Supports both snake_case (legacy/Python) and camelCase (schema/TS) keys.
+    """
+    camel_key = "".join([key.split("_")[0]] + [w.capitalize() for w in key.split("_")[1:]])
     if isinstance(params, dict):
-        return params.get(key, default)
-    return getattr(params, key, default)
+        if key in params:
+            return params[key]
+        if camel_key in params:
+            return params[camel_key]
+        return default
+    if hasattr(params, key):
+        return getattr(params, key)
+    if hasattr(params, camel_key):
+        return getattr(params, camel_key)
+    return default
 
 
 def _enable_expr(start_s: float, end_s: float) -> str:
@@ -527,7 +539,8 @@ def compile_timeline(
     enable_color_grade = _tier_index(style_tier) >= _tier_index("color_grade")
     enable_text = _tier_index(style_tier) >= _tier_index("with_text")
     enable_effects = _tier_index(style_tier) >= _tier_index("with_effects")
-    enable_audio = _tier_index(style_tier) >= _tier_index("full_remix")
+    # Audio is a base feature: if a song or audio track is provided, render it.
+    enable_audio = bool(cutlist.audio_tracks or config.song_path)
 
     if config.lut_path and not enable_color_grade:
         _warn_if_below(style_tier, "color_grade", "LUT / color grade")
@@ -535,8 +548,6 @@ def compile_timeline(
         _warn_if_below(style_tier, "with_text", "text overlays")
     if cutlist.subtitles and not enable_text:
         _warn_if_below(style_tier, "with_text", "subtitles")
-    if (cutlist.audio_tracks or config.song_path) and not enable_audio:
-        _warn_if_below(style_tier, "full_remix", "audio tracks / song")
     for slot in cutlist.slots:
         if slot.effects and not enable_effects:
             _warn_if_below(style_tier, "with_effects", f"slot effects ({slot.index})")
@@ -716,15 +727,21 @@ def compile_timeline(
         for seg in slot_segments:
             input_args.extend(["-i", seg["path"]])
 
-        # Audio inputs (only when tier allows remixing audio).
+        # Audio inputs: explicit audio tracks from the cutlist, or fallback to
+        # the legacy song_path config. Track asset IDs must resolve to downloaded
+        # local paths.
         audio_tracks: List[AudioTrack] = []
         if enable_audio:
             audio_tracks = list(cutlist.audio_tracks) if hasattr(cutlist, "audio_tracks") else []
             if not audio_tracks and config.song_path and os.path.exists(config.song_path or ""):
-                audio_tracks = [AudioTrack(asset_id="song", start_s=0.0, end_s=1e9, gain_db=0.0)]
+                audio_tracks = [AudioTrack(asset_id="song", start_s=0.0, end_s=current_duration, gain_db=0.0)]
 
         for track in audio_tracks:
-            path = sanitized_clip_paths.get(track.asset_id) or (config.song_path and _safe_path(config.song_path, must_exist=True))
+            path = config.audio_paths.get(track.asset_id)
+            if not path:
+                path = sanitized_clip_paths.get(track.asset_id)
+            if not path and config.song_path:
+                path = _safe_path(config.song_path, must_exist=True)
             if path and os.path.exists(path):
                 input_args.extend(["-i", path])
 
@@ -749,6 +766,13 @@ def compile_timeline(
             cmd.extend(["-map", "[amixed]", "-c:a", config.audio_codec, "-b:a", config.audio_bitrate, "-shortest"])
         else:
             cmd.extend(["-an"])
+
+        # Cap output at the cutlist's declared duration so the rendered file
+        # matches the reference/song duration target and does not grow due to
+        # overlapping slots or transition padding.
+        duration_cap = cutlist.globals.total_duration_s
+        if duration_cap and duration_cap > 0:
+            cmd.extend(["-t", str(duration_cap)])
 
         cmd.extend(["-movflags", "+faststart", output_path])
 

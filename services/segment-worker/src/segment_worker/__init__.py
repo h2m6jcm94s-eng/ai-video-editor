@@ -7,6 +7,10 @@ Imports are lazy so the package can be loaded without SAM3 or CUDA being
 available.  The heavy dependencies are only imported inside engine.py.
 """
 
+from shared_py.logging_config import configure_logging
+
+configure_logging(service_name="segment-worker")
+
 
 def __getattr__(name):
     if name == "is_segmentation_available":

@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "build": "tsc",
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --include ../../packages/shared-types/dist src/index.ts",
     "start": "node --require ./dist/lib/tracing.js dist/index.js",
     "lint": "eslint --ext .ts src/",
     "typecheck": "tsc --noEmit",

@@ -4,11 +4,9 @@
 """Entry point for the reason Temporal worker."""
 
 import asyncio
-import os
 
 from shared_py.startup import validate_startup
-from temporalio.client import Client
-from temporalio.worker import Worker
+from shared_py.worker_runner import run_worker
 
 from reason_worker.activities import (
     ensure_beat_grid,
@@ -24,11 +22,8 @@ from reason_worker.workflows import GenerateFromReferenceWorkflow
 
 
 async def main() -> None:
-    validate_startup("reason-worker")
-
-    client = await Client.connect(os.environ.get("TEMPORAL_HOST", "localhost:7233"))
-    worker = Worker(
-        client,
+    await run_worker(
+        worker_name="reason-worker",
         task_queue="generate",
         workflows=[GenerateFromReferenceWorkflow],
         activities=[
@@ -41,10 +36,8 @@ async def main() -> None:
             save_generated_cutlist,
             fail_generation_job,
         ],
+        validate=validate_startup,
     )
-
-    print("Reason worker started, polling task queue: generate")
-    await worker.run()
 
 
 if __name__ == "__main__":

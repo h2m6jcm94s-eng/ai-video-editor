@@ -5935,6 +5935,7 @@ dependencies = [
     { name = "opencv-python" },
     { name = "pillow" },
     { name = "shared-py" },
+    { name = "temporalio" },
 ]
 
 [package.metadata]
@@ -5945,6 +5946,7 @@ requires-dist = [
     { name = "opencv-python", specifier = ">=4.9.0" },
     { name = "pillow", specifier = ">=10.0.0" },
     { name = "shared-py", editable = "services/shared-py" },
+    { name = "temporalio", specifier = ">=1.10.0" },
 ]
 
 [[package]]
@@ -6534,6 +6536,7 @@ dependencies = [
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "shared-py" },
+    { name = "temporalio" },
 ]
 
 [package.metadata]
@@ -6549,6 +6552,7 @@ requires-dist = [
     { name = "scikit-image", specifier = ">=0.22.0" },
     { name = "scipy", specifier = ">=1.13.0" },
     { name = "shared-py", editable = "services/shared-py" },
+    { name = "temporalio", specifier = ">=1.10.0" },
 ]
 
 [[package]]

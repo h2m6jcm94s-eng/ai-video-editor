@@ -48,10 +48,7 @@ const schema = z.object({
   GUARDRAILS_TIMEOUT_MS: z.coerce.number().int().min(100).max(30000).default(3000),
   GUARDRAILS_ENABLED: z.enum(["true", "false"]).default("true"),
   DEFAULT_DAILY_TOKEN_LIMIT: z.coerce.number().int().min(1000).default(100000),
-  INTERNAL_WORKER_TOKEN: z
-    .string()
-    .min(32, "INTERNAL_WORKER_TOKEN must be at least 32 characters")
-    .optional(),
+  INTERNAL_WORKER_TOKEN: z.string().min(32, "INTERNAL_WORKER_TOKEN must be at least 32 characters"),
   PROVIDER_KEK: z
     .string()
     .length(64, "PROVIDER_KEK must be exactly 64 hex characters (32 bytes)")

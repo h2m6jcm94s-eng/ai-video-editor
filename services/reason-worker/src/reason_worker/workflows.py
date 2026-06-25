@@ -70,8 +70,18 @@ class GenerateFromReferenceWorkflow:
             if not reference_storage_key or not song_storage_key:
                 raise RuntimeError("Storage keys missing for reference or song asset")
 
-            # Resolve total duration from the song asset, falling back to reference.
-            total_duration = song_asset.get("durationSec") or reference_asset.get("durationSec") or 30.0
+            # Resolve total duration. Default cap is 30s so the edit stays short
+            # and social-friendly. Explicit user option wins; otherwise prefer the
+            # shorter of song/reference so we never ask for content that does not
+            # exist in the primary source.
+            target_duration = (input.options or {}).get("durationSec")
+            song_duration = song_asset.get("durationSec")
+            reference_duration = reference_asset.get("durationSec")
+            total_duration = target_duration or min(
+                song_duration or 30.0,
+                reference_duration or 30.0,
+                30.0,
+            )
 
             await self._publish(job_id, "analyzing_audio", 15, "Detecting beat grid")
             beat_result = await workflow.execute_activity(
@@ -108,6 +118,7 @@ class GenerateFromReferenceWorkflow:
                     beat_result["energy_curve"],
                     total_duration,
                     input.style_tier,
+                    song_asset_id,
                 ),
                 start_to_close_timeout=timedelta(seconds=300),
                 retry_policy=RetryPolicy(maximum_attempts=2),
