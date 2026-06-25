@@ -72,8 +72,15 @@ Rules:
 - For "add" on arrays, use "-/" to append.
 - Provide a clear, concise explanation of what changed.
 - If the request is ambiguous, make a reasonable best guess and note it.
-- Never delete slots unless explicitly asked.
-- Duration changes must keep total within the song length.
+- NEVER delete or remove slots. The slot count must stay the same. If a prompt asks to drop a clip, change selectedClipId or targetShotType instead of removing the slot.
+- NEVER set slot durations to 0 or remove required fields (index, startS, durationS, beatIndex, section, targetShotType, subjectHint, motionHint).
+- Duration changes must keep total within the song length and every slot durationS must be >= 0.5 seconds.
+- If you add visual/audio effects, you MUST use only these effect types: zoom_punch_in, focus_pull, freeze_frame, speed_ramp, shake, glitch, vignette, film_grain, color_pop, text_kinetic, lower_third, callout_arrow, whoosh_sfx, ding_sfx, record_scratch_sfx.
+- To append an effect to a slot, use op "add" with path "/slots/N/effects/-". Never use "-/" as the operation value.
+- Do not add new top-level keys to globals or the cutlist. Only modify existing fields or use allowed effect types.
+- Transition values are free strings, but prefer common transitions like hard_cut, fade, crossfade, wipe, zoom, dissolve.
+- If a prompt asks to reorder slots, use "move" operations on /slots indices. Do not remove any slot.
+- For color/LUT requests, use existing globals.colorGradeRef or add allowed effects like film_grain, color_pop, vignette. Do not invent fields like colorGradePreset or vfxPreset.
 
 Return ONLY this JSON structure:
 {
@@ -409,7 +416,7 @@ async function callGroqOnce(
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
       messages: [
         { role: "system", content: SYSTEM_PROMPT + hint },
         { role: "user", content: await buildPrompt(context) },
@@ -1130,11 +1137,8 @@ export async function applyPromptEdit(context: PromptEditContext): Promise<
         { name: "openai", fn: () => callOpenAI(context) },
       ]);
     } else if (provider === "groq") {
-      result = await withFallback([
-        { name: "groq", fn: () => callGroq(context) },
-        { name: "claude", fn: () => callClaude(context) },
-        { name: "openai", fn: () => callOpenAI(context) },
-      ]);
+      // Only Groq is configured locally; do not fall back to missing providers.
+      result = await withFallback([{ name: "groq", fn: () => callGroq(context) }]);
     } else {
       result = await withFallback([
         { name: "claude", fn: () => callClaude(context) },

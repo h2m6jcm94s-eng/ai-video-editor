@@ -189,26 +189,40 @@ def run_improvement_loop(client: httpx.Client, project_id: str, baseline: dict) 
 
     for idx, prompt in enumerate(PROMPTS, 1):
         print(f"\n[{idx}/{len(PROMPTS)}] Prompt: {prompt}")
+        time.sleep(5.0)  # Pause to stay under Groq rate limits.
         set_cutlist(client, project_id, best_cutlist)
-        try:
-            resp = apply_prompt(client, project_id, prompt)
-            cutlist = resp.get("project", {}).get("cutList") or best_cutlist
-            explanation = resp.get("explanation", "")
-            diff = resp.get("diff", [])
-            usage = resp.get("usage")
-        except Exception as exc:
-            print(f"  Prompt edit failed: {exc}")
+
+        resp = None
+        last_error = None
+        for attempt in range(3):
+            if attempt > 0:
+                backoff = 30 * attempt
+                print(f"  Retrying after {backoff}s...")
+                time.sleep(backoff)
+            try:
+                resp = apply_prompt(client, project_id, prompt)
+                break
+            except Exception as exc:
+                last_error = exc
+                print(f"  Attempt {attempt + 1} failed: {exc}")
+        else:
+            print(f"  Prompt edit failed after retries: {last_error}")
             iterations.append({
                 "index": idx,
                 "prompt": prompt,
                 "scoreBefore": best_score,
                 "scoreAfter": best_score,
                 "decision": "error",
-                "explanation": f"Error: {exc}",
+                "explanation": f"Error: {last_error}",
                 "diff": [],
                 "error": traceback.format_exc(),
             })
             continue
+
+        cutlist = resp.get("project", {}).get("cutList") or best_cutlist
+        explanation = resp.get("explanation", "")
+        diff = resp.get("diff", [])
+        usage = resp.get("usage")
 
         before = best_score
         after = score_cutlist(cutlist)
