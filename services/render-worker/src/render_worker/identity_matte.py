@@ -27,7 +27,7 @@ try:
 except Exception:  # pragma: no cover - optional dep
     np = None  # type: ignore[assignment]
 
-from ingest_worker.identity import ensure_faces
+from ingest_worker.identity import ensure_faces_for_clips
 from reason_worker.protagonist_pick import select_protagonists
 from segment_worker.engine import generate_subject_mask_for_identity
 from shared_py.identity_cluster import Identity
@@ -67,15 +67,16 @@ def build_identity_masks(
     """
     cutlist_obj = cutlist if isinstance(cutlist, CutList) else CutList(**cutlist)
 
-    # Ensure face caches exist for every selected clip.
-    for slot in cutlist_obj.slots:
-        clip_id = slot.selected_clip_id
-        if not clip_id or clip_id not in clip_paths:
-            continue
-        try:
-            ensure_faces(clip_paths[clip_id], clip_id, sample_fps=DEFAULT_SAMPLE_FPS)
-        except Exception as exc:
-            logger.warning("Failed to ensure faces for clip %s: %s", clip_id, exc)
+    # Ensure face caches exist for every selected clip in one batched pass.
+    selected_clip_paths = {
+        slot.selected_clip_id: clip_paths[slot.selected_clip_id]
+        for slot in cutlist_obj.slots
+        if slot.selected_clip_id and slot.selected_clip_id in clip_paths
+    }
+    try:
+        ensure_faces_for_clips(selected_clip_paths, sample_fps=IDENTITY.SAMPLE_FPS)
+    except Exception as exc:
+        logger.warning("Failed to ensure faces for selected clips: %s", exc)
 
     protagonists, protagonist_ids = select_protagonists(
         clip_paths,
