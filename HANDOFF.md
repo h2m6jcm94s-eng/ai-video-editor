@@ -1,24 +1,24 @@
 # AI Video Editor — Handoff
 
-> Generated after splitting the working tree into PRs. Last updated: 2026-06-27 (session 2 — PRs #181-#184 merged to main, integration test flakiness fixed).
+> Generated after splitting the working tree into PRs. Last updated: 2026-06-27 (session 3 — comprehensive `docs/wiki/` knowledge base added to `main`).
 
 ---
 
 ## 0. Latest Session Snapshot
 
 **Current branch:** `main`  
-**Latest commit:** `7317040` — `docs: refresh docs and OpenAPI for PRs #181-184`
+**Latest commit:** `d50162b` — `chore: ignore local debug/render scratch artifacts`
 
 ### What just happened
 
-- Merged all four open PRs serially into `main`:
-  1. `#181` — fix(batch2): address PRs #6-#13 demo render issues
-  2. `#182` — feat(render): NVENC hardware encoding + optional CUDA decode
-  3. `#183` — PR 2 — Batched face detection across clips
-  4. `#184` — feat: style genome extraction + extended cutlist slot schema
-- Resolved merge conflicts between #181/#182 (compiler, render config, batch2 script, tests) and #183/#184 (shared model definitions, pytest testpaths).
-- Fixed a flaky Windows-only integration test failure (`OSError: [WinError 6] The handle is invalid`) by passing `stdin=subprocess.DEVNULL` to FFmpeg subprocess calls in `services/render-worker/src/render_worker/compiler.py`.
-- Refreshed project documentation (`README.md`, `docs/ARCHITECTURE.md`, `docs/API.md`, `docs/DEVELOPMENT.md`, `docs/DEPLOYMENT.md`, `docs/TESTING.md`, `CHANGELOG.md`, and `apps/api/openapi.yaml`) to cover the merged Batch 2, NVENC, face detection/identity, and Style Genome features.
+- Finalised and committed a comprehensive `docs/wiki/` knowledge base covering:
+  - End-to-end feature overview (`01-features-overview.md`)
+  - Mathematical foundations and algorithm references (`02-mathematical-foundations.md`)
+  - Codebase guide for apps, services, packages, infra, and scripts (`03-codebase-guide/`)
+  - Roadmap and deep-dives on the next two features (`04-upcoming-features.md`)
+  - Glossary of terms (`05-glossary.md`)
+- Updated `.gitignore` to exclude local debug/render scratch artifacts (`filter_complex_*_debug.txt`, `optimisations.md`, `test files/`).
+- Previous merges (`#181`–`#184`) remain on `main`, including the Windows FFmpeg race fix (`stdin=subprocess.DEVNULL`) and refreshed core docs.
 
 ### Test results after merges
 
@@ -32,12 +32,11 @@ TS api:          316 passed
 ### Known working-tree state
 
 - `HANDOFF.md` — modified (this file).
-- `filter_complex_audio_debug.txt` and `filter_complex_video_debug.txt` — temporary debug artifacts from earlier render runs; safe to delete.
-- `test files/` — local test media (not tracked).
+- No untracked wiki files remaining.
 
 ### Next priority
 
-- **PR 3 — FastAPI inference server + TensorRT** for batched face detection is the next item in the GPU + Performance Optimizations Tier S plan. It was intentionally not started so #183 could land first.
+- **PR 3 — FastAPI inference server + TensorRT** for batched face detection is the next item in the GPU + Performance Optimizations Tier S plan.
 
 ---
 
