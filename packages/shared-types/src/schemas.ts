@@ -121,11 +121,16 @@ export const subtitleSchema = z
 export const audioTrackSchema = z
   .object({
     assetId: z.string().min(1),
+    role: z.enum(["music", "dialogue", "voiceover", "sfx", "ambience"]).default("music"),
     gainDb: z.number().min(-60).max(12).default(0),
     startS: z.number().min(0),
     endS: z.number().min(0),
     fadeInS: z.number().min(0).default(0),
     fadeOutS: z.number().min(0).default(0),
+    duckGainDb: z.number().min(-60).max(0).default(-12),
+    duckAttackMs: z.number().min(1).max(1000).default(20),
+    duckReleaseMs: z.number().min(10).max(2000).default(250),
+    duckThreshold: z.number().min(0).max(1).default(0.05),
   })
   .strict();
 
@@ -172,7 +177,8 @@ export const createRenderSchema = z
 
 export const renderOptionsSchema = z
   .object({
-    exportPreset: z.enum(["youtube_16_9", "reels_9_16", "tiktok_9_16", "square_1_1"]).optional(),
+    exportPreset: z.enum(["auto", "youtube_16_9", "reels_9_16", "tiktok_9_16", "square_1_1"]).optional(),
+    durationSec: z.number().min(5).max(600).optional(),
   })
   .strict();
 
