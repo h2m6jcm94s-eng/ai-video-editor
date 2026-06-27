@@ -40,15 +40,59 @@ def resolve_render_dimensions(export_preset: Optional[str], aspect_ratio: Option
 
 def _video_encode_args(config: RenderConfig) -> List[str]:
     """Return codec/preset/quality args tuned for the selected encoder."""
+    if config.use_nvenc or config.video_codec in ("h264_nvenc", "hevc_nvenc"):
+        codec = config.video_codec if config.video_codec in ("h264_nvenc", "hevc_nvenc") else "h264_nvenc"
+        preset = config.nvenc_preset or "p5"
+        cq = config.nvenc_cq if config.nvenc_cq and config.nvenc_cq > 0 else 19
+        return [
+            "-c:v", codec,
+            "-preset", preset,
+            "-tune", "hq",
+            "-rc", "vbr",
+            "-cq", str(cq),
+            "-pix_fmt", config.pix_fmt,
+        ]
+
     args = ["-c:v", config.video_codec, "-preset", config.video_preset]
-    if config.video_codec in ("h264_nvenc", "hevc_nvenc"):
-        # NVENC uses -cq / -rc vbr_hq instead of -crf.  Pull CQ from crf field
-        # or fall back to a sensible default.
-        cq = config.video_crf if config.video_crf and config.video_crf > 0 else 20
-        args.extend(["-rc", "vbr", "-cq", str(cq), "-pix_fmt", config.pix_fmt])
-    else:
-        args.extend(["-crf", str(config.video_crf), "-pix_fmt", config.pix_fmt])
+    args.extend(["-crf", str(config.video_crf), "-pix_fmt", config.pix_fmt])
     return args
+
+
+# Valid presets for the intermediate segment encoder.  NVENC presets are p1
+# (fastest) through p7 (slowest/best); libx264 presets are the standard set.
+_NVENC_PRESETS = frozenset({f"p{i}" for i in range(1, 8)})
+_LIBX264_PRESETS = frozenset(
+    {"ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow", "placebo"}
+)
+
+
+def _segment_video_args(config: RenderConfig) -> List[str]:
+    """Return encoder args for intermediate slot segments.
+
+    Intermediate segments are re-encoded before final concat.  Using NVENC here
+    (when available) removes the biggest CPU bottleneck in the render pipeline.
+    """
+    if config.use_nvenc:
+        preset = config.nvenc_preset if config.nvenc_preset in _NVENC_PRESETS else "p5"
+        cq = config.nvenc_cq if config.nvenc_cq and config.nvenc_cq > 0 else 19
+        return [
+            "-c:v", "h264_nvenc",
+            "-preset", preset,
+            "-tune", "hq",
+            "-rc", "vbr",
+            "-cq", str(cq),
+            "-pix_fmt", config.pix_fmt,
+            "-an",
+        ]
+
+    preset = config.video_preset if config.video_preset in _LIBX264_PRESETS else "ultrafast"
+    return [
+        "-c:v", "libx264",
+        "-preset", preset,
+        "-crf", str(config.video_crf),
+        "-pix_fmt", config.pix_fmt,
+        "-an",
+    ]
 
 
 def _tier_index(tier: str) -> int:
@@ -876,18 +920,38 @@ def _extract_segment(args) -> Optional[dict]:
     )
     vf = _apply_video_effects(slot, base_vf, temp_dir, relative_font, config, style_tier=style_tier)
 
+    encode_args = _segment_video_args(config)
+    input_prefix = ["-hwaccel", "cuda"] if config.use_hwaccel else []
     cmd = [
         "ffmpeg", "-y",
         "-ss", str(start),
         "-t", str(duration),
+        *input_prefix,
         "-i", clip_path,
         "-vf", vf,
-        "-c:v", "libx264", "-preset", "ultrafast",
-        "-crf", "23", "-pix_fmt", "yuv420p",
-        "-an",
+        *encode_args,
         segment_path,
     ]
-    _run_ffmpeg(cmd, f"segment extraction for slot {slot.index}", cwd=temp_dir)
+    try:
+        _run_ffmpeg(cmd, f"segment extraction for slot {slot.index}", cwd=temp_dir)
+    except RuntimeError:
+        if config.use_hwaccel:
+            warnings.warn(
+                f"Hardware decode failed for slot {slot.index}; retrying with software decode.",
+                stacklevel=2,
+            )
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(start),
+                "-t", str(duration),
+                "-i", clip_path,
+                "-vf", vf,
+                *encode_args,
+                segment_path,
+            ]
+            _run_ffmpeg(cmd, f"segment extraction for slot {slot.index}", cwd=temp_dir)
+        else:
+            raise
 
     raw_mask_path = None
     if getattr(slot, "mask_enabled", True):

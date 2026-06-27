@@ -10,7 +10,7 @@ from typing import Dict, List, Optional
 import httpx
 from temporalio import activity
 
-from render_worker.compiler import compile_timeline, resolve_render_dimensions
+from render_worker.compiler import compile_timeline, resolve_render_dimensions, _has_nvenc
 from shared_py.config import settings
 from shared_py.models import CutList, RenderConfig
 from shared_py.storage import download_asset, get_presigned_download_url, upload_file
@@ -193,12 +193,18 @@ async def compile_render(
         f"ave_render_{width}x{height}_{cutlist_obj.globals.total_duration_s:.0f}s_{_activity_run_id()}.mp4",
     )
 
+    # Auto-enable NVENC when the worker has a capable NVIDIA GPU.  Operators can
+    # opt out by setting AVE_DISABLE_NVENC=1.  CUDA decode is opt-in via
+    # AVE_USE_HWACCEL=1 because some source files/filters still need software decode.
+    use_nvenc = _has_nvenc() and not os.environ.get("AVE_DISABLE_NVENC")
+    use_hwaccel = os.environ.get("AVE_USE_HWACCEL", "0") == "1"
+
     config = RenderConfig(
         output_path=output_path,
         width=width,
         height=height,
         fps=30,
-        video_codec="libx264",
+        video_codec="h264_nvenc" if use_nvenc else "libx264",
         video_preset="slow",
         video_crf=23,
         audio_codec="aac",
@@ -210,6 +216,8 @@ async def compile_render(
         lut_path=lut_path,
         mask_paths=mask_paths,
         slot_mask_paths=slot_mask_paths,
+        use_nvenc=use_nvenc,
+        use_hwaccel=use_hwaccel,
     )
 
     compile_timeline(cutlist_obj, clip_paths, output_path, config, style_tier=style_tier)

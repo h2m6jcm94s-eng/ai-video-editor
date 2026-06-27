@@ -68,6 +68,19 @@ def main():
     parser.add_argument("--tier", type=str, default="full_remix", help="Style tier")
     parser.add_argument("--skip-heatmap", action="store_true", help="Skip heatmap computation (faster, lower quality)")
     parser.add_argument("--preview", action="store_true", help="Render 360p 15s preview")
+    parser.add_argument(
+        "--nvenc",
+        action="store_true",
+        help="Use NVIDIA NVENC hardware encoding when available (default: auto)",
+    )
+    parser.add_argument(
+        "--no-nvenc",
+        action="store_true",
+        help="Force software (libx264) encoding even if NVENC is available",
+    )
+    parser.add_argument("--nvenc-preset", type=str, default="p5", help="NVENC preset (p1 fastest -> p7 best, default: p5)")
+    parser.add_argument("--nvenc-cq", type=int, default=19, help="NVENC CQ value (default: 19)")
+    parser.add_argument("--hwaccel", action="store_true", help="Enable CUDA hardware decoding (experimental)")
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -232,7 +245,12 @@ def main():
         width, height = width // 4, height // 4
     else:
         width, height = ASPECT_PRESETS.get(preset, (1920, 1080))
-    use_nvenc = _has_nvenc() and not args.preview
+    if args.no_nvenc:
+        use_nvenc = False
+    elif args.nvenc:
+        use_nvenc = _has_nvenc()
+    else:
+        use_nvenc = _has_nvenc() and not args.preview
     config = RenderConfig(
         output_path=str(output_path),
         width=width,
@@ -240,8 +258,12 @@ def main():
         fps=30.0,
         song_path=str(song_path),
         video_codec="h264_nvenc" if use_nvenc else "libx264",
-        video_preset="p4" if use_nvenc else "slow",
-        video_crf=18 if not use_nvenc else 20,
+        video_preset="p5" if use_nvenc else "slow",
+        video_crf=18 if not use_nvenc else 19,
+        use_nvenc=use_nvenc,
+        nvenc_preset=args.nvenc_preset,
+        nvenc_cq=args.nvenc_cq,
+        use_hwaccel=args.hwaccel,
     )
 
     start_render = time.time()

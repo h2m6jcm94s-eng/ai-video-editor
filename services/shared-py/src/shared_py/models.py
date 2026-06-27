@@ -293,3 +293,10 @@ class RenderConfig(BaseModelCamel):
     slot_mask_paths: Dict[int, str] = Field(default_factory=dict)
     audio_tracks: List[AudioTrack] = Field(default_factory=list)
     audio_paths: Dict[str, str] = Field(default_factory=dict)
+
+    # Hardware-acceleration flags.  These are hints: the compiler falls back to
+    # software encode/decode automatically if the requested path fails.
+    use_nvenc: bool = False
+    nvenc_preset: str = "p5"
+    nvenc_cq: int = 19
+    use_hwaccel: bool = False
