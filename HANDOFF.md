@@ -7,7 +7,7 @@
 ## 0. Latest Session Snapshot
 
 **Current branch:** `main`  
-**Latest commit:** `51a803c` — `fix(repeat): eliminate duplicate source windows in demo render`
+**Latest commit:** `9c46408` — `fix(batch2): keep render temp dir on project drive and ignore .tmp`
 
 ### What just happened
 
@@ -19,11 +19,13 @@
   2. `services/reason-worker/src/reason_worker/clip_rank.py` — `_best_window` now hard-excludes already-used windows instead of only penalising them.
   3. `services/render-worker/src/render_worker/compiler.py` — when no heatmap window is available, the compiler now rotates the seek point across the clip based on slot index instead of always seeking to `0.0`.
   4. `scripts/batch2-offline-render.py` — added heatmap coverage validation; raises if >20% of clips have missing/empty heatmaps. Also lazy-imported `probe_video` and `compile_timeline` so spawned heatmap workers do not load boto3/torch stacks.
-- Re-rendered batch 2 demo:
-  - Full render completed in **47.0s**.
+- Re-rendered batch 2 demo (after deleting the heatmap cache):
+  - Heatmaps recomputed for all **67 clips**; cache now contains 67 files.
+  - Full render completed in **50.4s** using project-local temp dir (`E:`).
   - Cutlist: **101 slots, 67 unique clips, max reuse 2x**.
   - **True repeats (same clip + same window): 0** (was ~34 before the fix).
   - **Slots with `sourceWindowStartS = None`: 0/101**.
+  - Render temp dir forced to `repo_root/.tmp` so the system drive (`C:`) does not fill up with intermediate segments.
 
 ### Test results after merges
 
