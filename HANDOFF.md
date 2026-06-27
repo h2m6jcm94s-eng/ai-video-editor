@@ -7,7 +7,7 @@
 ## 0. Latest Session Snapshot
 
 **Current branch:** `main`  
-**Latest commit:** `f082876` — `docs: update HANDOFF after merging PRs #181-#184 and fixing flaky test`
+**Latest commit:** `7317040` — `docs: refresh docs and OpenAPI for PRs #181-184`
 
 ### What just happened
 
