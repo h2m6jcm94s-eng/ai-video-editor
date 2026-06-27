@@ -261,6 +261,86 @@ class StyleAnalysis(BaseModelCamel):
     mood: str = "neutral"
 
 
+class CutRhythmFamily(BaseModelCamel):
+    total_cuts: Optional[int] = None
+    avg_cut_duration_s: Optional[float] = None
+    std_cut_duration_s: Optional[float] = None
+    min_cut_duration_s: Optional[float] = None
+    max_cut_duration_s: Optional[float] = None
+    cut_density_per_min: Optional[float] = None
+    verse_cut_density: Optional[float] = None
+    chorus_cut_density: Optional[float] = None
+    drop_cut_density: Optional[float] = None
+    intro_cut_density: Optional[float] = None
+    outro_cut_density: Optional[float] = None
+    build_up_cut_density: Optional[float] = None
+    hard_cut_ratio: Optional[float] = None
+    gradual_transition_ratio: Optional[float] = None
+    cuts_on_downbeat_ratio: Optional[float] = None
+
+
+class MotionFamily(BaseModelCamel):
+    avg_motion_energy: Optional[float] = None
+    max_motion_energy: Optional[float] = None
+    motion_energy_std: Optional[float] = None
+    pct_still_shots: Optional[float] = None
+    pct_pan_left: Optional[float] = None
+    pct_pan_right: Optional[float] = None
+    pct_tilt_up: Optional[float] = None
+    pct_tilt_down: Optional[float] = None
+    pct_zoom_in: Optional[float] = None
+    pct_zoom_out: Optional[float] = None
+    pct_handheld: Optional[float] = None
+    pct_gimbal: Optional[float] = None
+
+
+class DwellFamily(BaseModelCamel):
+    avg_face_size_ratio: Optional[float] = None
+    max_face_size_ratio: Optional[float] = None
+    avg_subjects_per_shot: Optional[float] = None
+    pct_shots_with_face: Optional[float] = None
+    avg_face_screen_time_s: Optional[float] = None
+    protagonist_present_ratio: Optional[float] = None
+    avg_shot_subject_count: Optional[float] = None
+    face_size_variance: Optional[float] = None
+
+
+class AudioAlignFamily(BaseModelCamel):
+    cut_to_beat_alignment: Optional[float] = None
+    cut_to_downbeat_alignment: Optional[float] = None
+    verse_cut_to_beat_ratio: Optional[float] = None
+    chorus_cut_to_beat_ratio: Optional[float] = None
+    drop_cut_to_beat_ratio: Optional[float] = None
+    avg_cut_to_nearest_beat_s: Optional[float] = None
+    music_duck_frequency: Optional[float] = None
+    dialogue_clip_ratio: Optional[float] = None
+    iconic_line_count: Optional[int] = None
+    avg_dialogue_duration_s: Optional[float] = None
+
+
+class CompositionFamily(BaseModelCamel):
+    dominant_shot_size: Optional[Literal["close_up", "medium", "wide"]] = None
+    pct_close_up: Optional[float] = None
+    pct_medium_shot: Optional[float] = None
+    pct_wide_shot: Optional[float] = None
+    rule_of_thirds_ratio: Optional[float] = None
+
+
+class StyleGenomeFamilies(BaseModelCamel):
+    cut_rhythm: CutRhythmFamily = Field(default_factory=CutRhythmFamily)
+    motion: MotionFamily = Field(default_factory=MotionFamily)
+    dwell: DwellFamily = Field(default_factory=DwellFamily)
+    audio_align: AudioAlignFamily = Field(default_factory=AudioAlignFamily)
+    composition: CompositionFamily = Field(default_factory=CompositionFamily)
+
+
+class StyleGenome(BaseModelCamel):
+    version: str = "0.1.0"
+    feature_count: int = 50
+    families: StyleGenomeFamilies = Field(default_factory=StyleGenomeFamilies)
+    extracted_at: Optional[str] = None
+
+
 class ClipScore(BaseModelCamel):
     clip_id: str
     semantic_score: float = 0.0

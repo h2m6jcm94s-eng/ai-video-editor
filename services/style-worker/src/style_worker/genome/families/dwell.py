@@ -52,7 +52,7 @@ def _sample_video_faces(video_path: str, video_info: dict) -> List[dict]:
     try:
         from ingest_worker.identity import _get_face_app
     except Exception as exc:  # pragma: no cover - cross-service dep optional
-        logger.debug("ingest_worker.identity not available for dwell genome: %s", exc)
+        logger.debug("ingest_worker.identity not available for dwell genome", error=str(exc))
         return []
 
     app = _get_face_app()

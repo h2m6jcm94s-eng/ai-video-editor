@@ -32,7 +32,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "services/shared-py/tests", "services/segment-worker/tests", "services/reason-worker/tests"]
+testpaths = ["tests", "services/shared-py/tests", "services/segment-worker/tests", "services/reason-worker/tests", "services/style-worker/tests"]
 pythonpath = [
     "services/shared-py/src",
     "services/ingest-worker/src",
