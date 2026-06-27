@@ -15,6 +15,7 @@ from temporalio import activity
 
 from reason_worker.clip_rank import compute_confidence, rank_clips_for_slots
 from reason_worker.cutlist_gen import generate_cutlist
+from reason_worker.transition_select import select_xfade
 
 logger = StructuredLogger("reason_worker.activities")
 
@@ -130,6 +131,7 @@ async def generate_cutlist_activity(
     total_duration: float,
     style_tier: str = "full_remix",
     song_asset_id: Optional[str] = None,
+    clip_asset_ids: Optional[List[str]] = None,
 ) -> dict:
     """Generate a cutlist from beats, shots, and style analysis."""
     beat_grid = BeatGrid(**beat_grid_raw)
@@ -156,6 +158,7 @@ async def generate_cutlist_activity(
         total_duration=total_duration,
         style_tier=style_tier,
         song_asset_id=song_asset_id,
+        user_clip_count=len(clip_asset_ids) if clip_asset_ids else None,
     )
     return cutlist.model_dump(by_alias=True)
 
@@ -166,6 +169,7 @@ async def rank_clips_activity(
     clip_asset_ids: List[str],
     clip_metadata: Dict[str, dict],
     fallback_policy: str = "round_robin",
+    style_analysis: Optional[dict] = None,
 ) -> dict:
     """Rank user clips for each slot in the cutlist.
 
@@ -186,6 +190,7 @@ async def rank_clips_activity(
             "motion_energy": meta.get("motionEnergy") or meta.get("motion_energy") or 0.5,
             "aesthetic_score": meta.get("aestheticScore") or meta.get("aesthetic_score") or 0.5,
             "duration_sec": meta.get("durationSec") or meta.get("duration_sec") or 5.0,
+            "heatmap": meta.get("heatmap") or [],
         }
 
     rankings = rank_clips_for_slots(
@@ -195,13 +200,43 @@ async def rank_clips_activity(
     )
 
     confidences = compute_confidence(rankings)
+
+    # Reference transition archetypes (e.g., whip, hard_cut, dissolve) from style
+    # analysis, used to pick direction-aware transitions for each slot.
+    style_analysis = style_analysis or {}
+    ref_archetypes = (
+        style_analysis.get("detected_transition_types")
+        or style_analysis.get("detectedTransitionTypes")
+        or []
+    )
+
+    # First pass: select clips and copy heatmap window info.
+    selected_motions: dict = {}
     for slot in cutlist.slots:
         scores = rankings.get(slot.index, [])
         if scores:
-            slot.selected_clip_id = scores[0].clip_id
+            top = scores[0]
+            slot.selected_clip_id = top.clip_id
             slot.ranked_clip_ids = [s.clip_id for s in scores[:3]]
             # Clamp confidence to the valid API range [0, 0.99].
             slot.confidence = max(0.0, min(0.99, confidences.get(slot.index, 0.5)))
+            # Carry the heatmap-best window into the slot so the compiler seeks
+            # to the interesting part of the clip instead of the reference time.
+            if top.window_start_s is not None:
+                slot.source_window_start_s = top.window_start_s
+            if top.window_score is not None:
+                slot.heatmap_score = top.window_score
+            selected_motions[slot.index] = top.dominant_motion
+
+    # Second pass: direction-aware transition selection using outgoing motion from
+    # the current slot's clip and incoming motion from the next slot's clip.
+    slots = cutlist.slots
+    for i, slot in enumerate(slots):
+        ref_archetype = ref_archetypes[i % len(ref_archetypes)] if ref_archetypes else "dissolve"
+        out_motion = selected_motions.get(slot.index, "still")
+        next_slot = slots[i + 1] if i + 1 < len(slots) else None
+        in_motion = selected_motions.get(next_slot.index, "still") if next_slot else "still"
+        slot.transition_out = select_xfade(out_motion, in_motion, ref_archetype)
 
     return cutlist.model_dump(by_alias=True)
 

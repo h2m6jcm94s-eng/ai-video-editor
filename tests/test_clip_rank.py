@@ -133,21 +133,26 @@ class TestRankClipsForSlots:
             assert len(rankings[i]) == 3
 
     def test_total_score_computation(self):
-        """Verify total score is weighted sum."""
+        """Verify total score is weighted sum including heatmap window quality.
+
+        Use more clips than slots so the exhaust bonus does not apply.
+        """
         slots = [make_slot(index=0)]
         clips = {
             "C01": make_clip_meta(shot_type="wide", motion_energy=0.5, duration=2.0, aesthetic=0.5),
+            "C02": make_clip_meta(shot_type="medium", motion_energy=0.5, duration=2.0, aesthetic=0.5),
         }
 
         rankings = rank_clips_for_slots(slots, clips)
 
         score = rankings[0][0]
         expected = (
-            0.40 * score.semantic_score +
-            0.20 * score.shot_type_score +
-            0.15 * score.aesthetic_score +
-            0.15 * score.motion_score +
-            0.10 * score.duration_score -
+            0.30 * score.semantic_score +
+            0.15 * score.shot_type_score +
+            0.10 * score.aesthetic_score +
+            0.10 * score.motion_score +
+            0.05 * score.duration_score +
+            0.25 * score.window_score -
             0.40 * score.diversity_penalty -
             score.repetition_penalty
         )

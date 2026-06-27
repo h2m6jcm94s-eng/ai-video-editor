@@ -17,8 +17,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "services", "sh
 import warnings
 
 from PIL import Image
-from render_worker.compiler import compile_timeline, render_preview, resolve_render_dimensions, XFADE_MAP, _get_fontconfig_file
-from shared_py.models import CutList, CutListGlobals, Slot, Overlay, RenderConfig, Effect, Subtitle
+from render_worker.compiler import compile_timeline, render_preview, resolve_render_dimensions, XFADE_MAP, _get_fontconfig_file, _build_audio_filter
+from shared_py.models import CutList, CutListGlobals, Slot, Overlay, RenderConfig, Effect, Subtitle, AudioTrack
 
 
 def create_test_video(path: str, duration: float = 5.0, fps: int = 30,
@@ -675,3 +675,66 @@ class TestLUTApplication:
             for p in [video_path, lut_path, output_path]:
                 if os.path.exists(p):
                     os.unlink(p)
+
+
+class TestAudioDucking:
+    def test_no_dialogue_uses_plain_amix(self):
+        tracks = [
+            AudioTrack(asset_id="m1", role="music", start_s=0.0, end_s=30.0, gain_db=-6.0),
+            AudioTrack(asset_id="s1", role="sfx", start_s=0.0, end_s=30.0, gain_db=-12.0),
+        ]
+        filt, _, _ = _build_audio_filter(tracks, ["", ""], 2, None)
+        assert "amix" in filt
+        assert "sidechaincompress" not in filt
+
+    def test_dialogue_triggers_sidechaincompress_on_music(self):
+        tracks = [
+            AudioTrack(asset_id="m1", role="music", start_s=0.0, end_s=30.0, gain_db=-6.0),
+            AudioTrack(asset_id="d1", role="dialogue", start_s=0.0, end_s=30.0, gain_db=0.0),
+        ]
+        filt, _, _ = _build_audio_filter(tracks, ["", ""], 2, None)
+        assert "sidechaincompress" in filt
+        # The raw dialogue input is used directly as the sidechain key, while a
+        # gain-adjusted copy goes to the final mix.
+        assert "[trk2_raw][3:a]sidechaincompress" in filt
+        assert "[dlg3_mix]" in filt
+        assert "[trk2]" in filt
+
+    def test_multiple_dialogues_fall_back_to_plain_amix(self):
+        tracks = [
+            AudioTrack(asset_id="m1", role="music", start_s=0.0, end_s=30.0),
+            AudioTrack(asset_id="d1", role="dialogue", start_s=0.0, end_s=30.0),
+            AudioTrack(asset_id="d2", role="voiceover", start_s=0.0, end_s=30.0),
+        ]
+        filt, _, extra = _build_audio_filter(tracks, ["", "", ""], 2, None)
+        assert "sidechaincompress" not in filt
+        assert "amix" in filt
+        assert "[dlg_mix]" in filt
+        assert extra == []
+
+    def test_ducking_parameters_in_filter(self):
+        tracks = [
+            AudioTrack(
+                asset_id="m1",
+                role="music",
+                start_s=0.0,
+                end_s=30.0,
+                duck_gain_db=-18.0,
+                duck_attack_ms=10,
+                duck_release_ms=500,
+                duck_threshold=0.1,
+            ),
+            AudioTrack(asset_id="d1", role="dialogue", start_s=0.0, end_s=30.0),
+        ]
+        filt, _, _ = _build_audio_filter(tracks, ["", ""], 2, None)
+        assert "threshold=0.1" in filt
+        assert "attack=10" in filt
+        assert "release=500" in filt
+        # -18 dB reduction -> ratio = 10^(18/20) ≈ 7.94, rounded to 7.94 or 7.95.
+        assert "ratio=7.9" in filt
+
+    def test_empty_tracks_returns_no_audio(self):
+        filt, next_idx, extra = _build_audio_filter([], [], 2, None)
+        assert filt == ""
+        assert next_idx == -1
+        assert extra == []

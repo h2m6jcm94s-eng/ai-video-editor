@@ -13,6 +13,15 @@ dependencies = [
     "temporalio>=1.7.0",
 ]
 
+[project.optional-dependencies]
+audio_scoring = [
+    "openai-whisper>=20231117",
+]
+matting = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+]
+
 [tool.uv.sources]
 shared-py = { workspace = true }
 ingest-worker = { workspace = true }

@@ -10,6 +10,9 @@ from typing import Dict, List, Optional
 from temporalio import workflow
 from temporalio.common import RetryPolicy
 
+with workflow.unsafe.imports_passed_through():
+    from reason_worker.aspect_detect import detect_aspect_preset
+
 
 @dataclass
 class GenerateFromReferenceInput:
@@ -70,18 +73,32 @@ class GenerateFromReferenceWorkflow:
             if not reference_storage_key or not song_storage_key:
                 raise RuntimeError("Storage keys missing for reference or song asset")
 
-            # Resolve total duration. Default cap is 30s so the edit stays short
-            # and social-friendly. Explicit user option wins; otherwise prefer the
-            # shorter of song/reference so we never ask for content that does not
-            # exist in the primary source.
+            # Resolve total duration. Explicit user option wins; otherwise default
+            # to the song length (most natural), then reference length. No upper cap
+            # — the user controls output length via durationSec or by uploading a
+            # shorter song/reference. Floor at 5s to avoid degenerate renders.
             target_duration = (input.options or {}).get("durationSec")
             song_duration = song_asset.get("durationSec")
             reference_duration = reference_asset.get("durationSec")
-            total_duration = target_duration or min(
-                song_duration or 30.0,
-                reference_duration or 30.0,
-                30.0,
-            )
+            if target_duration is not None:
+                total_duration = float(target_duration)
+            elif song_duration is not None:
+                total_duration = float(song_duration)
+            elif reference_duration is not None:
+                total_duration = float(reference_duration)
+            else:
+                total_duration = 30.0
+            total_duration = max(total_duration, 5.0)
+
+            # Resolve export preset. If the user didn't pick one, infer from the
+            # reference video's aspect ratio so a YouTube reference doesn't render
+            # as a cropped portrait video.
+            options = input.options or {}
+            if not options.get("exportPreset"):
+                ref_width = reference_asset.get("width")
+                ref_height = reference_asset.get("height")
+                options = {**options, "exportPreset": detect_aspect_preset(ref_width, ref_height)}
+                input.options = options
 
             await self._publish(job_id, "analyzing_audio", 15, "Detecting beat grid")
             beat_result = await workflow.execute_activity(
@@ -108,6 +125,8 @@ class GenerateFromReferenceWorkflow:
                 retry_policy=RetryPolicy(maximum_attempts=2),
             )
 
+            clip_asset_ids = input.clip_asset_ids or project.get("clipAssetIds") or []
+
             await self._publish(job_id, "generating_cutlist", 50, "Generating cutlist from analysis")
             cutlist_raw = await workflow.execute_activity(
                 "generate_cutlist_activity",
@@ -119,13 +138,13 @@ class GenerateFromReferenceWorkflow:
                     total_duration,
                     input.style_tier,
                     song_asset_id,
+                    clip_asset_ids,
                 ),
                 start_to_close_timeout=timedelta(seconds=300),
                 retry_policy=RetryPolicy(maximum_attempts=2),
             )
 
             await self._publish(job_id, "ranking_clips", 75, "Ranking clips for each slot")
-            clip_asset_ids = input.clip_asset_ids or project.get("clipAssetIds") or []
             clip_metadata = {
                 clip_id: (assets_by_id.get(clip_id) or {}).get("metadata") or {}
                 for clip_id in clip_asset_ids

@@ -82,9 +82,19 @@ async def compile_render(
     mask_source_map: Optional[Dict[str, str]] = None,
     export_preset: Optional[str] = None,
     style_tier: str = "full_remix",
+    duration_sec: Optional[float] = None,
 ) -> str:
     """Compile the cut-list into a final MP4."""
     cutlist_obj = CutList(**cutlist)
+
+    # Apply an explicit duration cap from render options. This lets users request
+    # a shorter output than the generated cutlist without regenerating.
+    if duration_sec is not None and duration_sec > 0:
+        current = cutlist_obj.globals.total_duration_s
+        if current is None or duration_sec < current:
+            cutlist_obj.globals.total_duration_s = duration_sec
+            for track in cutlist_obj.audio_tracks:
+                track.end_s = min(track.end_s, duration_sec)
 
     # Map slots to local clip paths
     clip_paths: Dict[str, str] = {}
