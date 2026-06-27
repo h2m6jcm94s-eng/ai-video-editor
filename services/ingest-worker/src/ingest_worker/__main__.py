@@ -9,6 +9,7 @@ from shared_py.startup import validate_startup
 from shared_py.worker_runner import run_worker
 
 from ingest_worker.activities import (
+    compute_clip_heatmap_activity,
     detect_beats_activity,
     detect_shot_boundaries_activity,
     probe_asset,
@@ -25,6 +26,7 @@ async def main() -> None:
             probe_asset,
             detect_beats_activity,
             detect_shot_boundaries_activity,
+            compute_clip_heatmap_activity,
         ],
         validate=validate_startup,
     )

@@ -59,7 +59,19 @@ function makeEffect(id: string): Effect {
 }
 
 function makeAudioTrack(index: number): AudioTrack {
-  return { assetId: `audio-${index}`, gainDb: 0, startS: 0, endS: 30, fadeInS: 0, fadeOutS: 0 };
+  return {
+    assetId: `audio-${index}`,
+    role: "music",
+    gainDb: 0,
+    startS: 0,
+    endS: 30,
+    fadeInS: 0,
+    fadeOutS: 0,
+    duckGainDb: -12,
+    duckAttackMs: 20,
+    duckReleaseMs: 250,
+    duckThreshold: 0.05,
+  };
 }
 
 const initialState = {

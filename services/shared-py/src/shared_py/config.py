@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     gpu_device: str = os.environ.get("GPU_DEVICE", "cpu")
     temp_dir: str = Field(default_factory=lambda: str(Path(tempfile.gettempdir()) / "ai-video-editor"))
 
+    # Beat snapping in cutlist generation
+    beat_snap_downbeat_radius: float = 0.10
+    beat_snap_beat_radius: float = 0.05
+
     # API callback
     api_base: str = os.environ.get("API_BASE", "http://localhost:4000/api")
     api_token: str = os.environ.get("API_TOKEN", "")

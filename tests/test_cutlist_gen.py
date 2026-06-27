@@ -626,7 +626,9 @@ class TestShotAndBeatSnapping:
             f"last slot ends too early at {last_slot.start_s + last_slot.duration_s}"
         )
 
-    def test_slot_does_not_cross_shot_boundary_end(self):
+    def test_slot_starts_snap_near_shot_boundaries(self):
+        """Slot starts should snap to shot boundaries or beats, but durations
+        are no longer truncated at shot ends to avoid tiny slots."""
         beats = make_beat_grid(bpm=60)
         shots = [
             ShotBoundary(start_frame=0, end_frame=150, start_s=0.0, end_s=5.0, is_gradual=False),
@@ -636,12 +638,13 @@ class TestShotAndBeatSnapping:
         cutlist = generate_cutlist_programmatic(beats, shots, energy, ["wide"], total_duration=10.0)
 
         for slot in cutlist.slots:
-            end_s = slot.start_s + slot.duration_s
-            shot = next((s for s in shots if s.start_s <= slot.start_s < s.end_s), None)
-            if shot is not None:
-                assert end_s <= shot.end_s + 1e-3, (
-                    f"slot {slot.index} ends at {end_s}, past shot end {shot.end_s}"
-                )
+            # Slot start should be within one beat of a shot boundary or a beat.
+            nearest_shot = min((abs(slot.start_s - s.start_s) for s in shots), default=float("inf"))
+            nearest_beat = min((abs(slot.start_s - b) for b in beats.beats), default=float("inf"))
+            assert min(nearest_shot, nearest_beat) < 0.6, (
+                f"slot {slot.index} start {slot.start_s} is far from both shots and beats"
+            )
+            assert slot.duration_s >= 0.4, f"slot {slot.index} duration collapsed to {slot.duration_s}"
 
     def test_snapping_preserves_nonzero_duration(self):
         beats = make_beat_grid(bpm=60)

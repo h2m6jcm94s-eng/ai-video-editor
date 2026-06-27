@@ -84,7 +84,7 @@ class TestFullPipeline:
                  "-ar", "44100", audio_path],
                 check=True, capture_output=True,
             )
-            curve = compute_energy_curve(audio_path, n_points=10)
+            curve = compute_energy_curve(audio_path, num_points=10)
             assert len(curve) == 10
             assert all(isinstance(v, float) for v in curve)
             assert all(0 <= v <= 1 for v in curve)
@@ -260,7 +260,7 @@ class TestEndToEndSmoke:
 
             # Step 1: detect beats from song.
             beat_grid = detect_beats_librosa(song_path)
-            energy_curve = compute_energy_curve(song_path, n_points=10)
+            energy_curve = compute_energy_curve(song_path, num_points=10)
 
             # Step 2: define shot boundaries for the reference.
             # Use explicit boundaries so the test does not depend on the shot
