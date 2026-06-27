@@ -54,8 +54,26 @@ function normalizeSlot(slot: Record<string, unknown>, index: number, clipIds: st
     requiredTags: Array.isArray(slot.requiredTags) ? slot.requiredTags : [],
     avoidTags: Array.isArray(slot.avoidTags) ? slot.avoidTags : [],
     effects,
+    sourceWindowStartS: typeof slot.sourceWindowStartS === "number" ? slot.sourceWindowStartS : undefined,
+    anticipationOffsetS: typeof slot.anticipationOffsetS === "number" ? slot.anticipationOffsetS : 0,
     maskEnabled: typeof slot.maskEnabled === "boolean" ? slot.maskEnabled : true,
+    identityIdsPresent: Array.isArray(slot.identityIdsPresent) ? (slot.identityIdsPresent as number[]) : [],
+    protagonistMatteEnabled:
+      typeof slot.protagonistMatteEnabled === "boolean" ? slot.protagonistMatteEnabled : true,
+    enableKineticText: typeof slot.enableKineticText === "boolean" ? slot.enableKineticText : false,
+    textZLayer:
+      typeof slot.textZLayer === "string" && ["on_top", "behind_subject"].includes(slot.textZLayer)
+        ? (slot.textZLayer as "on_top" | "behind_subject")
+        : "on_top",
+    textDensity:
+      typeof slot.textDensity === "string" && ["low", "medium", "high"].includes(slot.textDensity)
+        ? (slot.textDensity as "low" | "medium" | "high")
+        : "medium",
   };
+
+  if (typeof slot.kineticText === "string") {
+    normalized.kineticText = slot.kineticText;
+  }
 
   if (selectedClipId) {
     normalized.selectedClipId = selectedClipId;
@@ -64,6 +82,14 @@ function normalizeSlot(slot: Record<string, unknown>, index: number, clipIds: st
       : [selectedClipId];
   } else if (Array.isArray(slot.rankedClipIds)) {
     normalized.rankedClipIds = slot.rankedClipIds as string[];
+  }
+
+  if (typeof slot.sourceWindowStartS === "number") {
+    normalized.sourceWindowStartS = slot.sourceWindowStartS;
+  }
+
+  if (typeof slot.anticipationOffsetS === "number") {
+    normalized.anticipationOffsetS = slot.anticipationOffsetS;
   }
 
   if (typeof slot.maskAssetId === "string") {

@@ -20,4 +20,7 @@ def __getattr__(name):
     if name == "analyze_camera_motion":
         from style_worker.camera_motion import analyze_camera_motion
         return analyze_camera_motion
+    if name == "extract_genome":
+        from style_worker.genome.extract import extract_genome
+        return extract_genome
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

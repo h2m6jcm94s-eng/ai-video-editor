@@ -14,16 +14,17 @@ from style_worker.activities import (
     cleanup_style_assets,
     detect_text_overlays,
     download_reference_video,
+    extract_genome_activity,
     extract_lut,
 )
-from style_worker.workflows import AnalyzeStyleWorkflow
+from style_worker.workflows import AnalyzeGenomeWorkflow, AnalyzeStyleWorkflow
 
 
 async def main() -> None:
     await run_worker(
         worker_name="style-worker",
         task_queue="style",
-        workflows=[AnalyzeStyleWorkflow],
+        workflows=[AnalyzeStyleWorkflow, AnalyzeGenomeWorkflow],
         activities=[
             download_reference_video,
             extract_lut,
@@ -31,6 +32,7 @@ async def main() -> None:
             analyze_motion,
             classify_shot_transitions,
             cleanup_style_assets,
+            extract_genome_activity,
         ],
         validate=validate_startup,
     )

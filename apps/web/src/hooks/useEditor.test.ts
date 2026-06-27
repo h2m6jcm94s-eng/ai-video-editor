@@ -39,7 +39,14 @@ function makeSlot(index: number, overrides: Partial<Slot> = {}): Slot {
     requiredTags: [],
     avoidTags: [],
     maskEnabled: true,
+    identityIdsPresent: [],
+    protagonistMatteEnabled: true,
+    enableKineticText: false,
+    textZLayer: "on_top",
+    textDensity: "medium",
     effects: [],
+    sourceWindowStartS: undefined,
+    anticipationOffsetS: 0,
     ...overrides,
   };
 }

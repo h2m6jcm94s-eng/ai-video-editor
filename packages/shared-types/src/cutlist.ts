@@ -49,7 +49,15 @@ export function buildInitialCutList(assets: AssetLike[]): CutList {
       rankedClipIds: clip ? [clip.id] : undefined,
       maskAssetId: undefined,
       maskEnabled: true,
+      identityIdsPresent: [],
+      protagonistMatteEnabled: true,
+      enableKineticText: false,
+      textZLayer: "on_top",
+      textDensity: "medium",
+      kineticText: undefined,
       effects: [],
+      sourceWindowStartS: undefined,
+      anticipationOffsetS: 0,
     };
   });
 

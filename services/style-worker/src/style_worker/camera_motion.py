@@ -22,7 +22,6 @@ def analyze_camera_motion(video_path: str, shot_boundaries: list) -> List[str]:
         logger.warning("cv2 not available, skipping camera motion analysis")
         return ["static"] * len(shot_boundaries)
     cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     motions = []
