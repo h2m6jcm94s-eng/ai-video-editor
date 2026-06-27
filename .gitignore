@@ -88,3 +88,4 @@ filter_complex_*_debug.txt
 optimisations.md
 test files/
 
+.tmp/

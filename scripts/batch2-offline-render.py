@@ -66,6 +66,14 @@ def main():
     from ingest_worker.probe import probe_video
     from render_worker.compiler import compile_timeline, _has_nvenc, QUALITY_PROFILES
 
+    # Keep render temp files on the project drive (E:) so we do not fill the
+    # system drive (C:) with intermediate segments.
+    import tempfile
+
+    tmp_dir = repo_root / ".tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    tempfile.tempdir = str(tmp_dir)
+
     parser = argparse.ArgumentParser(description="Batch 2 offline render")
     parser.add_argument("--duration", type=float, default=None, help="Target output duration in seconds (default: full song length)")
     parser.add_argument("--clips-limit", type=int, default=0, help="Limit number of clips (0 = all)")
