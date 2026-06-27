@@ -306,7 +306,14 @@ def _run_ffmpeg(cmd: List[str], context: str, cwd: Optional[str] = None) -> None
         env["FONTCONFIG_FILE"] = fontconfig
 
     try:
-        subprocess.run(cmd, check=True, capture_output=True, cwd=cwd, env=env)
+        subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            cwd=cwd,
+            env=env,
+            stdin=subprocess.DEVNULL,
+        )
     except subprocess.CalledProcessError as e:
         stderr = e.stderr.decode("utf-8", errors="replace") if e.stderr else ""
         log_path = ""
