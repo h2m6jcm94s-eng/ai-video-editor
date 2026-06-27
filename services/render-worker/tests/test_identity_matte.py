@@ -85,7 +85,7 @@ def test_matte_skipped_when_identity_absent(tmp_path, monkeypatch):
         lambda *a, **kw: ([fake_identity], [0]),
     )
     monkeypatch.setattr(
-        "render_worker.identity_matte.ensure_faces",
+        "render_worker.identity_matte.ensure_faces_for_clips",
         lambda *a, **kw: None,
     )
     monkeypatch.setattr(
