@@ -1,4 +1,4 @@
-﻿# Copyright (c) 2025 Devayan Dewri. All rights reserved.
+# Copyright (c) 2025 Devayan Dewri. All rights reserved.
 # Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 # Commercial SaaS use is prohibited without written permission.
 """FFmpeg-based timeline compiler for beat-synced video rendering."""
@@ -8,7 +8,8 @@ import shutil
 import tempfile
 import subprocess
 import warnings
-from typing import List, Optional, Dict
+from concurrent.futures import ThreadPoolExecutor
+from typing import List, Optional, Dict, NamedTuple
 from shared_py.models import CutList, Slot, RenderConfig, AudioTrack
 
 
@@ -37,11 +38,151 @@ def resolve_render_dimensions(export_preset: Optional[str], aspect_ratio: Option
     return ASPECT_RATIO_DIMENSIONS.get(aspect_ratio, (720, 1280))
 
 
+def _video_encode_args(config: RenderConfig) -> List[str]:
+    """Return codec/preset/quality args tuned for the selected encoder."""
+    args = ["-c:v", config.video_codec, "-preset", config.video_preset]
+    if config.video_codec in ("h264_nvenc", "hevc_nvenc"):
+        # NVENC uses -cq / -rc vbr_hq instead of -crf.  Pull CQ from crf field
+        # or fall back to a sensible default.
+        cq = config.video_crf if config.video_crf and config.video_crf > 0 else 20
+        args.extend(["-rc", "vbr", "-cq", str(cq), "-pix_fmt", config.pix_fmt])
+    else:
+        args.extend(["-crf", str(config.video_crf), "-pix_fmt", config.pix_fmt])
+    return args
+
+
 def _tier_index(tier: str) -> int:
     try:
         return STYLE_TIERS.index(tier)
     except ValueError:
         return len(STYLE_TIERS) - 1
+
+
+_ffprobe_duration_cache: Dict[str, float] = {}
+
+
+def _probe_duration(video_path: str) -> float:
+    """Return video duration in seconds using ffprobe, with caching."""
+    if video_path in _ffprobe_duration_cache:
+        return _ffprobe_duration_cache[video_path]
+
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        video_path,
+    ]
+    try:
+        out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, text=True).strip()
+        duration = float(out) if out else 0.0
+    except Exception:
+        duration = 0.0
+
+    _ffprobe_duration_cache[video_path] = duration
+    return duration
+
+
+def _db_to_linear(gain_db: float) -> float:
+    """Convert a dB gain to a linear amplitude ratio."""
+    return 10 ** (gain_db / 20.0)
+
+
+def _extract_dialogue_audio(
+    clip_path: str,
+    source_start_s: float,
+    source_end_s: float,
+    temp_dir: str,
+) -> Optional[str]:
+    """Extract a single dialogue segment as a 48kHz stereo WAV with fades.
+
+    Fades remove click/pop artefacts at cut points and resampling guarantees a
+    common sample rate for the final mix.
+    """
+    duration = max(0.0, source_end_s - source_start_s)
+    if duration < 0.05 or not os.path.exists(clip_path):
+        return None
+
+    fade_dur = min(0.02, duration / 2.0)
+    out_start = max(0.0, duration - fade_dur)
+    wav_path = os.path.join(temp_dir, f"dlg_{abs(hash(clip_path))}_{int(source_start_s*1000)}.wav")
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", str(source_start_s),
+        "-t", str(duration),
+        "-i", clip_path,
+        "-vn",
+        "-af", f"aresample=48000,afade=t=in:st=0:d={fade_dur},afade=t=out:st={out_start}:d={fade_dur}",
+        "-ar", "48000", "-ac", "2",
+        wav_path,
+    ]
+    _run_ffmpeg(cmd, "dialogue audio extraction", cwd=temp_dir)
+    return wav_path
+
+
+def _dummy_silence_audio(duration: float, temp_dir: str) -> str:
+    """Return a silent WAV of the requested duration."""
+    duration = max(0.0, duration)
+    wav_path = os.path.join(temp_dir, f"silence_{int(duration*1000)}.wav")
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+        "-t", str(duration),
+        "-acodec", "pcm_s16le",
+        wav_path,
+    ]
+    _run_ffmpeg(cmd, "silent audio placeholder", cwd=temp_dir)
+    return wav_path
+
+
+def _build_dialogue_bus(
+    dialogue_segments: List[tuple[AudioTrack, str]],
+    temp_dir: str,
+) -> str:
+    """Mix per-slot dialogue extracts into one timed, gated, compressed bus.
+
+    Each segment is delayed to its timeline position so silent padding keeps the
+    music sidechain from reacting when no one is speaking. The resulting WAV is
+    a single input that can be used directly as the sidechain key.
+    """
+    if len(dialogue_segments) == 1:
+        return dialogue_segments[0][1]
+
+    output_path = os.path.join(temp_dir, "dialogue_bus.wav")
+    inputs: List[str] = []
+    for _, path in dialogue_segments:
+        inputs.extend(["-i", path])
+
+    parts: List[str] = []
+    labels: List[str] = []
+    for i, (track, _) in enumerate(dialogue_segments):
+        label = f"dlg{i}"
+        delay_ms = max(0, int(round(track.start_s * 1000)))
+        filters = [f"volume={track.gain_db}dB"]
+        if delay_ms > 0:
+            filters.append(f"adelay=delays={delay_ms}|{delay_ms}:all=1")
+        parts.append(f"[{i}:a]{','.join(filters)}[{label}]")
+        labels.append(f"[{label}]")
+
+    parts.append(
+        f"{''.join(labels)}amix=inputs={len(labels)}:duration=longest:normalize=0[dlgbus]"
+    )
+    parts.append(
+        f"[dlgbus]"
+        f"agate=threshold=-50dB:ratio=10:attack=20:release=200,"
+        f"acompressor=threshold=-18dB:ratio=3:attack=5:release=100"
+    )
+
+    cmd = [
+        "ffmpeg", "-y",
+        *inputs,
+        "-filter_complex", ";".join(parts),
+        "-ar", "48000", "-ac", "2",
+        output_path,
+    ]
+    _run_ffmpeg(cmd, "dialogue bus mix", cwd=temp_dir)
+    return output_path
 
 
 def _warn_if_below(style_tier: str, required_tier: str, feature: str) -> None:
@@ -132,7 +273,7 @@ def _run_ffmpeg(cmd: List[str], context: str, cwd: Optional[str] = None) -> None
         log_path = ""
         try:
             with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".log", prefix="ave_ffmpeg_", delete=False
+                mode="w", suffix=".log", prefix="ave_ffmpeg_", delete=False, encoding="utf-8"
             ) as f:
                 log_path = f.name
                 f.write(f"\n--- {context} ---\n")
@@ -448,39 +589,323 @@ def _apply_video_effects(
     return ",".join(filters)
 
 
-def _build_audio_filter(audio_tracks: List[AudioTrack], base_input_count: int, song_path: Optional[str]) -> tuple[str, int]:
-    """Build amix filter for multi-audio tracks. Returns filter string and output audio label."""
+class SlotAudioMix(NamedTuple):
+    """Per-slot audio mix decision used by the two-pass audio renderer."""
+
+    song_level_db: float
+    clip_audio_enabled: bool
+
+
+def _duck_ratio(duck_gain_db: float) -> float:
+    """Convert a negative duck gain to a sidechaincompress ratio >= 1."""
+    return max(1.0, round(10 ** (abs(duck_gain_db) / 20.0), 2))
+
+
+def _fade_filters(track: AudioTrack) -> List[str]:
+    """Return afade filters for a music track based on its declared window."""
+    filters: List[str] = []
+    if track.fade_in_s and track.fade_in_s > 0:
+        filters.append(f"afade=t=in:ss=0:d={track.fade_in_s}")
+    fade_out = track.fade_out_s or 0.0
+    if fade_out > 0:
+        clip_dur = max(0.0, track.end_s - track.start_s)
+        out_start = max(0.0, clip_dur - fade_out)
+        if out_start > 0:
+            filters.append(f"afade=t=out:st={out_start}:d={fade_out}")
+    return filters
+
+
+def _build_audio_filter(
+    audio_tracks: List[AudioTrack],
+    audio_paths: List[str],
+    base_input_count: int,
+    song_path: Optional[str],
+    temp_dir: Optional[str] = None,
+) -> tuple[str, int, List[str]]:
+    """Build audio filter graph with adaptive ducking.
+
+    Dialogue/voiceover tracks are expected to be a single pre-mixed bus file
+    (produced by ``_build_dialogue_bus``) when ducking is required. This avoids
+    an FFmpeg limitation where ``sidechaincompress`` cannot use a filter-output
+    sidechain stream in graphs that also contain video filters.
+
+    Returns the filter string, the next input index, and a list of extra audio
+    files that must be appended as additional inputs to the FFmpeg command.
+    """
     if not audio_tracks and not song_path:
-        return "", -1
+        return "", -1, []
 
-    parts = []
-    inputs = []
-    idx = base_input_count
+    music_tracks: List[tuple[int, AudioTrack]] = []
+    dialogue_tracks: List[tuple[int, AudioTrack]] = []
+    other_tracks: List[tuple[int, AudioTrack]] = []
+    for offset, track in enumerate(audio_tracks):
+        idx = base_input_count + offset
+        if track.role == "music":
+            music_tracks.append((idx, track))
+        elif track.role in ("dialogue", "voiceover"):
+            dialogue_tracks.append((idx, track))
+        else:
+            other_tracks.append((idx, track))
 
-    for track in audio_tracks:
-        track_filters = []
-        if track.fade_in_s and track.fade_in_s > 0:
-            track_filters.append(f"afade=t=in:ss=0:d={track.fade_in_s}")
+    parts: List[str] = []
+    next_idx = base_input_count + len(audio_tracks)
+    extra_inputs: List[str] = []
 
-        fade_out = track.fade_out_s or 0.0
-        if fade_out > 0:
-            clip_dur = max(0.0, track.end_s - track.start_s)
-            out_start = max(0.0, clip_dur - fade_out)
-            if out_start > 0:
-                track_filters.append(f"afade=t=out:st={out_start}:d={fade_out}")
+    # No ducking needed when there is no dialogue or no music.
+    if not dialogue_tracks or not music_tracks:
+        all_tracks = music_tracks + dialogue_tracks + other_tracks
+        labels: List[str] = []
+        for idx, track in all_tracks:
+            label = f"trk{idx}"
+            filters = [f"volume={track.gain_db}dB", *_fade_filters(track)]
+            parts.append(f"[{idx}:a]{','.join(filters)}[{label}]")
+            labels.append(label)
+        if len(labels) > 1:
+            parts.append(
+                f"{''.join(f'[{l}]' for l in labels)}"
+                f"amix=inputs={len(labels)}:duration=longest:normalize=0,"
+                f"acompressor=threshold=-12dB:ratio=4:attack=5:release=50[amixed]"
+            )
+        elif labels:
+            parts.append(f"[{labels[0]}]anull[amixed]")
+        return ";".join(parts), next_idx, extra_inputs
 
-        track_filters.append(f"volume={track.gain_db}dB")
-        parts.append(f"[{idx}:a]{','.join(track_filters)}[a{idx}]")
-        inputs.append(f"[a{idx}]")
-        idx += 1
+    # Multiple dialogues are pre-mixed by the caller. If we still receive more
+    # than one, fall back to a plain amix without sidechain ducking.
+    if len(dialogue_tracks) > 1:
+        labels = []
+        for idx, track in dialogue_tracks:
+            label = f"dlg{idx}"
+            delay_ms = max(0, int(round(track.start_s * 1000)))
+            filters = [f"volume={track.gain_db}dB"]
+            if delay_ms > 0:
+                filters.append(f"adelay=delays={delay_ms}|{delay_ms}:all=1")
+            parts.append(f"[{idx}:a]{','.join(filters)}[{label}]")
+            labels.append(label)
+        parts.append(
+            f"{''.join(f'[{l}]' for l in labels)}"
+            f"amix=inputs={len(labels)}:duration=longest:normalize=0[dlg_mix]"
+        )
+        dialogue_label = "dlg_mix"
+    else:
+        d_idx, d_track = dialogue_tracks[0]
+        # The sidechain key must be the RAW input stream (FFmpeg limitation when
+        # video filters are also in the graph). Mix gets a gain-adjusted copy.
+        dialogue_label = f"dlg{d_idx}_mix"
+        parts.append(f"[{d_idx}:a]volume={d_track.gain_db}dB[{dialogue_label}]")
 
-    if len(inputs) > 1:
-        parts.append(f"{''.join(inputs)}amix=inputs={len(inputs)}:duration=longest:dropout_transition=0[amixed]")
-        return ";".join(parts), idx
-    elif inputs:
-        parts.append(f"{inputs[0]}anull[amixed]")
-        return ";".join(parts), idx
-    return "", idx
+    # Duck each music track against the raw dialogue bus input.
+    music_labels: List[str] = []
+    for idx, track in music_tracks:
+        label = f"trk{idx}"
+        filters = [f"volume={track.gain_db}dB", *_fade_filters(track)]
+
+        if track.duck_disabled or len(dialogue_tracks) > 1:
+            parts.append(f"[{idx}:a]{','.join(filters)}[{label}]")
+        else:
+            ratio = _duck_ratio(track.duck_gain_db)
+            raw_label = f"{label}_raw"
+            parts.append(f"[{idx}:a]{','.join(filters)}[{raw_label}]")
+            parts.append(
+                f"[{raw_label}][{d_idx}:a]"
+                f"sidechaincompress=threshold={track.duck_threshold}:ratio={ratio}:"
+                f"attack={track.duck_attack_ms}:release={track.duck_release_ms}:"
+                f"level_sc=1[{label}]"
+            )
+        music_labels.append(label)
+
+    # SFX / ambience straight through.
+    other_labels: List[str] = []
+    for idx, track in other_tracks:
+        label = f"trk{idx}"
+        parts.append(f"[{idx}:a]volume={track.gain_db}dB[{label}]")
+        other_labels.append(label)
+
+    # Final mix with a safety limiter.
+    final_inputs = (
+        [f"[{dialogue_label}]"]
+        + [f"[{l}]" for l in music_labels]
+        + [f"[{l}]" for l in other_labels]
+    )
+    if len(final_inputs) > 1:
+        parts.append(
+            f"{''.join(final_inputs)}"
+            f"amix=inputs={len(final_inputs)}:duration=longest:normalize=0,"
+            f"acompressor=threshold=-12dB:ratio=4:attack=5:release=50[amixed]"
+        )
+    elif final_inputs:
+        parts.append(f"{final_inputs[0]}anull[amixed]")
+    return ";".join(parts), next_idx, extra_inputs
+
+
+def _build_volume_expression(segments: List[tuple[float, float, float]]) -> str:
+    """Build an FFmpeg volume expression from [(start_s, end_s, db), ...].
+
+    Returns a nested if() expression that evaluates to the linear gain for the
+    active segment and a -3dB fallback outside all segments.
+    """
+    if not segments:
+        return f"{10 ** (-3 / 20):.4f}"
+
+    expr_parts: List[str] = []
+    for start_s, end_s, db in segments:
+        linear = 10 ** (db / 20)
+        expr_parts.append(f"if(between(t,{start_s:.3f},{end_s:.3f}),{linear:.4f}")
+
+    default = 10 ** (-3 / 20)
+    expr = ",".join(expr_parts) + f",{default:.4f}" + ")" * len(expr_parts)
+    return expr
+
+
+def _build_audio_filter_v2(
+    slots: List[Slot],
+    song_input_idx: int,
+    dialogue_specs: List[tuple[int, int, int, float]],
+    mix_decisions: List[SlotAudioMix],
+) -> str:
+    """Build a two-pass FFmpeg audio filter graph with correct ducking.
+
+    Video is rendered in a separate pass, so this graph contains only audio
+    filters. That lets ``sidechaincompress`` use the gated dialogue bus as its
+    sidechain input without hitting FFmpeg's limitation with mixed video/audio
+    filter graphs.
+    """
+    parts: List[str] = []
+
+    # 1. Music: per-section volume curve + resample to 48k.
+    volume_segments = [
+        (slot.start_s, slot.start_s + slot.duration_s, dec.song_level_db)
+        for slot, dec in zip(slots, mix_decisions)
+    ]
+    volume_expr = _build_volume_expression(volume_segments)
+    parts.append(
+        f"[{song_input_idx}:a]"
+        f"volume='{volume_expr}':eval=frame,"
+        f"aresample=48000"
+        f"[music]"
+    )
+
+    # 2. Dialogue tracks: fade, resample, delay to timeline position.
+    dialogue_labels: List[str] = []
+    for slot_idx, input_idx, t_start_ms, dur_s in dialogue_specs:
+        label = f"dlg_{slot_idx}"
+        fade_out_start = max(0.0, dur_s - 0.02)
+        parts.append(
+            f"[{input_idx}:a]"
+            f"afade=t=in:st=0:d=0.02,"
+            f"afade=t=out:st={fade_out_start:.3f}:d=0.02,"
+            f"aresample=48000,"
+            f"adelay={t_start_ms}|{t_start_ms}"
+            f"[{label}]"
+        )
+        dialogue_labels.append(label)
+
+    if not dialogue_labels:
+        parts.append("[music]anull[a_out]")
+        return ";".join(parts)
+
+    # 3. Mix dialogue bus (normalize to prevent clipping when many overlap).
+    mix_inputs = "".join(f"[{l}]" for l in dialogue_labels)
+    parts.append(
+        f"{mix_inputs}"
+        f"amix=inputs={len(dialogue_labels)}:duration=longest:normalize=1"
+        f"[dlg_raw]"
+    )
+
+    # 4. Noise gate so silent padding/room tone does not duck the music.
+    # Split the gated bus into two copies: one drives the sidechain detector
+    # and one is mixed into the output. Reusing a single filter output for
+    # both tasks causes FFmpeg to report "matches no streams" once the graph
+    # has more than a couple of delayed dialogue inputs.
+    parts.append(
+        "[dlg_raw]agate="
+        "threshold=-40dB:"
+        "ratio=10:"
+        "attack=20:"
+        "release=200,"
+        "asplit=2[dlg_sc][dlg_mix]"
+    )
+
+    # 5. Sidechain duck music using gated dialogue.
+    parts.append(
+        "[music][dlg_sc]sidechaincompress="
+        "threshold=0.15:"
+        "ratio=4:"
+        "attack=200:"
+        "release=400"
+        "[music_ducked]"
+    )
+
+    # 6. Final mix with dialogue slightly boosted over the ducked bed.
+    parts.append(
+        "[music_ducked][dlg_mix]"
+        "amix=inputs=2:duration=longest:weights='1.0 1.2':normalize=0"
+        "[a_out]"
+    )
+
+    return ";".join(parts)
+
+
+def _has_nvenc() -> bool:
+    """Return True if FFmpeg was built with h264_nvenc."""
+    try:
+        out = subprocess.check_output(["ffmpeg", "-encoders"], stderr=subprocess.DEVNULL, text=True)
+        return "h264_nvenc" in out
+    except Exception:
+        return False
+
+
+def _extract_segment(args) -> Optional[dict]:
+    """Extract and optionally mask a single slot segment."""
+    slot, clip_path, scaled_duration, config, temp_dir, relative_font, style_tier = args
+    segment_path = os.path.join(temp_dir, f"slot_{slot.index:03d}.mp4")
+
+    start = float(slot.source_window_start_s if slot.source_window_start_s is not None else slot.start_s)
+    clip_duration = _probe_duration(clip_path)
+    duration = min(scaled_duration, max(0.0, clip_duration - start))
+    if duration < 0.1:
+        start = max(0.0, clip_duration - scaled_duration)
+        duration = min(scaled_duration, max(0.0, clip_duration - start))
+    if duration < 0.1:
+        return None
+
+    base_vf = (
+        f"fps={config.fps},"
+        f"scale={config.width}:{config.height}:force_original_aspect_ratio=decrease,"
+        f"pad={config.width}:{config.height}:(ow-iw)/2:(oh-ih)/2"
+    )
+    vf = _apply_video_effects(slot, base_vf, temp_dir, relative_font, config, style_tier=style_tier)
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", str(start),
+        "-t", str(duration),
+        "-i", clip_path,
+        "-vf", vf,
+        "-c:v", "libx264", "-preset", "ultrafast",
+        "-crf", "23", "-pix_fmt", "yuv420p",
+        "-an",
+        segment_path,
+    ]
+    _run_ffmpeg(cmd, f"segment extraction for slot {slot.index}", cwd=temp_dir)
+
+    raw_mask_path = None
+    if getattr(slot, "mask_enabled", True):
+        if config.slot_mask_paths and slot.index in config.slot_mask_paths:
+            raw_mask_path = config.slot_mask_paths[slot.index]
+        elif config.mask_paths and slot.selected_clip_id in config.mask_paths:
+            raw_mask_path = config.mask_paths[slot.selected_clip_id]
+    mask_path = raw_mask_path and _safe_path(raw_mask_path, must_exist=True)
+    if mask_path and os.path.exists(mask_path):
+        masked_segment_path = os.path.join(temp_dir, f"slot_{slot.index:03d}_masked.mp4")
+        _apply_subject_mask(segment_path, mask_path, masked_segment_path, config, temp_dir)
+        segment_path = masked_segment_path
+
+    return {
+        "path": segment_path,
+        "slot": slot,
+        "actual_duration": _probe_duration(segment_path),
+    }
 
 
 def _apply_subject_mask(
@@ -513,10 +938,7 @@ def _apply_subject_mask(
         "-i", segment_path,
         "-i", mask_path,
         "-filter_complex", filter_complex,
-        "-c:v", config.video_codec,
-        "-preset", config.video_preset,
-        "-crf", str(config.video_crf),
-        "-pix_fmt", config.pix_fmt,
+        *_video_encode_args(config),
         "-an",
         output_path,
     ]
@@ -562,6 +984,18 @@ def compile_timeline(
     slot_segments = []
     temp_dir = tempfile.mkdtemp(prefix="ave_render_")
 
+    # Scale slot durations to compensate for xfade transition overlap. The
+    # compiler overlaps adjacent slots by ~0.3s per transition, so we need
+    # extra source content to end up at the target duration.
+    target_duration = cutlist.globals.total_duration_s
+    raw_slot_sum = sum(s.duration_s for s in cutlist.slots)
+    estimated_overlap = (len(cutlist.slots) - 1) * 0.3
+    desired_slot_sum = target_duration + estimated_overlap
+    duration_scale = desired_slot_sum / raw_slot_sum if raw_slot_sum > 0 else 1.0
+    scaled_durations = {
+        s.index: s.duration_s * duration_scale for s in cutlist.slots
+    }
+
     try:
         # Copy the system font and LUT into the render temp dir up-front so both
         # per-slot text effects (Stage 1) and global overlays/LUT (Stage 2) can
@@ -581,60 +1015,26 @@ def compile_timeline(
                 shutil.copy2(lut_path, local_lut)
                 relative_lut = os.path.basename(local_lut)
 
+        # Extract slot segments in parallel.  Each slot is an independent FFmpeg
+        # subprocess, so we saturate CPU/GPU by running several at once.
+        extract_args = []
         for slot in cutlist.slots:
             clip_id = slot.selected_clip_id
             if not clip_id or clip_id not in sanitized_clip_paths:
                 continue
-
             if slot.start_s < 0:
                 raise ValueError(f"Slot {slot.index} has negative start_s: {slot.start_s}")
-
             clip_path = sanitized_clip_paths[clip_id]
-            segment_path = os.path.join(temp_dir, f"slot_{slot.index:03d}.mp4")
+            scaled_duration = scaled_durations.get(slot.index, slot.duration_s)
+            extract_args.append((slot, clip_path, scaled_duration, config, temp_dir, relative_font, style_tier))
 
-            duration = slot.duration_s
-            start = float(slot.start_s)
-
-            base_vf = (
-                f"fps={config.fps},"
-                f"scale={config.width}:{config.height}:force_original_aspect_ratio=decrease,"
-                f"pad={config.width}:{config.height}:(ow-iw)/2:(oh-ih)/2"
-            )
-
-            vf = _apply_video_effects(slot, base_vf, temp_dir, relative_font, config, style_tier=style_tier)
-
-            cmd = [
-                "ffmpeg", "-y",
-                "-ss", str(start),
-                "-t", str(duration),
-                "-i", clip_path,
-                "-vf", vf,
-                "-c:v", "libx264", "-preset", "ultrafast",
-                "-crf", "23", "-pix_fmt", "yuv420p",
-                "-an",
-                segment_path,
-            ]
-            _run_ffmpeg(cmd, f"segment extraction for slot {slot.index}", cwd=temp_dir)
-
-            # If this slot (or its clip) has a segmentation mask and masks are
-            # enabled for the slot, composite the subject over black. Per-slot
-            # masks take precedence over per-clip masks.
-            raw_mask_path = None
-            if getattr(slot, "mask_enabled", True):
-                if config.slot_mask_paths and slot.index in config.slot_mask_paths:
-                    raw_mask_path = config.slot_mask_paths[slot.index]
-                elif config.mask_paths and clip_id in config.mask_paths:
-                    raw_mask_path = config.mask_paths[clip_id]
-            mask_path = raw_mask_path and _safe_path(raw_mask_path, must_exist=True)
-            if mask_path and os.path.exists(mask_path):
-                masked_segment_path = os.path.join(temp_dir, f"slot_{slot.index:03d}_masked.mp4")
-                _apply_subject_mask(segment_path, mask_path, masked_segment_path, config, temp_dir)
-                segment_path = masked_segment_path
-
-            slot_segments.append({
-                "path": segment_path,
-                "slot": slot,
-            })
+        workers = max(1, (os.cpu_count() or 1))
+        # Do not oversubscribe the GPU if NVENC is used downstream; cap workers.
+        workers = min(workers, 8)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for seg in pool.map(_extract_segment, extract_args):
+                if seg is not None:
+                    slot_segments.append(seg)
 
         if not slot_segments:
             raise ValueError("No valid segments could be extracted")
@@ -646,12 +1046,14 @@ def compile_timeline(
             filter_parts.append(f"[{i}:v]setpts=PTS-STARTPTS[v{i}]")
 
         current_label = "v0"
-        current_duration = slot_segments[0]["slot"].duration_s
+        current_duration = slot_segments[0]["actual_duration"]
         for i in range(len(slot_segments) - 1):
             slot = slot_segments[i]["slot"]
             next_slot = slot_segments[i + 1]["slot"]
             transition = XFADE_MAP.get(slot.transition_out if enable_effects else "hard_cut", "fade")
-            xfade_duration = min(0.3, slot.duration_s * 0.5, next_slot.duration_s * 0.5)
+            slot_dur = slot_segments[i]["actual_duration"]
+            next_dur = slot_segments[i + 1]["actual_duration"]
+            xfade_duration = min(0.3, slot_dur * 0.5, next_dur * 0.5)
             offset = max(0.0, current_duration - xfade_duration)
 
             out_label = f"vx{i}"
@@ -659,7 +1061,7 @@ def compile_timeline(
                 f"[{current_label}][v{i+1}]xfade=transition={transition}:duration={xfade_duration}:offset={offset}[{out_label}]"
             )
             current_label = out_label
-            current_duration = current_duration + next_slot.duration_s - xfade_duration
+            current_duration = current_duration + next_dur - xfade_duration
 
         # LUT application if available and tier allows it.
         if relative_lut and enable_color_grade:
@@ -722,69 +1124,167 @@ def compile_timeline(
         filter_parts.append(f"[{current_label}]format=yuv420p[outv]")
         final_label = "outv"
 
-        # Build full command
-        input_args = []
-        for seg in slot_segments:
-            input_args.extend(["-i", seg["path"]])
+        # Cap output at the cutlist's declared duration.
+        duration_cap = cutlist.globals.total_duration_s
 
-        # Audio inputs: explicit audio tracks from the cutlist, or fallback to
-        # the legacy song_path config. Track asset IDs must resolve to downloaded
-        # local paths.
+        # Build video-only intermediate. Audio is rendered in a separate pass so
+        # the sidechain ducking graph can reference filter outputs without the
+        # FFmpeg limitation that forbids sidechaincompress from using a filtered
+        # stream when video filters are also present in the graph.
+        video_input_args = []
+        for seg in slot_segments:
+            video_input_args.extend(["-i", seg["path"]])
+
+        video_filter_complex = ";".join(filter_parts)
+        video_only_path = os.path.join(temp_dir, "video_only.mp4")
+        video_cmd = [
+            "ffmpeg", "-y",
+            *video_input_args,
+            "-filter_complex", video_filter_complex,
+            "-map", f"[{final_label}]",
+            "-an",
+            *_video_encode_args(config),
+            "-movflags", "+faststart",
+        ]
+        if duration_cap and duration_cap > 0:
+            video_cmd.extend(["-t", str(duration_cap)])
+        video_cmd.append(video_only_path)
+
+        try:
+            debug_fc_path = os.path.join(os.getcwd(), "filter_complex_video_debug.txt")
+            with open(debug_fc_path, "w", encoding="utf-8") as f:
+                f.write(video_filter_complex)
+        except Exception:
+            pass
+
+        _run_ffmpeg(video_cmd, "video pass", cwd=temp_dir)
+
+        # Collect audio tracks.
         audio_tracks: List[AudioTrack] = []
         if enable_audio:
             audio_tracks = list(cutlist.audio_tracks) if hasattr(cutlist, "audio_tracks") else []
             if not audio_tracks and config.song_path and os.path.exists(config.song_path or ""):
-                audio_tracks = [AudioTrack(asset_id="song", start_s=0.0, end_s=current_duration, gain_db=0.0)]
+                audio_tracks = [AudioTrack(asset_id="song", role="music", start_s=0.0, end_s=current_duration, gain_db=0.0)]
+
+        slot_by_index = {seg["slot"].index: seg["slot"] for seg in slot_segments}
+        music_tracks: List[AudioTrack] = []
+        dialogue_segments: List[tuple[AudioTrack, str]] = []
 
         for track in audio_tracks:
-            path = config.audio_paths.get(track.asset_id)
-            if not path:
-                path = sanitized_clip_paths.get(track.asset_id)
-            if not path and config.song_path:
-                path = _safe_path(config.song_path, must_exist=True)
-            if path and os.path.exists(path):
-                input_args.extend(["-i", path])
+            if track.role in ("dialogue", "voiceover"):
+                clip_path = config.audio_paths.get(track.asset_id)
+                if not clip_path:
+                    clip_path = sanitized_clip_paths.get(track.asset_id)
+                if not clip_path or not os.path.exists(clip_path):
+                    continue
 
-        audio_filter, _ = _build_audio_filter(audio_tracks, len(slot_segments), config.song_path)
-        if audio_filter:
-            filter_parts.append(audio_filter)
+                src_start = track.source_start_s
+                src_end = track.source_end_s
+                if src_start is None:
+                    slot = slot_by_index.get(track.slot_index) if track.slot_index is not None else None
+                    if slot is None:
+                        for seg in slot_segments:
+                            s = seg["slot"]
+                            if s.selected_clip_id == track.asset_id and abs(s.start_s - track.start_s) < 0.5:
+                                slot = s
+                                break
+                    if slot is not None:
+                        window_start = slot.source_window_start_s if slot.source_window_start_s is not None else slot.start_s
+                        src_start = window_start + max(0.0, track.start_s - slot.start_s)
+                        src_end = src_start + max(0.0, track.end_s - track.start_s)
+                    else:
+                        src_start = 0.0
+                        src_end = max(0.0, track.end_s - track.start_s)
+                clip_dur = _probe_duration(clip_path)
+                src_start = max(0.0, min(src_start or 0.0, clip_dur - 0.05))
+                src_end = max(src_start + 0.05, min(src_end or clip_dur, clip_dur))
 
-        filter_complex = ";".join(filter_parts)
+                wav_path = _extract_dialogue_audio(clip_path, src_start, src_end, temp_dir)
+                if wav_path:
+                    dialogue_segments.append((track, wav_path))
+                continue
 
-        cmd = [
-            "ffmpeg", "-y",
-            *input_args,
-            "-filter_complex", filter_complex,
-            "-map", f"[{final_label}]",
-            "-c:v", config.video_codec,
-            "-preset", config.video_preset,
-            "-crf", str(config.video_crf),
-            "-pix_fmt", config.pix_fmt,
-        ]
+            if track.role == "music":
+                music_tracks.append(track)
 
-        if audio_filter:
-            cmd.extend(["-map", "[amixed]", "-c:a", config.audio_codec, "-b:a", config.audio_bitrate, "-shortest"])
+        # Final mux: video-only intermediate + self-contained audio graph.
+        if enable_audio and config.song_path and os.path.exists(config.song_path):
+            song_input_idx = 1
+            audio_input_args = ["-i", video_only_path, "-i", config.song_path]
+
+            dialogue_specs: List[tuple[int, int, int, float]] = []
+            for track, wav_path in dialogue_segments:
+                input_idx = 1 + 1 + len(dialogue_specs)
+                audio_input_args.extend(["-i", wav_path])
+                start_ms = max(0, int(round(track.start_s * 1000)))
+                dur_s = max(0.05, track.end_s - track.start_s)
+                slot_idx = track.slot_index if track.slot_index is not None else 0
+                dialogue_specs.append((slot_idx, input_idx, start_ms, dur_s))
+
+            mix_decisions: List[SlotAudioMix] = []
+            for slot in cutlist.slots:
+                song_level_db = 0.0
+                for mt in music_tracks:
+                    if mt.start_s <= slot.start_s < mt.end_s:
+                        song_level_db = mt.gain_db
+                        break
+                has_dialogue = any(
+                    t.slot_index == slot.index
+                    for t, _ in dialogue_segments
+                    if t.slot_index is not None
+                )
+                mix_decisions.append(SlotAudioMix(song_level_db=song_level_db, clip_audio_enabled=has_dialogue))
+
+            audio_filter = _build_audio_filter_v2(
+                cutlist.slots,
+                song_input_idx,
+                dialogue_specs,
+                mix_decisions,
+            )
+
+            try:
+                debug_fc_path = os.path.join(os.getcwd(), "filter_complex_audio_debug.txt")
+                with open(debug_fc_path, "w", encoding="utf-8") as f:
+                    f.write(audio_filter)
+            except Exception:
+                pass
+
+            final_cmd = [
+                "ffmpeg", "-y",
+                *audio_input_args,
+                "-filter_complex", audio_filter,
+                "-map", "0:v",
+                "-map", "[a_out]",
+                "-c:v", "copy",
+                "-c:a", config.audio_codec,
+                "-b:a", config.audio_bitrate,
+                "-movflags", "+faststart",
+            ]
+            if duration_cap and duration_cap > 0:
+                final_cmd.extend(["-t", str(duration_cap)])
+            final_cmd.append(output_path)
+
+            _run_ffmpeg(final_cmd, "audio/mux pass", cwd=temp_dir)
         else:
-            cmd.extend(["-an"])
+            copy_cmd = [
+                "ffmpeg", "-y",
+                "-i", video_only_path,
+                "-c", "copy",
+                "-an",
+                "-movflags", "+faststart",
+            ]
+            if duration_cap and duration_cap > 0:
+                copy_cmd.extend(["-t", str(duration_cap)])
+            copy_cmd.append(output_path)
+            _run_ffmpeg(copy_cmd, "copy video pass", cwd=temp_dir)
 
-        # Cap output at the cutlist's declared duration so the rendered file
-        # matches the reference/song duration target and does not grow due to
-        # overlapping slots or transition padding.
-        duration_cap = cutlist.globals.total_duration_s
-        if duration_cap and duration_cap > 0:
-            cmd.extend(["-t", str(duration_cap)])
-
-        cmd.extend(["-movflags", "+faststart", output_path])
-
-        _run_ffmpeg(cmd, "final render", cwd=temp_dir)
-        return output_path
-    finally:
-        # Remove the entire render scratch directory including fonts and any
-        # segments that were created. ``ignore_errors`` keeps cleanup from
-        # masking the real exception.
         shutil.rmtree(temp_dir, ignore_errors=True)
-
-    return output_path
+        return output_path
+    except Exception:
+        # Keep the scratch directory for debugging on failure.
+        import logging
+        logging.error("Render failed; temp dir preserved: %s", temp_dir)
+        raise
 
 
 def render_preview(
