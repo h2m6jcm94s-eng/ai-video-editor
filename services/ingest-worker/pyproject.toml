@@ -15,5 +15,11 @@ dependencies = [
     "temporalio>=1.7.0",
 ]
 
+[project.optional-dependencies]
+real_structure = [
+    "allin1>=1.1.0",
+    "natten>=0.21.0",
+]
+
 [tool.uv.sources]
 shared-py = { workspace = true }

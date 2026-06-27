@@ -12,6 +12,7 @@ from shared_py.storage import download_asset
 from temporalio import activity
 
 from ingest_worker.beat_detect import compute_energy_curve, detect_beats
+from ingest_worker.heatmap import compute_clip_heatmap, heatmap_to_metadata
 from ingest_worker.probe import probe_asset_remote
 from ingest_worker.shot_detect import detect_shot_boundaries
 
@@ -71,6 +72,22 @@ async def detect_shot_boundaries_activity(asset_id: str, storage_key: str, fps: 
         }
         await _patch_asset_metadata(asset_id, metadata)
         return {"asset_id": asset_id, "shot_boundaries": metadata["shotBoundaries"]}
+    finally:
+        try:
+            os.remove(local_path)
+        except OSError:
+            pass
+
+
+@activity.defn
+async def compute_clip_heatmap_activity(asset_id: str, storage_key: str) -> dict:
+    """Download a clip asset, compute an interestingness heatmap, and persist metadata."""
+    local_path = download_asset(storage_key)
+    try:
+        heatmap = compute_clip_heatmap(local_path, audio_path=None, window_s=0.5, stride_s=0.25)
+        metadata = {"heatmap": heatmap_to_metadata(heatmap)}
+        await _patch_asset_metadata(asset_id, metadata)
+        return {"asset_id": asset_id, "heatmap": metadata["heatmap"]}
     finally:
         try:
             os.remove(local_path)

@@ -84,7 +84,9 @@ class VideoRenderWorkflow:
         try:
             # Resolve export preset from the active render row (preset wins over cut-list aspect ratio)
             active_render = project_info.get("activeRender") or {}
-            export_preset = (active_render.get("options") or {}).get("exportPreset")
+            render_options = active_render.get("options") or {}
+            export_preset = render_options.get("exportPreset")
+            duration_sec = render_options.get("durationSec")
 
             # 3. Compile the final video
             output_path = await workflow.execute_activity(
@@ -98,6 +100,7 @@ class VideoRenderWorkflow:
                     input.mask_source_map,
                     export_preset,
                     input.style_tier,
+                    duration_sec,
                 ),
                 start_to_close_timeout=timedelta(seconds=600),
                 retry_policy=RetryPolicy(maximum_attempts=2),
