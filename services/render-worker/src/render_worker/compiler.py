@@ -1005,9 +1005,19 @@ def _extract_segment(args) -> Optional[dict]:
     slot, clip_path, scaled_duration, config, temp_dir, relative_font, style_tier, kinetic_overlays = args
     segment_path = os.path.join(temp_dir, f"slot_{slot.index:03d}.mp4")
 
-    # If the ranker did not pick a source window, start from the beginning of
-    # the clip instead of using the arbitrary timeline time as a clip offset.
-    base_start = float(slot.source_window_start_s if slot.source_window_start_s is not None else 0.0)
+    # If the ranker did not pick a source window, deterministically rotate the
+    # seek point across the clip so repeated clips show different moments instead
+    # of replaying the same opening seconds.
+    if slot.source_window_start_s is not None:
+        base_start = float(slot.source_window_start_s)
+    else:
+        clip_duration = _probe_duration(clip_path)
+        safe_max_start = max(0.0, clip_duration - scaled_duration - 0.5)
+        if safe_max_start > 0:
+            # 1.7 is an arbitrary irrational-ish step that spreads slots evenly.
+            base_start = (slot.index * 1.7) % safe_max_start
+        else:
+            base_start = 0.0
     anticipation = float(getattr(slot, "anticipation_offset_s", 0.0) or 0.0)
     start = max(0.0, base_start + anticipation)
     clip_duration = _probe_duration(clip_path)

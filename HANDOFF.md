@@ -1,24 +1,29 @@
 # AI Video Editor — Handoff
 
-> Generated after splitting the working tree into PRs. Last updated: 2026-06-27 (session 3 — comprehensive `docs/wiki/` knowledge base added to `main`).
+> Generated after splitting the working tree into PRs. Last updated: 2026-06-27 (session 4 — fixed repeat bug caused by missing heatmap windows / failed process pool).
 
 ---
 
 ## 0. Latest Session Snapshot
 
 **Current branch:** `main`  
-**Latest commit:** `d50162b` — `chore: ignore local debug/render scratch artifacts`
+**Latest commit:** *(pending — repeat-bug fixes staged)*
 
 ### What just happened
 
-- Finalised and committed a comprehensive `docs/wiki/` knowledge base covering:
-  - End-to-end feature overview (`01-features-overview.md`)
-  - Mathematical foundations and algorithm references (`02-mathematical-foundations.md`)
-  - Codebase guide for apps, services, packages, infra, and scripts (`03-codebase-guide/`)
-  - Roadmap and deep-dives on the next two features (`04-upcoming-features.md`)
-  - Glossary of terms (`05-glossary.md`)
-- Updated `.gitignore` to exclude local debug/render scratch artifacts (`filter_complex_*_debug.txt`, `optimisations.md`, `test files/`).
-- Previous merges (`#181`–`#184`) remain on `main`, including the Windows FFmpeg race fix (`stdin=subprocess.DEVNULL`) and refreshed core docs.
+- Diagnosed and fixed the demo render repeat bug:
+  - **Root cause:** `compute_clip_heatmaps_batch` used `ProcessPoolExecutor`, which crashed on Windows while re-importing PyTorch/CUDA in every spawned worker. Only 37 of 67 clips had heatmap cache files; the rest silently got empty heatmaps.
+  - Empty heatmaps caused `_best_window` to return `None`, so every slot received `source_window_start_s = None`, and the compiler fell back to `seek=0` for every clip. Reused clips therefore replayed the exact same opening seconds.
+- Applied four fixes:
+  1. `services/ingest-worker/src/ingest_worker/heatmap.py` — switched heatmap batching to `ThreadPoolExecutor` and added cache-hit/miss/empty logging. Empty results are no longer cached so they retry on the next run.
+  2. `services/reason-worker/src/reason_worker/clip_rank.py` — `_best_window` now hard-excludes already-used windows instead of only penalising them.
+  3. `services/render-worker/src/render_worker/compiler.py` — when no heatmap window is available, the compiler now rotates the seek point across the clip based on slot index instead of always seeking to `0.0`.
+  4. `scripts/batch2-offline-render.py` — added heatmap coverage validation; raises if >20% of clips have missing/empty heatmaps. Also lazy-imported `probe_video` and `compile_timeline` so spawned heatmap workers do not load boto3/torch stacks.
+- Re-rendered batch 2 demo:
+  - Full render completed in **47.0s**.
+  - Cutlist: **101 slots, 67 unique clips, max reuse 2x**.
+  - **True repeats (same clip + same window): 0** (was ~34 before the fix).
+  - **Slots with `sourceWindowStartS = None`: 0/101**.
 
 ### Test results after merges
 

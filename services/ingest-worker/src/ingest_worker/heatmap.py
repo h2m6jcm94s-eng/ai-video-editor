@@ -264,25 +264,31 @@ def compute_clip_heatmap_cached(
             logger.warning("Heatmap cache read failed, recomputing", error=str(e))
 
     windows = compute_clip_heatmap(video_path, audio_path, window_s, stride_s, target_height)
-    try:
-        cache_file.write_text(
-            json.dumps(
-                [
-                    {
-                        "start_s": w.start_s,
-                        "end_s": w.end_s,
-                        "score": w.score,
-                        "components": w.components,
-                        "dominant_motion": w.dominant_motion,
-                    }
-                    for w in windows
-                ],
-                indent=2,
-            ),
-            encoding="utf-8",
+    if windows:
+        try:
+            cache_file.write_text(
+                json.dumps(
+                    [
+                        {
+                            "start_s": w.start_s,
+                            "end_s": w.end_s,
+                            "score": w.score,
+                            "components": w.components,
+                            "dominant_motion": w.dominant_motion,
+                        }
+                        for w in windows
+                    ],
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            logger.warning("Heatmap cache write failed", error=str(e))
+    else:
+        logger.warning(
+            "Heatmap computation returned no windows; skipping cache write so the next run retries",
+            video_path=video_path,
         )
-    except Exception as e:
-        logger.warning("Heatmap cache write failed", error=str(e))
 
     return windows
 
@@ -296,8 +302,13 @@ def compute_clip_heatmaps_batch(
     cache_dir: Optional[Path] = None,
     max_workers: Optional[int] = None,
 ) -> Dict[str, List[ClipWindow]]:
-    """Compute heatmaps for many clips in parallel with disk caching."""
-    from concurrent.futures import ProcessPoolExecutor
+    """Compute heatmaps for many clips in parallel with disk caching.
+
+    Uses a thread pool rather than a process pool so Windows spawn does not
+    need to reload PyTorch/CUDA libraries in every worker, which can exhaust
+    the paging file and crash the pool.
+    """
+    from concurrent.futures import ThreadPoolExecutor
 
     cache_dir = cache_dir or Path(os.environ.get("AVE_HEATMAP_CACHE_DIR", ".heatmap-cache"))
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -305,12 +316,14 @@ def compute_clip_heatmaps_batch(
     # Load cached results first.
     results: Dict[str, List[ClipWindow]] = {}
     to_compute: List[str] = []
+    from_cache = 0
     for path in video_paths:
         cache_file = _cache_path(path, cache_dir, window_s, stride_s, target_height)
         if cache_file.exists():
             try:
                 data = json.loads(cache_file.read_text(encoding="utf-8"))
                 results[path] = [ClipWindow(**w) for w in data]
+                from_cache += 1
                 continue
             except Exception as e:
                 logger.warning("Heatmap cache read failed, recomputing", error=str(e))
@@ -319,7 +332,7 @@ def compute_clip_heatmaps_batch(
     if to_compute:
         workers = max_workers or max(1, os.cpu_count() or 1)
         logger.info("Computing heatmaps in parallel", clips=len(to_compute), workers=workers)
-        with ProcessPoolExecutor(max_workers=workers) as pool:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
             computed = list(
                 pool.map(
                     compute_clip_heatmap_cached,
@@ -331,8 +344,22 @@ def compute_clip_heatmaps_batch(
                     [cache_dir] * len(to_compute),
                 )
             )
+        computed_count = 0
+        empty_count = 0
         for path, windows in zip(to_compute, computed):
             results[path] = windows
+            computed_count += 1
+            if not windows:
+                empty_count += 1
+        logger.info(
+            "Heatmap batch complete",
+            from_cache=from_cache,
+            computed=computed_count,
+            empty=empty_count,
+            total=len(video_paths),
+        )
+    else:
+        logger.info("Heatmap batch complete (all from cache)", from_cache=from_cache, total=len(video_paths))
 
     return results
 

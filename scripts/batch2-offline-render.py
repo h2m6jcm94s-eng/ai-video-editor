@@ -35,7 +35,6 @@ sys.path.insert(0, str(repo_root / "services" / "shared-py" / "src"))
 
 from ingest_worker.beat_detect import detect_beats, compute_energy_curve
 from ingest_worker.heatmap import compute_clip_heatmaps_batch, heatmap_to_metadata
-from ingest_worker.probe import probe_video
 from ingest_worker.shot_detect import detect_shot_boundaries
 from reason_worker.clip_rank import rank_clips_for_slots
 from reason_worker.aspect_detect import detect_aspect_preset, ASPECT_PRESETS
@@ -43,7 +42,7 @@ from reason_worker.cutlist_gen import generate_cutlist_programmatic
 from reason_worker.transition_select import select_xfade
 from reason_worker.audio_mix import build_audio_tracks
 from reason_worker.audio_scoring import ScoringConfig
-from render_worker.compiler import compile_timeline, _has_nvenc, QUALITY_PROFILES
+
 from shared_py.models import CutList, RenderConfig
 from shared_py.logging_config import StructuredLogger
 
@@ -62,6 +61,11 @@ def log_progress(stage: str, progress: float, message: str):
 
 
 def main():
+    # Import probe here (not at top level) so subprocesses spawned by the
+    # heatmap batch worker do not have to import boto3/storage stacks.
+    from ingest_worker.probe import probe_video
+    from render_worker.compiler import compile_timeline, _has_nvenc, QUALITY_PROFILES
+
     parser = argparse.ArgumentParser(description="Batch 2 offline render")
     parser.add_argument("--duration", type=float, default=None, help="Target output duration in seconds (default: full song length)")
     parser.add_argument("--clips-limit", type=int, default=0, help="Limit number of clips (0 = all)")
@@ -160,9 +164,31 @@ def main():
             stride_s=0.25,
             cache_dir=cache_dir,
         )
+        missing_heatmaps: list[str] = []
+        empty_heatmaps: list[str] = []
         for idx, cp in enumerate(clip_paths):
             windows = heatmaps.get(str(cp), [])
             print(f"  [{idx+1}/{len(clip_paths)}] {cp.stem[:40]}... heatmap={len(windows)} windows")
+            if windows is None:
+                missing_heatmaps.append(cp.name)
+            elif len(windows) == 0:
+                empty_heatmaps.append(cp.name)
+
+        total_clips = len(clip_paths)
+        if missing_heatmaps or empty_heatmaps:
+            print(
+                f"⚠️  WARNING: heatmap coverage incomplete "
+                f"({len(missing_heatmaps)} missing, {len(empty_heatmaps)} empty out of {total_clips})"
+            )
+            if missing_heatmaps:
+                print(f"   Missing: {', '.join(missing_heatmaps[:5])}{'...' if len(missing_heatmaps) > 5 else ''}")
+            if empty_heatmaps:
+                print(f"   Empty: {', '.join(empty_heatmaps[:5])}{'...' if len(empty_heatmaps) > 5 else ''}")
+            if len(missing_heatmaps) > total_clips * 0.2 or len(empty_heatmaps) > total_clips * 0.2:
+                raise RuntimeError(
+                    f"Heatmap coverage too low ({len(missing_heatmaps)} missing + {len(empty_heatmaps)} empty / {total_clips}). "
+                    f"This will cause clip repeats. Delete {cache_dir} or fix inputs and rerun."
+                )
 
     for idx, cp in enumerate(clip_paths):
         info = probe_video(str(cp))

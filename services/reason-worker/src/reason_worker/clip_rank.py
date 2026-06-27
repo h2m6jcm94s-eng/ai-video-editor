@@ -84,12 +84,21 @@ def _best_window(
             base -= RANK.WINDOW_REUSE_PENALTY
         return base
 
-    # Only windows that leave enough room for the full slot duration.
-    valid = [
+    used_starts = set(used_windows.get(clip_id, []))
+
+    # Prefer windows that fit the slot duration and have not been used yet.
+    candidates = [
         w for w in heatmap
         if w.get("start_s", 0.0) + slot_duration_s <= clip_dur + 0.1
+        and w.get("start_s") not in used_starts
     ]
-    candidates = valid or heatmap
+    # Fallback 1: any unused window, even if shorter than the slot duration.
+    if not candidates:
+        candidates = [w for w in heatmap if w.get("start_s") not in used_starts]
+    # Fallback 2: reuse an already-used window (penalty will still apply).
+    if not candidates:
+        candidates = heatmap
+
     best = max(candidates, key=_window_score)
     return (
         best.get("start_s"),
