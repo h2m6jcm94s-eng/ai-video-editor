@@ -84,7 +84,7 @@ class TestComputeEnergyCurve:
             path = f.name
         try:
             create_sine_wave(path, duration=5.0)
-            energy = compute_energy_curve(path, n_points=10)
+            energy = compute_energy_curve(path, num_points=10)
             assert len(energy) == 10
             assert all(0 <= e <= 1 for e in energy)
         finally:
@@ -95,7 +95,7 @@ class TestComputeEnergyCurve:
             path = f.name
         try:
             create_sine_wave(path, duration=3.0)
-            energy = compute_energy_curve(path, n_points=1)
+            energy = compute_energy_curve(path, num_points=1)
             assert len(energy) == 1
             assert 0 <= energy[0] <= 1
         finally:
@@ -106,7 +106,7 @@ class TestComputeEnergyCurve:
             path = f.name
         try:
             create_sine_wave(path, duration=5.0)
-            energy = compute_energy_curve(path, n_points=50)
+            energy = compute_energy_curve(path, num_points=50)
             assert len(energy) == 50
         finally:
             os.unlink(path)
@@ -120,7 +120,7 @@ class TestComputeEnergyCurve:
                  "-ar", "44100", path],
                 check=True, capture_output=True,
             )
-            energy = compute_energy_curve(path, n_points=5)
+            energy = compute_energy_curve(path, num_points=5)
             assert len(energy) == 5
         finally:
             os.unlink(path)
@@ -199,5 +199,30 @@ class TestDetectBeats:
 class TestComputeEnergyCurveNoLibrosa:
     def test_returns_default_curve_when_librosa_missing(self, monkeypatch):
         monkeypatch.setattr(beat_detect_module, "_HAS_LIBROSA", False)
-        curve = beat_detect_module.compute_energy_curve("any.wav", n_points=7)
+        curve = beat_detect_module.compute_energy_curve("any.wav", num_points=7)
         assert curve == [0.0] * 7
+
+
+class TestSongStructure:
+    def test_label_structure_segments(self):
+        times = [0.0, 10.0, 20.0, 30.0, 40.0, 50.0]
+        energies = [0.1, 0.3, 0.8, 0.2, 0.9, 0.1]
+        labels = beat_detect_module._label_structure_segments(times, energies)
+        assert labels[0] == "intro"
+        assert labels[-1] == "outro"
+        assert "chorus" in labels
+        assert "drop" in labels
+
+    @pytest.mark.slow
+    @pytest.mark.skipif(not os.path.exists("test files/batch 2/Let You Down - Dawid Podsiadło.mp3"), reason="Batch 2 song not present")
+    def test_librosa_structure_is_not_equal_chunks(self):
+        path = "test files/batch 2/Let You Down - Dawid Podsiadło.mp3"
+        beat_grid = detect_beats_librosa(path)
+        starts = [s.start for s in beat_grid.segments]
+        # A real song should have non-uniform segment boundaries (not simple quarters).
+        diffs = [starts[i + 1] - starts[i] for i in range(len(starts) - 1)]
+        assert max(diffs) - min(diffs) > 1.0
+        labels = {s.label for s in beat_grid.segments}
+        assert "intro" in labels
+        assert "outro" in labels
+        assert labels & {"chorus", "drop", "verse"}
