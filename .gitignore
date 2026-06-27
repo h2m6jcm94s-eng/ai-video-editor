@@ -82,3 +82,9 @@ playwright-report/
 
 # Committed demo assets (README car-meet example)
 !docs/assets/car-meet/*
+
+# Debug / scratch artifacts generated during local rendering/tests
+filter_complex_*_debug.txt
+optimisations.md
+test files/
+
