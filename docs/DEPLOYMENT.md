@@ -69,8 +69,30 @@ Production images are built from Dockerfiles in `infra/docker/`.
 | `temporal` | `temporalio/auto-setup` | 7233, 8233 | 1 |
 | `temporal-ui` | `temporalio/ui` | 8080 | 1 |
 | `ingest-worker` | `aivideo/ingest` | — | 2 |
+| `style-worker` | `aivideo/style` | — | 2 |
 | `segment-worker` | `aivideo/segment` | — | 1 |
 | `render-worker` | `aivideo/render` | — | 2 |
+
+### GPU / NVENC Considerations
+
+The render worker automatically enables NVIDIA NVENC encoding when `h264_nvenc` is available in the container's FFmpeg build. For meaningful speed-ups, run the render worker on a GPU host:
+
+```bash
+# Local Docker Compose with GPU (requires nvidia-container-toolkit)
+docker compose -f infra/local/docker-compose.yml up -d --build \
+  --scale render-worker=2 \
+  --scale segment-worker=2 \
+  --scale style-worker=2
+```
+
+| Worker | GPU Benefit | Notes |
+|---|---|---|
+| `render-worker` | 5-10× faster encode with NVENC | Set `AVE_DISABLE_NVENC=1` to force software encode for debugging |
+| `segment-worker` | SAM3 mask generation | Requires CUDA-capable GPU; falls back to CPU-only mode if unavailable |
+| `style-worker` | Optical flow / motion analysis | GPU recommended but not required |
+| `ingest-worker` | Face detection (InsightFace) / beat detection | Optional; CPU fallback works for small projects |
+
+Set `AVE_USE_HWACCEL=1` to enable experimental CUDA hardware decoding in the render compiler. If a segment fails with hardware decode, the compiler retries with software decode automatically.
 
 ### Health Checks
 
@@ -278,6 +300,10 @@ ANTHROPIC_API_KEY=sk-ant-api03-...
 OPENAI_API_KEY=sk-openai-...
 AI_PROVIDER=claude
 
+# Render tuning
+AVE_DISABLE_NVENC=0
+AVE_USE_HWACCEL=0
+
 # Encryption (replace with proper key management)
 PROVIDER_ENCRYPTION_SECRET=<32-byte-random-hex>
 
@@ -458,8 +484,10 @@ appendfsync everysec
 
 | Component | Bottleneck | Solution |
 |---|---|---|
-| Render Worker | Slow FFmpeg | GPU instances (T4, A10G) |
-| Ingest Worker | Slow ML models | GPU for TransNet V2 |
+| Render Worker | Slow FFmpeg | GPU instances (T4, A10G) with NVENC |
+| Ingest Worker | Slow ML models | GPU for TransNet V2 / InsightFace |
+| Style Worker | Style Genome / motion analysis | GPU for optical flow / SAM3 |
+| Segment Worker | SAM3 masks | GPU (T4 minimum) |
 | API | CPU-bound | More cores |
 | PostgreSQL | Query performance | More RAM for cache |
 

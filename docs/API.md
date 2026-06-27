@@ -308,6 +308,11 @@ Update the cutlist and trigger rendering (assisted mode).
 
 **Validation Rules**:
 - `cutList`: Required, object
+- Slots support extended fields introduced by the Style Genome / Batch 2 work:
+  - `identityIdsPresent`, `protagonistMatteEnabled` — identity-aware subject matting
+  - `enableKineticText`, `textZLayer`, `textDensity`, `kineticText` — layered text effects
+  - `sourceWindowStartS`, `anticipationOffsetS`, `heatmapScore` — clip ranking/windowing metadata
+  - `effects` — per-slot effect array
 
 **Response**:
 ```json
@@ -645,8 +650,8 @@ Start a new render job for a project.
 {
   "projectId": "550e8400-e29b-41d4-a716-446655440000",
   "options": {
-    "resolution": "1080p",
-    "quality": "high"
+    "exportPreset": "reels_9_16",
+    "durationSec": 60
   }
 }
 ```
@@ -654,6 +659,11 @@ Start a new render job for a project.
 **Validation Rules**:
 - `projectId`: Required, string, valid UUID
 - `options`: Optional, object
+  - `exportPreset`: Optional, enum `auto | youtube_16_9 | reels_9_16 | tiktok_9_16 | square_1_1`. Defaults to the cut-list aspect ratio when omitted or `auto`.
+  - `durationSec`: Optional, number between 5 and 600. Caps the output duration without regenerating the cut-list.
+
+**Render Options Storage**:
+Validated options are stored on the render row and passed to the `VideoRenderWorkflow`. The compiler uses `exportPreset` to resolve output dimensions and `durationSec` to truncate the timeline and audio tracks.
 
 **Response**:
 ```json

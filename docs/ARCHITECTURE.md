@@ -286,6 +286,7 @@ projects
 ├── songAssetId → assets.id (nullable)
 ├── clipAssetIds (JSONB array of asset IDs)
 ├── cutList (JSONB — full cutlist structure)
+├── styleAnalysis (JSONB — LUT/motion/transition/text/genome results)
 ├── renderAssetId → assets.id (nullable)
 ├── createdAt
 └── updatedAt
@@ -293,7 +294,7 @@ projects
 assets
 ├── id (UUID PK)
 ├── projectId → projects.id
-├── type (reference_video | song | clip | render | preview | subtitle | lut | sfx | mask)
+├── type (reference_video | song | clip | render | preview | subtitle | lut | sfx | mask | style_genome)
 ├── filename
 ├── mimeType
 ├── sizeBytes
@@ -317,6 +318,7 @@ renders
 ├── outputAssetId → assets.id (nullable)
 ├── previewAssetId → assets.id (nullable)
 ├── errorMessage (nullable)
+├── options (JSONB — render options such as export preset and duration cap)
 ├── startedAt
 ├── completedAt
 ├── createdAt
@@ -364,12 +366,12 @@ All foreign keys have B-tree indexes. Additional indexes:
 
 | Worker | Type | Primary Tasks | Key Libraries |
 |---|---|---|---|
-| **Ingest Worker** | Temporal | Probe uploaded media metadata | PyAV, temporalio |
-| **Render Worker** | Temporal | Compile final video with FFmpeg | FFmpeg, PyAV, temporalio |
-| **Style Worker** | On-demand | Extract LUT, classify transitions, detect text, analyze camera motion | PIL, scikit-learn, OpenCV |
-| **Reason Worker** | On-demand | Generate cutlist, rank clips per slot | Claude/OpenAI APIs, programmatic fallback |
+| **Ingest Worker** | Temporal | Probe uploaded media metadata; detect beats; cache face detections | PyAV, librosa, temporalio |
+| **Style Worker** | Temporal | Extract LUT, classify transitions, detect text, analyze camera motion, extract 50-feature Style Genome | PIL, scikit-learn, OpenCV, temporalio |
+| **Reason Worker** | Temporal / On-demand | Generate cutlist, rank clips per slot, momentum/anticipation scoring, lyric overlays, audio mix | Claude/OpenAI APIs, programmatic fallback |
+| **Render Worker** | Temporal | Compile final video with FFmpeg; identity-aware masks; NVENC/CUDA acceleration | FFmpeg, PyAV, temporalio |
 | **Upscale Worker** | On-demand | Optional post-render upscaling | Real-ESRGAN, Topaz (placeholder) |
-| **Segment Worker** | Temporal | Subject segmentation / mask generation | SAM, OpenCV, PyAV |
+| **Segment Worker** | Temporal | Subject segmentation / mask generation; protagonist identity masks | SAM3, OpenCV, PyAV |
 
 ### Temporal Task Queues
 
@@ -377,6 +379,7 @@ All foreign keys have B-tree indexes. Additional indexes:
 |---|---|---|---|
 | `ingest` | Ingest Worker | `ProbeAssetWorkflow` | One-shot probe of a single uploaded asset |
 | `segment` | Segment Worker | `SegmentSubjectWorkflow` | Generate per-subject masks for a clip |
+| `style` | Style Worker | `AnalyzeStyleWorkflow`, `AnalyzeGenomeWorkflow` | Reference style analysis and 50-feature Style Genome extraction |
 | `video-render-queue` | Render Worker | `VideoRenderWorkflow` | End-to-end render: fetch, download, compile, upload, finalize |
 
 ### Data Flow (Current Temporal Pipeline)
@@ -406,18 +409,23 @@ Segment Worker generates a mask video and PATCHes asset metadata
          ↓
 A `mask` asset is linked to the source clip
          ↓
-[User builds cut-list via prompt edit or reference pipeline]
+[Style Worker runs `AnalyzeStyleWorkflow` / `AnalyzeGenomeWorkflow` on reference video]
+         ↓
+[Ingest Worker caches face detections for selected clips on demand]
+         ↓
+[Reason Worker builds cut-list, ranks clips, and computes audio mix]
          ↓
 User clicks Render
          ↓
-API starts VideoRenderWorkflow on `video-render-queue`
+API starts `VideoRenderWorkflow` on `video-render-queue`
          ↓
 Render Worker:
   1. fetch_project   → GET /api/internal/projects/:id
   2. download_clips  → from MinIO/R2
-  3. compile_video   → FFmpeg filter_complex
-  4. upload_render   → PUT to MinIO/R2
-  5. finalize_render → PATCH /api/renders/:renderId/complete
+  3. build_identity_masks → face clustering + SAM3 protagonist masks (optional)
+  4. compile_video   → FFmpeg filter_complex (NVENC/CUDA when available)
+  5. upload_render   → PUT to MinIO/R2
+  6. finalize_render → PATCH /api/renders/:renderId/complete
          ↓
     Final MP4 + project/render status updated
 ```
@@ -430,34 +438,116 @@ All workers depend on `shared-py` which provides:
 - **Pydantic models** (`models.py`) — Type-safe data structures with camelCase alias generation
 - **AI provider abstraction** (`ai_providers/`) — Unified interface for Claude, OpenAI, Gemini, Groq, Kimi, Qwen, OpenRouter, plus programmatic fallback
 - **Structured logging** (`logging_config.py`) — JSON-structured logs with correlation IDs
+- **Tuning constants** (`tuning.py`) — Centralized knobs for ranking, optical flow, identity clustering, compiler quality profiles, and NVENC defaults
+- **Identity clustering** (`identity_cluster.py`) — DBSCAN-based face clustering and protagonist selection
+
+---
+
+### Face Detection & Identity Clustering
+
+The ingest worker can sample frames from clips and extract face embeddings with [InsightFace](https://github.com/deepinsight/insightface). Detections are cached as `{clip}.faces.json` and clustered across the project with DBSCAN to discover recurring subjects (identities). The top identities by screen time become **protagonists**.
+
+During render, the render worker:
+1. Ensures face caches exist for every selected clip.
+2. Clusters detections and picks the top-N protagonists.
+3. For each selected clip containing a protagonist, requests a SAM3 subject mask.
+4. Composites the mask as an alpha matte so text/effects can sit behind the subject.
+
+If InsightFace, scikit-learn, or SAM3 is unavailable, the pipeline falls back gracefully: identity metadata is empty and no masks are applied.
+
+---
+
+### Style Genome Extraction
+
+The Style Genome is a 50-feature numeric fingerprint extracted from a reference video. It is produced by the `AnalyzeGenomeWorkflow` on the `style` task queue and stored as a `style_genome` asset (or inside `project.styleAnalysis`).
+
+The five feature families are:
+
+| Family | What it captures |
+|---|---|
+| `cut_rhythm` | Cut density, duration stats, hard-cut vs gradual ratios, downbeat alignment |
+| `motion` | Average/max motion energy, percentages of pan/tilt/zoom/handheld/gimbal |
+| `dwell` | Face size ratios, subjects per shot, face screen time, protagonist presence |
+| `audio_align` | Cuts aligned to beats/downbeats, music ducking frequency, dialogue stats |
+| `composition` | Dominant shot size, close-up/medium/wide ratios, rule-of-thirds ratio |
+
+The genome is computed cheaply from shot boundaries and the existing style analysis; missing inputs are derived automatically so callers can obtain a complete fingerprint from a video path alone.
+
+---
+
+### Hardware-Accelerated Rendering
+
+The render compiler automatically uses NVIDIA NVENC when FFmpeg reports `h264_nvenc` support. Operators can disable it with `AVE_DISABLE_NVENC=1` or opt into CUDA hardware decode with `AVE_USE_HWACCEL=1`.
+
+| Mode | Default | Override |
+|---|---|---|
+| NVENC encode | Auto-detected | `AVE_DISABLE_NVENC=1` forces libx264 |
+| CUDA decode | Off | `AVE_USE_HWACCEL=1` enables `-hwaccel cuda` per segment; falls back to software decode on failure |
+
+NVENC settings are controlled through `RenderConfig`:
+- `use_nvenc` / `video_codec` — choose the encoder path
+- `nvenc_preset` — `p1` (fastest) through `p7` (best quality)
+- `nvenc_cq` — constant quality value (default `19`)
+
+When NVENC is unavailable or explicitly disabled, the compiler falls back to `libx264` with the configured `video_preset` and `video_crf`.
+
+---
+
+### Render Quality Profiles & Clip Ordering
+
+The offline render CLI and render compiler share a set of quality profiles defined in `shared_py.tuning.COMPILER.QUALITY_PROFILES`:
+
+| Profile | libx264 preset | CRF | Use case |
+|---|---|---|---|
+| `preview` | `ultrafast` | 28 | Fast 360p previews |
+| `draft` | `veryfast` | 23 | Iterative editing |
+| `demo` | `medium` | 19 | Default social-media exports |
+| `export` | `slow` | 17 | High-quality delivery |
+| `archive` | `veryslow` | 15 | Archival masters |
+
+Clip ranking supports a deterministic tie-break when the top candidates are statistically tied:
+
+| Mode | Tie-break rule |
+|---|---|
+| `smart` | Keep score order (default) |
+| `filename` | Alphabetical by filename |
+| `upload` | Earliest upload time |
+| `shuffle` | Deterministic per-slot shuffle |
+
+The threshold for applying the tie-break is configured with `clip_order_smart_threshold` (default `0.15`).
 
 ---
 
 ## Render Workflow (Temporal)
 
-The `VideoRenderWorkflow` is a 5-step Temporal workflow that renders a project cut-list to a final MP4.
+The `VideoRenderWorkflow` is a 6-step Temporal workflow that renders a project cut-list to a final MP4.
 
 ### Workflow Steps
 
 ```
 1. fetch_project
    └─► GET /api/internal/projects/:id
-   └─► Returns cut-list, asset IDs, asset key map, active render job
+   └─► Returns cut-list, asset IDs, asset key map, active render job + options
 
 2. download_clips
    └─► Download each clip from MinIO/R2 to a local temp path
    └─► Uses asset key map from fetch_project
 
-3. compile_video
+3. build_identity_masks (optional)
+   └─► Extract/cache faces for selected clips
+   └─► Cluster identities, pick protagonists, request SAM3 masks
+
+4. compile_video
    └─► Build FFmpeg filter_complex from cut-list
-   └─► Apply video effects, transitions, overlays, audio mix
+   └─► Apply masks, video effects, transitions, overlays, audio mix
+   └─► Use NVENC/CUDA when available; otherwise libx264/software decode
    └─► Output: local MP4 file
 
-4. upload_render
+5. upload_render
    └─► Upload rendered MP4 to MinIO/R2
    └─► Return storage key
 
-5. finalize_render
+6. finalize_render
    └─► PATCH /api/renders/:renderId/complete
    └─► API updates render status, project status, output asset
 ```
@@ -587,10 +677,12 @@ API validates:
     ↓
 API collects any `mask` assets and builds a `maskSourceMap` from clip → mask
     ↓
+API validates and stores render `options` (e.g. `exportPreset`, `durationSec`)
+    ↓
 API creates render record (status: queued)
     ↓
 API starts `VideoRenderWorkflow` on `video-render-queue`
-    Body includes the mask map so the compiler can apply segmentation
+    Body includes the mask map and render options so the compiler can apply segmentation and pick dimensions/duration
     ↓
 Response: { job: { id, status, stage } }
     ↓

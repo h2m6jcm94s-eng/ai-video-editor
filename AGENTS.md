@@ -23,8 +23,8 @@ An AI-powered video editor monorepo. The product vision: "Claude Code for video 
 ### Core User Flow
 
 1. User uploads **reference video** + **song** + **clips**
-2. AI analyzes reference (beats, shots, color, text, motion)
-3. AI generates **cutlist** (editing timeline)
+2. AI analyzes reference (beats, shots, color, text, motion, Style Genome, faces)
+3. AI generates **cutlist** (editing timeline) and identity-aware masks
 4. User reviews and optionally prompt-edits the cutlist
 5. System renders final video with effects and transitions
 6. User downloads the result
@@ -43,7 +43,7 @@ ai_video_editor/
 ├── packages/
 │   ├── shared-types/  Source of truth for Zod schemas, enums, errors, effects
 │   └── eslint-config  Shared lint rules
-├── services/          Python workers (render, ingest, style, reason) — uv workspace
+├── services/          Python workers (render, ingest, style, reason, segment) — uv workspace
 │                      └─ AGENTS.md: services/AGENTS.md
 ├── infra/             Docker, Temporal, deployment configs
 │                      └─ AGENTS.md: infra/AGENTS.md

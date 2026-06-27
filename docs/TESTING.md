@@ -91,8 +91,8 @@ export default defineConfig({
 ### Python Tests
 
 **Framework**: pytest
-**Location**: `tests/` (repo root)
-**Config**: `pyproject.toml` or `pytest.ini`
+**Locations**: `tests/` (repo root) plus `services/*/tests/`
+**Config**: `pyproject.toml` (aggregated `testpaths`)
 
 ---
 
@@ -130,17 +130,20 @@ pnpm --filter @ai-video-editor/web vitest --ui
 ### Python Tests
 
 ```bash
-# All Python tests
-uv run pytest tests/
+# All Python tests (root + all service test suites)
+uv run pytest
 
 # With coverage
-uv run pytest tests/ --cov=services/shared-py/src --cov-report=html
+uv run pytest --cov=services/shared-py/src --cov-report=html
 
 # Specific test file
 uv run pytest tests/test_ingest.py -v
+uv run pytest services/render-worker/tests/test_render_compiler.py -v
+uv run pytest services/ingest-worker/tests/test_identity.py -v
+uv run pytest services/style-worker/tests/test_genome.py -v
 
 # Run with markers
-uv run pytest tests/ -m "not slow"
+uv run pytest -m "not slow"
 ```
 
 ### Full Test Suite
@@ -150,9 +153,10 @@ uv run pytest tests/ -m "not slow"
 pnpm test
 
 # This runs:
-# 1. pnpm --filter @ai-video-editor/api test
-# 2. pnpm --filter @ai-video-editor/web test
-# 3. uv run pytest tests/
+# 1. pnpm --filter @ai-video-editor/shared-types test
+# 2. pnpm --filter @ai-video-editor/api test
+# 3. pnpm --filter @ai-video-editor/web test
+# 4. uv run pytest (all configured testpaths)
 ```
 
 ---
@@ -178,7 +182,9 @@ pnpm infra:up
 
 # 2. Start workers in separate terminals
 uv run python -m ingest_worker
+uv run python -m style_worker
 uv run python -m render_worker
+uv run python -m segment_worker  # optional, for mask / identity features
 
 # 3. Run E2E in headed mode
 pnpm e2e:headed

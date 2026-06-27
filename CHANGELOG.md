@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Batch 2 demo render pipeline** (`fix/batch2-prs-6-13`) — quality profiles (`preview`/`draft`/`demo`/`export`/`archive`), deterministic clip-order tie-break modes (`smart`, `filename`, `upload`, `shuffle`), anticipation offsets, momentum scoring, lyric overlays, identity-aware matte compositing, and layered kinetic text ([#181](https://github.com/h2m6jcm94s-eng/ai-video-editor/issues/181)).
+- **NVIDIA NVENC hardware encoding** (`feat/nvenc-hwaccel-render`) — automatic NVENC detection and fallback, optional CUDA hardware decode, and `RenderConfig` knobs `use_nvenc`, `nvenc_preset`, `nvenc_cq`, `use_hwaccel` ([#182](https://github.com/h2m6jcm94s-eng/ai-video-editor/issues/182)).
+- **Batched face detection & identity clustering** (`feat/batched-face-detection`) — InsightFace-based face extraction across selected clips, DBSCAN identity clustering, protagonist selection, and SAM3-driven protagonist masks ([#183](https://github.com/h2m6jcm94s-eng/ai-video-editor/issues/183)).
+- **Style Genome extraction** (`feat/style-genome-slot-fields`) — 50-feature reference-video fingerprint (`cut_rhythm`, `motion`, `dwell`, `audio_align`, `composition`) plus the `AnalyzeGenomeWorkflow` and extended cutlist slot schema ([#184](https://github.com/h2m6jcm94s-eng/ai-video-editor/issues/184)).
 - Self-hosted LGTM observability stack: Grafana + Loki + Tempo + Prometheus + Promtail + OTel Collector ([#119](https://github.com/h2m6jcm94s-eng/ai-video-editor/issues/119)).
 - 5 pre-provisioned Grafana dashboards: API Health, Temporal Workflows, AI Calls, Render Queue, User Activity.
 - OpenTelemetry tracing for API (NodeSDK) and Python workers (OTLP HTTP exporter) ([#121](https://github.com/h2m6jcm94s-eng/ai-video-editor/issues/121)).
@@ -35,6 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Upload uses PUT raw file with XMLHttpRequest progress and mime gate.
 
 ### Fixed
+- Windows FFmpeg subprocess race eliminated by passing `stdin=subprocess.DEVNULL` in `render_worker.compiler._run_ffmpeg`.
 - `projects.ts` cutList `any` cast replaced with typed `z.infer<typeof updateCutlistSchema>` ([#102](https://github.com/h2m6jcm94s-eng/ai-video-editor/issues/102)).
 - `compiler.py` bare `except:` changed to typed `except OSError:` in temp-file cleanup ([#113](https://github.com/h2m6jcm94s-eng/ai-video-editor/issues/113)).
 - `probe.py` and `shot_detect.py` `av.open()` leaks fixed with context managers + correct duration math ([#114](https://github.com/h2m6jcm94s-eng/ai-video-editor/issues/114)).

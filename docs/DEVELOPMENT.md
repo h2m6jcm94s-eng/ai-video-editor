@@ -164,7 +164,7 @@ pnpm dev:stop
 If you prefer to run pieces separately:
 
 ```bash
-# Workers only
+# Workers only (ingest, reason, render, style, segment)
 pnpm workers
 
 # API only
@@ -264,6 +264,8 @@ Python workers read from the same `.env` file via `python-dotenv`. Key variables
 | `TEMPORAL_HOST` | Yes | Temporal server address |
 | `INTERNAL_WORKER_TOKEN` | Yes | Shared secret for `/api/internal` routes |
 | `R2_*` | Yes | Object storage credentials |
+| `AVE_DISABLE_NVENC` | No | Set to `1` to force software (libx264) encoding |
+| `AVE_USE_HWACCEL` | No | Set to `1` to enable CUDA hardware decode (experimental) |
 
 ---
 
@@ -382,11 +384,34 @@ Workers are started with `uv run` from the repo root:
 # Ingest worker — task queue `ingest`
 uv run python -m ingest_worker
 
+# Reason worker — cutlist generation, ranking, audio mix
+uv run python -m reason_worker
+
 # Render worker — task queue `video-render-queue`
 uv run python -m render_worker
+
+# Style worker — task queue `style`
+uv run python -m style_worker
+
+# Segment worker — task queue `segment`
+uv run python -m segment_worker
 ```
 
 Make sure `apps/api/.env.local` is sourced or variables are exported.
+
+### Offline Batch Rendering
+
+The `scripts/batch2-offline-render.py` CLI runs the full AI pipeline without the API or Temporal stack. It is useful for iterating on render quality and face/identity features:
+
+```bash
+python scripts/batch2-offline-render.py \
+  --quality demo \
+  --clip-order smart \
+  --nvenc \
+  --duration 30
+```
+
+See `--help` for all options (`--nvenc-preset`, `--nvenc-cq`, `--hwaccel`, `--clip-order-threshold`, etc.).
 
 ### Running E2E Tests Locally
 

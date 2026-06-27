@@ -84,7 +84,10 @@ The AI analyzes the reference video to extract:
 - **Color grading** — LUT extraction for color matching
 - **Text overlays** — Title styles and positioning
 - **Camera motion** — Pan, tilt, push patterns
+- **Style Genome** — A 50-feature fingerprint of cut rhythm, motion, dwell, audio alignment, and composition
 - **Effects** — Transitions, zooms, shakes
+
+It also detects faces across clips, clusters them into identities, and can generate **protagonist-aware subject masks** so text and effects stay behind the main subject.
 
 Then it generates a **cutlist** — a structured editing timeline — and compiles the final video with FFmpeg.
 
@@ -197,17 +200,19 @@ Open `http://localhost:3000`, sign in with Clerk, and add your AI provider keys 
 └─────────────┘     └──────┬──────┘     └─────────────────────────────────────────┘
                            │
               ┌────────────┼────────────┐
-              ▼            ▼            ▼
-        ┌──────────┐ ┌──────────┐ ┌──────────┐
-        │  Ingest  │ │  Render  │ │  Future  │
-        │  Worker  │ │  Worker  │ │  Workers │
-        │(Temporal)│ │(Temporal)│ │(Temporal)│
-        └──────────┘ └──────────┘ └──────────┘
+              ▼            ▼            ▼            ▼
+        ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+        │  Ingest  │ │  Style   │ │  Render  │ │ Segment  │
+        │  Worker  │ │  Worker  │ │  Worker  │ │  Worker  │
+        │(Temporal)│ │(Temporal)│ │(Temporal)│ │(Temporal)│
+        └──────────┘ └──────────┘ └──────────┘ └──────────┘
 ```
 
 Workers connect to Temporal on `localhost:7233`:
-- **Ingest Worker** listens on task queue `ingest` — probes uploaded media and reports metadata back to the API.
-- **Render Worker** listens on task queue `video-render-queue` — downloads clips, compiles the timeline with FFmpeg, uploads the output MP4, and finalizes the render job.
+- **Ingest Worker** listens on task queue `ingest` — probes uploaded media, detects beats, and caches face detections.
+- **Style Worker** listens on task queue `style` — extracts LUTs, motion, transitions, text overlays, and the 50-feature Style Genome.
+- **Render Worker** listens on task queue `video-render-queue` — downloads clips, builds identity-aware masks, compiles the timeline with FFmpeg (NVENC when available), uploads the output MP4, and finalizes the render job.
+- **Segment Worker** listens on task queue `segment` — generates SAM3 subject masks and protagonist identity masks.
 
 All worker→API calls use the internal route prefix `/api/internal` protected by `x-internal-token`.
 
@@ -231,8 +236,8 @@ All worker→API calls use the internal route prefix `/api/internal` protected b
 | Backend | Fastify 4, Drizzle ORM, PostgreSQL, Redis, MinIO/R2 |
 | Orchestration | Temporal |
 | AI | Claude 3.5 Sonnet, GPT-4o, Whisper, Gemini, Groq |
-| Render | FFmpeg, PyAV |
-| Workers | Python 3.11, librosa, PySceneDetect, TransNet V2 |
+| Render | FFmpeg, PyAV (NVIDIA NVENC / CUDA optional) |
+| Workers | Python 3.11, librosa, PySceneDetect, TransNet V2, InsightFace, OpenCV, scikit-learn, SAM3 |
 | Observability | Grafana, Loki, Tempo, Prometheus, OTel Collector, GlitchTip |
 | Language | TypeScript 5.4, Python 3.11 |
 | Package Manager | pnpm 9.15 (JS), uv (Python) |
@@ -253,10 +258,11 @@ ai_video_editor/
 │   ├── shared-types/     # Zod schemas, enums, effects
 │   └── eslint-config/    # Shared lint rules
 ├── services/             # Python uv workspace
-│   ├── ingest-worker/    # Temporal worker — media probing
-│   ├── style-worker/     # LUT, transition, text, camera analysis
-│   ├── reason-worker/    # Cutlist generation, clip ranking
-│   ├── render-worker/    # Temporal worker — FFmpeg compilation
+│   ├── ingest-worker/    # Temporal worker — media probing + face detection
+│   ├── style-worker/     # LUT, transition, text, camera motion, Style Genome
+│   ├── reason-worker/    # Cutlist generation, clip ranking, audio mix
+│   ├── render-worker/    # Temporal worker — FFmpeg compilation (NVENC optional)
+│   ├── segment-worker/   # Temporal worker — SAM3 subject / identity masks
 │   ├── upscale-worker/   # Post-render upscaling
 │   ├── shared-py/        # Shared Python library
 │   └── orchestrator.py   # Standalone pipeline CLI
@@ -306,6 +312,9 @@ uv run python -m reason_worker
 uv run python -m render_worker
 uv run python -m style_worker
 uv run python -m segment_worker
+
+# Offline batch-2 demo render (no API/Temporal stack)
+python scripts/batch2-offline-render.py --quality demo --clip-order smart
 ```
 
 ### Running Tests

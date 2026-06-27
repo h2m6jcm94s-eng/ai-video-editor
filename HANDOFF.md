@@ -7,7 +7,7 @@
 ## 0. Latest Session Snapshot
 
 **Current branch:** `main`  
-**Latest commit:** `afa7619` — `fix(compiler): pass DEVNULL stdin to FFmpeg subprocess`
+**Latest commit:** `f082876` — `docs: update HANDOFF after merging PRs #181-#184 and fixing flaky test`
 
 ### What just happened
 
@@ -18,6 +18,7 @@
   4. `#184` — feat: style genome extraction + extended cutlist slot schema
 - Resolved merge conflicts between #181/#182 (compiler, render config, batch2 script, tests) and #183/#184 (shared model definitions, pytest testpaths).
 - Fixed a flaky Windows-only integration test failure (`OSError: [WinError 6] The handle is invalid`) by passing `stdin=subprocess.DEVNULL` to FFmpeg subprocess calls in `services/render-worker/src/render_worker/compiler.py`.
+- Refreshed project documentation (`README.md`, `docs/ARCHITECTURE.md`, `docs/API.md`, `docs/DEVELOPMENT.md`, `docs/DEPLOYMENT.md`, `docs/TESTING.md`, `CHANGELOG.md`, and `apps/api/openapi.yaml`) to cover the merged Batch 2, NVENC, face detection/identity, and Style Genome features.
 
 ### Test results after merges
 

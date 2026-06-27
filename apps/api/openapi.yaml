@@ -1188,6 +1188,10 @@ components:
             format: uuid
         cutList:
           $ref: "#/components/schemas/CutList"
+        styleAnalysis:
+          type: object
+          nullable: true
+          description: Cached reference style analysis (LUT, motion, transitions, text, genome)
         renderAssetId:
           type: string
           format: uuid
@@ -1480,7 +1484,13 @@ components:
           properties:
             exportPreset:
               type: string
-              enum: [youtube_16_9, reels_9_16, tiktok_9_16, square_1_1]
+              enum: [auto, youtube_16_9, reels_9_16, tiktok_9_16, square_1_1]
+              description: Output dimension preset. Use `auto` to fall back to the cut-list aspect ratio.
+            durationSec:
+              type: number
+              minimum: 5
+              maximum: 600
+              description: Optional output duration cap.
 
     CompleteRenderRequest:
       type: object
@@ -1789,10 +1799,48 @@ components:
           type: number
           minimum: 0
           maximum: 1
+        maskAssetId:
+          type: string
+          format: uuid
+          nullable: true
+        maskEnabled:
+          type: boolean
+          default: true
+        identityIdsPresent:
+          type: array
+          items:
+            type: integer
+          default: []
+        protagonistMatteEnabled:
+          type: boolean
+          default: true
+        enableKineticText:
+          type: boolean
+          default: false
+        textZLayer:
+          type: string
+          enum: [on_top, behind_subject]
+          default: on_top
+        textDensity:
+          type: string
+          enum: [low, medium, high]
+          default: medium
+        kineticText:
+          type: string
         effects:
           type: array
           items:
             $ref: "#/components/schemas/Effect"
+        sourceWindowStartS:
+          type: number
+          minimum: 0
+        anticipationOffsetS:
+          type: number
+          default: 0
+        heatmapScore:
+          type: number
+          minimum: 0
+          maximum: 1
 
     Overlay:
       type: object
