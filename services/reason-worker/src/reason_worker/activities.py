@@ -170,6 +170,8 @@ async def rank_clips_activity(
     clip_metadata: Dict[str, dict],
     fallback_policy: str = "round_robin",
     style_analysis: Optional[dict] = None,
+    clip_order_fallback: str = "smart",
+    clip_order_smart_threshold: float = 0.15,
 ) -> dict:
     """Rank user clips for each slot in the cutlist.
 
@@ -197,6 +199,8 @@ async def rank_clips_activity(
         cutlist.slots,
         populated_metadata,
         fallback_policy=fallback_policy,
+        clip_order_fallback=clip_order_fallback,
+        clip_order_smart_threshold=clip_order_smart_threshold,
     )
 
     confidences = compute_confidence(rankings)
