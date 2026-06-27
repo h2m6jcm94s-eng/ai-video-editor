@@ -158,6 +158,8 @@ class Slot(BaseModelCamel):
     mask_asset_id: Optional[str] = None
     mask_enabled: bool = True
     effects: List[Effect] = Field(default_factory=list)
+    source_window_start_s: Optional[float] = None
+    heatmap_score: Optional[float] = None
 
 
 class Overlay(BaseModelCamel):
@@ -183,11 +185,23 @@ class Subtitle(BaseModelCamel):
 
 class AudioTrack(BaseModelCamel):
     asset_id: str
+    role: Literal["music", "dialogue", "voiceover", "sfx", "ambience"] = "music"
     gain_db: float = Field(default=0.0, ge=-60.0, le=12.0)
     start_s: float = Field(ge=0.0)
     end_s: float = Field(ge=0.0)
     fade_in_s: float = Field(default=0.0, ge=0.0)
     fade_out_s: float = Field(default=0.0, ge=0.0)
+    duck_gain_db: float = Field(default=-12.0, ge=-60.0, le=0.0)
+    duck_attack_ms: int = Field(default=20, ge=1, le=1000)
+    duck_release_ms: int = Field(default=250, ge=10, le=2000)
+    duck_threshold: float = Field(default=0.15, ge=0.0, le=1.0)
+    # Source window inside the asset file (for dialogue extracted from clips).
+    source_start_s: Optional[float] = None
+    source_end_s: Optional[float] = None
+    # Link back to the cutlist slot that produced this track.
+    slot_index: Optional[int] = None
+    # If True, sidechain ducking is skipped for this music track (e.g. drop).
+    duck_disabled: bool = False
 
 
 class CutList(BaseModelCamel):
@@ -240,6 +254,7 @@ class StyleAnalysis(BaseModelCamel):
     lut_extracted: bool = False
     lut_storage_key: Optional[str] = None
     detected_transitions: List[str] = Field(default_factory=list)
+    detected_transition_types: List[str] = Field(default_factory=list)
     detected_overlays: List[Overlay] = Field(default_factory=list)
     camera_motions: List[str] = Field(default_factory=list)
     pacing: str = "medium"
@@ -253,6 +268,9 @@ class ClipScore(BaseModelCamel):
     aesthetic_score: float = 0.0
     motion_score: float = 0.0
     duration_score: float = 0.0
+    window_score: float = 0.0
+    window_start_s: Optional[float] = None
+    dominant_motion: str = "still"
     diversity_penalty: float = 0.0
     repetition_penalty: float = 0.0
     total_score: float = 0.0
