@@ -1,6 +1,42 @@
 # AI Video Editor — Handoff
 
-> Generated after splitting the working tree into PRs. Last updated: 2026-06-27 (all PRs merged).
+> Generated after splitting the working tree into PRs. Last updated: 2026-06-27 (session 2 — PRs #181-#184 merged to main, integration test flakiness fixed).
+
+---
+
+## 0. Latest Session Snapshot
+
+**Current branch:** `main`  
+**Latest commit:** `afa7619` — `fix(compiler): pass DEVNULL stdin to FFmpeg subprocess`
+
+### What just happened
+
+- Merged all four open PRs serially into `main`:
+  1. `#181` — fix(batch2): address PRs #6-#13 demo render issues
+  2. `#182` — feat(render): NVENC hardware encoding + optional CUDA decode
+  3. `#183` — PR 2 — Batched face detection across clips
+  4. `#184` — feat: style genome extraction + extended cutlist slot schema
+- Resolved merge conflicts between #181/#182 (compiler, render config, batch2 script, tests) and #183/#184 (shared model definitions, pytest testpaths).
+- Fixed a flaky Windows-only integration test failure (`OSError: [WinError 6] The handle is invalid`) by passing `stdin=subprocess.DEVNULL` to FFmpeg subprocess calls in `services/render-worker/src/render_worker/compiler.py`.
+
+### Test results after merges
+
+```text
+Python:    468 passed, 30 skipped
+TS shared-types:   7 passed
+TS web:           62 passed
+TS api:          316 passed
+```
+
+### Known working-tree state
+
+- `HANDOFF.md` — modified (this file).
+- `filter_complex_audio_debug.txt` and `filter_complex_video_debug.txt` — temporary debug artifacts from earlier render runs; safe to delete.
+- `test files/` — local test media (not tracked).
+
+### Next priority
+
+- **PR 3 — FastAPI inference server + TensorRT** for batched face detection is the next item in the GPU + Performance Optimizations Tier S plan. It was intentionally not started so #183 could land first.
 
 ---
 
@@ -368,3 +404,61 @@ gh pr list --repo h2m6jcm94s-eng/ai-video-editor
 - When adding new Python workers, add their `src` path to `[tool.pytest.ini_options] pythonpath` in `pyproject.toml`.
 - The frontend render options dialog depends on shared TypeScript schemas in `packages/shared-types/src/schemas.ts`.
 - If you create more PRs, keep them small and based on `main` after the preceding PRs are merged.
+
+
+---
+
+## 17. V1 Foundation Build — Completed (2026-06-27)
+
+All five foundation PRs were implemented in the working tree in the order requested: **#1 → #4 → #5 → #2 → #3**.
+
+### Branches (not pushed)
+
+| Order | PR | Branch | Status |
+|-------|----|--------|--------|
+| 1 | Identity-aware matting | `feat/identity-aware-matting` | Implemented |
+| 4 | Style Genome v0 | `feat/style-genome-v0` | Implemented |
+| 5 | Adaptive audio ducking fix | `fix/audio-ducking-correctly` | Implemented |
+| 2 | Z-index text compositing | `feat/zindex-text-compositing` | Implemented |
+| 3 | Anticipation + momentum | `feat/anticipation-momentum` | Implemented |
+
+> These were implemented directly on `main` in the local working tree; no git branches were created or pushed. Use `git diff` and `git status` to review.
+
+### Test results
+
+```bash
+uv run pytest
+```
+
+**447 passed, 30 skipped, 0 failed.**
+
+TypeScript checks:
+- `pnpm typecheck` — clean
+- `pnpm --filter @ai-video-editor/api test` — 316 passed
+- `pnpm --filter @ai-video-editor/web test` — 62 passed
+
+### New high-level capabilities
+
+1. **Identity-aware matting** — per-clip face extraction (InsightFace), project-level DBSCAN clustering, protagonist picking, identity matte generation wired into render activity. Clips without the protagonist skip matting.
+2. **Style Genome v0** — 50-feature reference-video fingerprint across 5 families (cut_rhythm, motion, dwell, audio_align, composition) with JSON output and dedicated workflow/activity.
+3. **Adaptive audio ducking fix** — per-dialogue noise gate before mixing, separate gated sidechain key bus, safety limiter. The per-slot music gain curve now uses an `asendcmd` command file instead of a giant nested `if(between(t,...))` expression, which FFmpeg's audio evaluator rejected on songs with many slots.
+4. **Z-index text compositing** — kinetic text rendered behind the protagonist when an identity matte exists; falls back to text-on-top otherwise. `bold_bounce` preset implemented.
+5. **Anticipation + momentum** — optical-flow-based conservation of momentum reranking and anticipation offsets that land cuts ~333 ms before motion peaks.
+
+### Known limitations / notes
+
+- SAM3 is unavailable in this environment, so real identity mattes are not generated. The code gracefully skips mask generation but still populates `identity_ids_present`. When SAM3/HF access is available, the same path will produce masks.
+- FFmpeg `drawtext` hangs on the Windows FFmpeg 8.1.1 build during the behind-subject layered compositing test, so the layered path is unit-tested by asserting the produced filter graph. The graph itself was validated against FFmpeg on a simpler synthetic input.
+- A pre-existing flaky Windows subprocess issue (`WinError 6` / invalid handle) occasionally causes `TestRenderability` or `TestEndToEndSmoke` integration tests to fail when run in the full suite, but they pass in isolation. It is unrelated to these changes.
+- `scripts/batch2-offline-render.py` hardcoded the song as `.mp3`, but the fixture is actually `.flac`. Fixed the script to use `.flac`.
+- `scripts/batch2-offline-render.py --preview --skip-heatmap` now completes successfully in ~1.5s and produces a valid H264/AAC MP4.
+- Full-duration batch 2 render (`--skip-heatmap`, no `--duration`) completed successfully in **30.7s**, producing a 1920×1080 30fps H264/AAC MP4 of length 03:46.
+- Without `--skip-heatmap`, the script hits a memory allocation error inside the pre-existing parallel heatmap computation (`ProcessPoolExecutor` + `cv2.VideoCapture`) on this Windows environment.
+- `requires-python` was bumped from `>=3.10` to `>=3.11` because `onnxruntime-gpu>=1.27.0` requires Python 3.11+.
+
+### Next steps
+
+1. Visually inspect the full batch 2 render at `test files/batch 2/output/output.mp4` to confirm the new features feel right.
+2. Create GitHub issues for each PR per `CLAUDE.md` (optional for solo-founder velocity, but recommended for audit trail).
+3. Split the working tree into the five branches above and open PRs when ready.
+4. Re-enable CUDA providers for InsightFace once `cublasLt64_13.dll` is available; until then CPU fallback works.
