@@ -7,7 +7,7 @@
 ## 0. Latest Session Snapshot
 
 **Current branch:** `main`  
-**Latest commit:** *(pending — repeat-bug fixes staged)*
+**Latest commit:** `51a803c` — `fix(repeat): eliminate duplicate source windows in demo render`
 
 ### What just happened
 
