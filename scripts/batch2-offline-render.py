@@ -69,6 +69,19 @@ def main():
     parser.add_argument("--skip-heatmap", action="store_true", help="Skip heatmap computation (faster, lower quality)")
     parser.add_argument("--preview", action="store_true", help="Render 360p 15s preview")
     parser.add_argument(
+        "--nvenc",
+        action="store_true",
+        help="Use NVIDIA NVENC hardware encoding when available (default: auto)",
+    )
+    parser.add_argument(
+        "--no-nvenc",
+        action="store_true",
+        help="Force software (libx264) encoding even if NVENC is available",
+    )
+    parser.add_argument("--nvenc-preset", type=str, default="p5", help="NVENC preset (p1 fastest -> p7 best, default: p5)")
+    parser.add_argument("--nvenc-cq", type=int, default=19, help="NVENC CQ value (default: 19)")
+    parser.add_argument("--hwaccel", action="store_true", help="Enable CUDA hardware decoding (experimental)")
+    parser.add_argument(
         "--quality",
         type=str,
         choices=list(QUALITY_PROFILES.keys()),
@@ -259,7 +272,12 @@ def main():
     # Map quality profile to encoder settings.
     quality = "preview" if args.preview else args.quality
     profile = QUALITY_PROFILES[quality]
-    use_nvenc = _has_nvenc() and not args.preview
+    if args.no_nvenc:
+        use_nvenc = False
+    elif args.nvenc:
+        use_nvenc = _has_nvenc()
+    else:
+        use_nvenc = _has_nvenc() and not args.preview
     if use_nvenc:
         # Map x264 preset names to NVENC p-values (p1 slowest/best, p7 fastest).
         preset_to_nvenc = {
@@ -269,8 +287,8 @@ def main():
             "slow": "p3",
             "veryslow": "p2",
         }
-        video_preset = preset_to_nvenc.get(profile["preset"], "p4")
-        video_crf = profile["crf"]
+        video_preset = args.nvenc_preset or preset_to_nvenc.get(profile["preset"], "p4")
+        video_crf = args.nvenc_cq if args.nvenc_cq and args.nvenc_cq > 0 else profile["crf"]
         video_codec = "h264_nvenc"
     else:
         video_preset = profile["preset"]
@@ -286,6 +304,11 @@ def main():
         video_codec=video_codec,
         video_preset=video_preset,
         video_crf=video_crf,
+        use_nvenc=use_nvenc,
+        nvenc_preset=args.nvenc_preset,
+        nvenc_cq=args.nvenc_cq,
+        use_hwaccel=args.hwaccel,
+
     )
 
     start_render = time.time()

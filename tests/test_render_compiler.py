@@ -17,7 +17,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "services", "sh
 import warnings
 
 from PIL import Image
-from render_worker.compiler import compile_timeline, render_preview, resolve_render_dimensions, XFADE_MAP, _get_fontconfig_file, _build_audio_filter, _build_audio_filter_v2
+from render_worker.compiler import (
+    compile_timeline,
+    render_preview,
+    resolve_render_dimensions,
+    XFADE_MAP,
+    _get_fontconfig_file,
+    _build_audio_filter,
+    _build_audio_filter_v2,
+    _video_encode_args,
+    _segment_video_args,
+)
 from shared_py.models import CutList, CutListGlobals, Slot, Overlay, RenderConfig, Effect, Subtitle, AudioTrack
 
 
@@ -741,6 +751,134 @@ class TestAudioDucking:
         assert next_idx == -1
         assert extra == []
 
+
+class TestHardwareEncodeArgs:
+    """NVENC / libx264 encoder flag selection."""
+
+    def test_video_encode_args_defaults_to_libx264(self):
+        config = RenderConfig(output_path="/tmp/out.mp4")
+        args = _video_encode_args(config)
+        assert "-c:v" in args
+        assert "libx264" in args
+        assert "-crf" in args
+        assert "-cq" not in args
+
+    def test_video_encode_args_uses_nvenc_when_flag_set(self):
+        config = RenderConfig(
+            output_path="/tmp/out.mp4",
+            use_nvenc=True,
+            nvenc_preset="p5",
+            nvenc_cq=19,
+        )
+        args = _video_encode_args(config)
+        assert "h264_nvenc" in args
+        assert "p5" in args
+        assert "-tune" in args
+        assert "hq" in args
+        assert "-rc" in args
+        assert "vbr" in args
+        assert "-cq" in args
+        assert "19" in args
+
+    def test_segment_video_args_uses_nvenc_when_flag_set(self):
+        config = RenderConfig(
+            output_path="/tmp/out.mp4",
+            use_nvenc=True,
+            nvenc_preset="p5",
+            nvenc_cq=19,
+        )
+        args = _segment_video_args(config)
+        assert "h264_nvenc" in args
+        assert "p5" in args
+        assert "-cq" in args
+        assert "19" in args
+        assert "-an" in args
+
+    def test_segment_video_args_defaults_to_libx264(self):
+        config = RenderConfig(output_path="/tmp/out.mp4")
+        args = _segment_video_args(config)
+        assert "libx264" in args
+        assert "-crf" in args
+        assert "-an" in args
+
+    def test_segment_video_args_falls_back_to_safe_presets(self):
+        config = RenderConfig(
+            output_path="/tmp/out.mp4",
+            use_nvenc=True,
+            nvenc_preset="not-a-preset",
+        )
+        args = _segment_video_args(config)
+        assert "p5" in args
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg not available")
+class TestHardwareEncoding:
+    """End-to-end smoke test for NVENC hardware encoding path."""
+
+    def test_nvenc_render_produces_h264_video(self, tmp_path):
+        from render_worker.compiler import _has_nvenc
+        if not _has_nvenc():
+            pytest.skip("NVENC not available on this runner")
+
+        clip1 = create_test_video(str(tmp_path / "a.mp4"), duration=2.0, resolution=(640, 480))
+        clip2 = create_test_video(str(tmp_path / "b.mp4"), duration=2.0, resolution=(640, 480))
+
+        cutlist = CutList(
+            globals=CutListGlobals(total_duration_s=3.0, tempo_bpm=120.0),
+            slots=[
+                Slot(
+                    index=0,
+                    start_s=0.0,
+                    duration_s=1.5,
+                    beat_index=0,
+                    section="verse",
+                    target_shot_type="wide",
+                    subject_hint="person",
+                    motion_hint="static",
+                    energy_level=0.5,
+                    selected_clip_id="a",
+                ),
+                Slot(
+                    index=1,
+                    start_s=1.5,
+                    duration_s=1.5,
+                    beat_index=1,
+                    section="verse",
+                    target_shot_type="wide",
+                    subject_hint="person",
+                    motion_hint="static",
+                    energy_level=0.5,
+                    selected_clip_id="b",
+                ),
+            ],
+        )
+
+        output_path = str(tmp_path / "out.mp4")
+        config = RenderConfig(
+            output_path=output_path,
+            width=640,
+            height=480,
+            fps=30.0,
+            use_nvenc=True,
+            nvenc_preset="p5",
+            nvenc_cq=19,
+        )
+
+        result = compile_timeline(cutlist, {"a": clip1, "b": clip2}, output_path, config)
+        assert os.path.exists(result)
+
+        # Verify the output was encoded with NVENC.
+        probe = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=codec_name",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                output_path,
+            ],
+            check=True, capture_output=True, text=True,
+        )
+        assert "h264" in probe.stdout.lower()
 
 class TestAudioFilterV2:
     """Unit tests for the two-pass adaptive ducking filter graph."""
