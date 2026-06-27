@@ -97,7 +97,9 @@ def _dialogue_segments_for_slot(
     cfg: ScoringConfig,
 ) -> List[DialogueSegment]:
     """Find dialogue segments inside the selected window of a clip."""
-    window_start = slot.source_window_start_s if slot.source_window_start_s is not None else slot.start_s
+    # When no source window has been chosen, start from the beginning of the
+    # clip so early dialogue is not missed.
+    window_start = slot.source_window_start_s if slot.source_window_start_s is not None else 0.0
     window_end = window_start + slot.duration_s
 
     segments = score_clip_dialogue(clip_path, cfg=cfg)
@@ -187,6 +189,7 @@ def build_audio_tracks(
     song_asset_id: Optional[str] = None,
     clip_paths: Optional[Dict[str, str]] = None,
     scoring_cfg: Optional[ScoringConfig] = None,
+    max_dialogue_tracks: int = 50,
 ) -> List[AudioTrack]:
     """Build the final music + dialogue AudioTrack list for ``cutlist``.
 
@@ -194,6 +197,9 @@ def build_audio_tracks(
     keep full music level, while verse/chorus tracks are sidechain-ducked under
     dialogue. Dialogue tracks carry source offsets so the renderer extracts only
     the relevant clip window and places it at the correct timeline position.
+
+    The number of dialogue tracks is capped to keep the final FFmpeg command
+    line within Windows' length limit; only the highest-scoring segments are kept.
     """
     clip_paths = clip_paths or {}
     scoring_cfg = scoring_cfg or ScoringConfig()
@@ -228,9 +234,14 @@ def build_audio_tracks(
         window_start = (
             slot.source_window_start_s
             if slot.source_window_start_s is not None
-            else slot.start_s
+            else 0.0
         )
         segs = _dialogue_segments_for_slot(slot, clip_paths[clip_id], scoring_cfg)
+        if not segs:
+            continue
+        # Keep only the strongest segment per slot to avoid flooding the mixer
+        # with low-confidence detections.
+        segs = sorted(segs, key=lambda s: s.total_score, reverse=True)[:1]
         for seg in segs:
             # Translate from slot-relative to global cutlist time.
             global_start = slot.start_s + seg.start_s
@@ -266,6 +277,12 @@ def build_audio_tracks(
                     slot_index=slot.index,
                 )
             )
+
+    # Keep only the highest-scoring dialogue tracks so the final FFmpeg command
+    # stays within Windows' command-line length limit.
+    dialogue_tracks.sort(key=lambda t: t.start_s)
+    dialogue_tracks.sort(key=lambda t: t.gain_db, reverse=True)
+    dialogue_tracks = dialogue_tracks[:max_dialogue_tracks]
 
     # Merge overlapping dialogue tracks from the same clip to avoid redundant inputs.
     # Simple greedy merge, but keep the merged source window covering the union.

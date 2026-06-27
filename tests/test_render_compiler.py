@@ -24,6 +24,7 @@ from render_worker.compiler import (
     XFADE_MAP,
     _get_fontconfig_file,
     _build_audio_filter,
+    _build_audio_filter_v2,
     _video_encode_args,
     _segment_video_args,
 )
@@ -540,25 +541,27 @@ def _write_identity_cube(path: str, size: int = 2) -> None:
 class TestResolveRenderDimensions:
     def test_all_export_presets(self):
         expected = {
-            "youtube_16_9": (1280, 720),
-            "reels_9_16": (720, 1280),
-            "tiktok_9_16": (720, 1280),
-            "square_1_1": (720, 720),
+            "youtube_16_9": (1920, 1080),
+            "youtube_4k_16_9": (3840, 2160),
+            "reels_9_16": (1080, 1920),
+            "tiktok_9_16": (1080, 1920),
+            "square_1_1": (1080, 1080),
+            "preview_360p_16_9": (640, 360),
         }
         for preset, dims in expected.items():
             assert resolve_render_dimensions(preset, None) == dims
 
     def test_preset_wins_over_aspect_ratio(self):
-        assert resolve_render_dimensions("youtube_16_9", "9:16") == (1280, 720)
+        assert resolve_render_dimensions("youtube_16_9", "9:16") == (1920, 1080)
 
     def test_aspect_ratio_fallbacks(self):
-        assert resolve_render_dimensions(None, "16:9") == (1280, 720)
-        assert resolve_render_dimensions(None, "9:16") == (720, 1280)
-        assert resolve_render_dimensions(None, "4:5") == (720, 900)
-        assert resolve_render_dimensions(None, "1:1") == (720, 720)
+        assert resolve_render_dimensions(None, "16:9") == (1920, 1080)
+        assert resolve_render_dimensions(None, "9:16") == (1080, 1920)
+        assert resolve_render_dimensions(None, "4:5") == (1080, 1350)
+        assert resolve_render_dimensions(None, "1:1") == (1080, 1080)
 
     def test_unknown_values_fallback_to_vertical(self):
-        assert resolve_render_dimensions("unknown_preset", "unknown_ratio") == (720, 1280)
+        assert resolve_render_dimensions("unknown_preset", "unknown_ratio") == (1080, 1920)
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg not available")
@@ -876,3 +879,73 @@ class TestHardwareEncoding:
             check=True, capture_output=True, text=True,
         )
         assert "h264" in probe.stdout.lower()
+
+class TestAudioFilterV2:
+    """Unit tests for the two-pass adaptive ducking filter graph."""
+
+    def _make_slot(self, idx: int, start_s: float, duration_s: float, song_db: float = 0.0, has_dialogue: bool = True):
+        from render_worker.compiler import SlotAudioMix
+        slot = Slot(
+            index=idx,
+            start_s=start_s,
+            duration_s=duration_s,
+            beat_index=idx,
+            section="verse",
+            target_shot_type="medium_shot",
+            subject_hint="protagonist",
+            motion_hint="still",
+            energy_level=0.5,
+        )
+        mix = SlotAudioMix(song_level_db=song_db, clip_audio_enabled=has_dialogue)
+        return slot, mix
+
+    def test_no_dialogue_returns_music_only(self, tmp_path):
+        slot, mix = self._make_slot(0, 0.0, 5.0, has_dialogue=False)
+        filt = _build_audio_filter_v2([slot], 1, [], [mix], str(tmp_path))
+        assert "[music]anull[a_out]" in filt
+        assert "sidechaincompress" not in filt
+
+    def test_single_dialogue_has_sidechain(self, tmp_path):
+        slot, mix = self._make_slot(0, 0.0, 5.0, has_dialogue=True)
+        dialogue_specs = [(0, 2, 0, 5.0)]
+        filt = _build_audio_filter_v2([slot], 1, dialogue_specs, [mix], str(tmp_path))
+        assert "sidechaincompress" in filt
+        assert "[music][dlg_sc_padded]sidechaincompress" in filt
+        assert "[dlg_sc]apad=" in filt
+        assert "[a_out]" in filt
+
+    def test_multiple_dialogues_have_sidechain(self, tmp_path):
+        slots, mixes = [], []
+        dialogue_specs = []
+        for i in range(3):
+            slot, mix = self._make_slot(i, i * 5.0, 5.0, has_dialogue=True)
+            slots.append(slot)
+            mixes.append(mix)
+            dialogue_specs.append((i, 2 + i, int(i * 5000), 5.0))
+        filt = _build_audio_filter_v2(slots, 1, dialogue_specs, mixes, str(tmp_path))
+        assert "sidechaincompress" in filt
+        assert filt.count("agate=") == 3
+        assert "amix=inputs=3" in filt
+
+    def test_each_dialogue_is_gated_before_mix(self, tmp_path):
+        slot, mix = self._make_slot(0, 0.0, 5.0, has_dialogue=True)
+        dialogue_specs = [(0, 2, 0, 5.0)]
+        filt = _build_audio_filter_v2([slot], 1, dialogue_specs, [mix], str(tmp_path))
+        assert "agate=threshold=-45dB" in filt
+        assert "asplit=2[dlg_sc_0][dlg_mix_0]" in filt
+
+    def test_final_mix_has_limiter(self, tmp_path):
+        slot, mix = self._make_slot(0, 0.0, 5.0, has_dialogue=True)
+        dialogue_specs = [(0, 2, 0, 5.0)]
+        filt = _build_audio_filter_v2([slot], 1, dialogue_specs, [mix], str(tmp_path))
+        assert "alimiter" in filt
+
+    def test_music_gain_changes_use_asendcmd(self, tmp_path):
+        slots, mixes = [], []
+        for i in range(3):
+            slot, mix = self._make_slot(i, i * 5.0, 5.0, song_db=float(i * -2), has_dialogue=False)
+            slots.append(slot)
+            mixes.append(mix)
+        filt = _build_audio_filter_v2(slots, 1, [], mixes, str(tmp_path))
+        assert "asendcmd=f=volume_sendcmd.txt" in filt
+        assert (tmp_path / "volume_sendcmd.txt").exists()

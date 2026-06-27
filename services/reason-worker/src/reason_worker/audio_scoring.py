@@ -65,7 +65,7 @@ class ScoringConfig:
     model_size: str = "base"
     language: Optional[str] = "en"
     # Minimum combined score for a segment to become a dialogue audio track.
-    min_dialogue_score: float = 0.65
+    min_dialogue_score: float = 0.55
     # Phrases that should be preserved / emphasized in the mix.
     iconic_phrases: List[str] = field(default_factory=list)
     # Whisper-specific: segments with high no-speech probability are dropped.
@@ -225,7 +225,7 @@ def _spectral_dialogue_segments(
             seg_start = float(t)
             in_speech = True
         elif not is_speech and in_speech:
-            if t - seg_start >= 0.5:
+            if t - seg_start >= 0.3:
                 segments.append(
                     DialogueSegment(
                         start_s=seg_start,
@@ -235,7 +235,7 @@ def _spectral_dialogue_segments(
                     )
                 )
             in_speech = False
-    if in_speech and times[-1] - seg_start >= 0.5:
+    if in_speech and times[-1] - seg_start >= 0.3:
         segments.append(
             DialogueSegment(
                 start_s=seg_start,

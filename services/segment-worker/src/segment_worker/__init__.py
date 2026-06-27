@@ -22,6 +22,9 @@ def __getattr__(name):
     if name == "detect_subject_mask_video":
         from segment_worker.engine import detect_subject_mask_video
         return detect_subject_mask_video
+    if name == "generate_subject_mask_for_identity":
+        from segment_worker.engine import generate_subject_mask_for_identity
+        return generate_subject_mask_for_identity
     if name == "segment_subject":
         from segment_worker.activities import segment_subject
         return segment_subject

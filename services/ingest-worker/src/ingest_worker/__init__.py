@@ -16,5 +16,11 @@ def __getattr__(name):
     if name == "detect_beats":
         from ingest_worker.beat_detect import detect_beats
         return detect_beats
+    if name == "extract_faces_from_clip":
+        from ingest_worker.identity import extract_faces_from_clip
+        return extract_faces_from_clip
+    if name == "ensure_faces":
+        from ingest_worker.identity import ensure_faces
+        return ensure_faces
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

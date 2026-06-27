@@ -11,6 +11,7 @@ import httpx
 from temporalio import activity
 
 from render_worker.compiler import compile_timeline, resolve_render_dimensions, _has_nvenc
+from render_worker.identity_matte import build_identity_masks
 from shared_py.config import settings
 from shared_py.models import CutList, RenderConfig
 from shared_py.storage import download_asset, get_presigned_download_url, upload_file
@@ -103,6 +104,19 @@ async def compile_render(
         if clip_id and clip_id in local_paths:
             clip_paths[clip_id] = local_paths[clip_id]
 
+    # Build identity-aware masks.  When SAM3 is unavailable this still populates
+    # slot.identity_ids_present and simply omits mask paths.
+    identity_mask_paths: Dict[str, str] = {}
+    try:
+        identity_mask_paths, slot_identity_info = build_identity_masks(
+            cutlist_obj, clip_paths, tempfile.gettempdir()
+        )
+        for slot in cutlist_obj.slots:
+            slot.identity_ids_present = slot_identity_info.get(slot.index, [])
+    except Exception as e:
+        activity.logger.warning(f"Identity-aware matting failed, continuing without masks: {e}")
+        identity_mask_paths = {}
+
     # Resolve song path if available
     song_path = local_paths.get(song_asset_id) if song_asset_id else None
 
@@ -165,6 +179,10 @@ async def compile_render(
             slot_mask_paths[slot_index] = download_asset(mask_storage_key, mask_path)
         except Exception as e:
             activity.logger.warning(f"Failed to download mask {mask_storage_key} for slot {slot_index}: {e}")
+
+    # Merge identity-aware masks. These take precedence over legacy masks
+    # because they were generated specifically for this render.
+    mask_paths.update(identity_mask_paths)
 
     # Legacy per-clip masks (keyed by clip_id).
     for clip_id, mask_storage_key in mask_source_map.items():

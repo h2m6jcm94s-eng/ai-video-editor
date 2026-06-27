@@ -10,32 +10,25 @@ import subprocess
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional, Dict, NamedTuple
-from shared_py.models import CutList, Slot, RenderConfig, AudioTrack
+from shared_py.models import CutList, Slot, RenderConfig, AudioTrack, Overlay
+from shared_py.tuning import COMPILER
 
 
 # Ordered from least to most capability. Used for tier-gating warnings only in M1.
 STYLE_TIERS = ("cuts_only", "color_grade", "with_text", "with_effects", "full_remix")
 
-PRESET_DIMENSIONS = {
-    "youtube_16_9": (1280, 720),
-    "reels_9_16": (720, 1280),
-    "tiktok_9_16": (720, 1280),
-    "square_1_1": (720, 720),
-}
-
-ASPECT_RATIO_DIMENSIONS = {
-    "16:9": (1280, 720),
-    "9:16": (720, 1280),
-    "4:5": (720, 900),
-    "1:1": (720, 720),
-}
+# Re-export dimension/quality tables from the centralized tuning module so
+# existing imports continue to work.
+PRESET_DIMENSIONS = COMPILER.PRESET_DIMENSIONS
+QUALITY_PROFILES = COMPILER.QUALITY_PROFILES
+ASPECT_RATIO_DIMENSIONS = COMPILER.ASPECT_RATIO_DIMENSIONS
 
 
 def resolve_render_dimensions(export_preset: Optional[str], aspect_ratio: Optional[str]) -> tuple[int, int]:
     """Resolve output width/height from export preset or cut-list aspect ratio."""
     if export_preset:
-        return PRESET_DIMENSIONS.get(export_preset, (720, 1280))
-    return ASPECT_RATIO_DIMENSIONS.get(aspect_ratio, (720, 1280))
+        return PRESET_DIMENSIONS.get(export_preset, (1080, 1920))
+    return ASPECT_RATIO_DIMENSIONS.get(aspect_ratio, (1080, 1920))
 
 
 def _video_encode_args(config: RenderConfig) -> List[str]:
@@ -147,7 +140,7 @@ def _extract_dialogue_audio(
     if duration < 0.05 or not os.path.exists(clip_path):
         return None
 
-    fade_dur = min(0.02, duration / 2.0)
+    fade_dur = min(COMPILER.DIALOGUE_FADE_MIN_S, duration / 2.0)
     out_start = max(0.0, duration - fade_dur)
     wav_path = os.path.join(temp_dir, f"dlg_{abs(hash(clip_path))}_{int(source_start_s*1000)}.wav")
 
@@ -157,8 +150,8 @@ def _extract_dialogue_audio(
         "-t", str(duration),
         "-i", clip_path,
         "-vn",
-        "-af", f"aresample=48000,afade=t=in:st=0:d={fade_dur},afade=t=out:st={out_start}:d={fade_dur}",
-        "-ar", "48000", "-ac", "2",
+        "-af", f"aresample={COMPILER.SILENCE_SAMPLE_RATE},afade=t=in:st=0:d={fade_dur},afade=t=out:st={out_start}:d={fade_dur}",
+        "-ar", str(COMPILER.SILENCE_SAMPLE_RATE), "-ac", "2",
         wav_path,
     ]
     _run_ffmpeg(cmd, "dialogue audio extraction", cwd=temp_dir)
@@ -171,7 +164,7 @@ def _dummy_silence_audio(duration: float, temp_dir: str) -> str:
     wav_path = os.path.join(temp_dir, f"silence_{int(duration*1000)}.wav")
     cmd = [
         "ffmpeg", "-y",
-        "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+        "-f", "lavfi", "-i", f"anullsrc=r={COMPILER.SILENCE_SAMPLE_RATE}:cl=stereo",
         "-t", str(duration),
         "-acodec", "pcm_s16le",
         wav_path,
@@ -214,15 +207,17 @@ def _build_dialogue_bus(
     )
     parts.append(
         f"[dlgbus]"
-        f"agate=threshold=-50dB:ratio=10:attack=20:release=200,"
-        f"acompressor=threshold=-18dB:ratio=3:attack=5:release=100"
+        f"agate=threshold={COMPILER.DIALOGUE_BUS_GATE_THRESHOLD_DB}dB:ratio={COMPILER.DIALOGUE_BUS_GATE_RATIO}:"
+        f"attack={COMPILER.DIALOGUE_BUS_GATE_ATTACK_MS}:release={COMPILER.DIALOGUE_BUS_GATE_RELEASE_MS},"
+        f"acompressor=threshold={COMPILER.DIALOGUE_BUS_COMP_THRESHOLD_DB}dB:ratio={COMPILER.DIALOGUE_BUS_COMP_RATIO}:"
+        f"attack={COMPILER.DIALOGUE_BUS_COMP_ATTACK_MS}:release={COMPILER.DIALOGUE_BUS_COMP_RELEASE_MS}"
     )
 
     cmd = [
         "ffmpeg", "-y",
         *inputs,
         "-filter_complex", ";".join(parts),
-        "-ar", "48000", "-ac", "2",
+        "-ar", str(COMPILER.SILENCE_SAMPLE_RATE), "-ac", "2",
         output_path,
     ]
     _run_ffmpeg(cmd, "dialogue bus mix", cwd=temp_dir)
@@ -782,23 +777,76 @@ def _build_audio_filter(
     return ";".join(parts), next_idx, extra_inputs
 
 
-def _build_volume_expression(segments: List[tuple[float, float, float]]) -> str:
-    """Build an FFmpeg volume expression from [(start_s, end_s, db), ...].
+def _build_music_volume_filter(
+    slots: List[Slot],
+    mix_decisions: List[SlotAudioMix],
+    song_input_idx: int,
+    temp_dir: str,
+) -> str:
+    """Build music volume filtering using asendcmd.
 
-    Returns a nested if() expression that evaluates to the linear gain for the
-    active segment and a -3dB fallback outside all segments.
+    Writes a sendcmd file to ``temp_dir`` and returns a filter graph fragment
+    that turns the song input into the ``[music]`` labelled stream.  This avoids
+    the deeply-nested ``if(between(t,...))`` expression that FFmpeg's audio
+    evaluator rejects for long songs.
     """
-    if not segments:
-        return f"{10 ** (-3 / 20):.4f}"
+    default_db = COMPILER.DEFAULT_MUSIC_GAIN_DB
+    total_duration = slots[-1].start_s + slots[-1].duration_s if slots else 0.0
 
-    expr_parts: List[str] = []
-    for start_s, end_s, db in segments:
+    raw_segments: List[tuple[float, float, float]] = []
+    for slot, dec in zip(slots, mix_decisions):
+        start = float(slot.start_s)
+        end = float(slot.start_s + slot.duration_s)
+        raw_segments.append((start, end, float(dec.song_level_db)))
+
+    # Merge adjacent segments with identical gain.
+    merged: List[tuple[float, float, float]] = []
+    for start, end, db in raw_segments:
+        if (
+            merged
+            and abs(merged[-1][2] - db) < 0.001
+            and abs(merged[-1][1] - start) < 0.001
+        ):
+            merged[-1] = (merged[-1][0], end, db)
+        else:
+            merged.append((start, end, db))
+
+    # Fill gaps before the first slot and after the last slot with default level.
+    segments: List[tuple[float, float, float]] = []
+    if not merged:
+        segments.append((0.0, total_duration, default_db))
+    else:
+        if merged[0][0] > 0.001:
+            segments.append((0.0, merged[0][0], default_db))
+        segments.extend(merged)
+        if merged[-1][1] < total_duration - 0.001:
+            segments.append((merged[-1][1], total_duration, default_db))
+
+    initial_linear = 10 ** (segments[0][2] / 20)
+    cmd_lines: List[str] = []
+    for start_s, _end_s, db in segments[1:]:
         linear = 10 ** (db / 20)
-        expr_parts.append(f"if(between(t,{start_s:.3f},{end_s:.3f}),{linear:.4f}")
+        cmd_lines.append(f"{start_s:.3f} volume volume {linear:.4f};")
 
-    default = 10 ** (-3 / 20)
-    expr = ",".join(expr_parts) + f",{default:.4f}" + ")" * len(expr_parts)
-    return expr
+    if cmd_lines:
+        cmd_path = os.path.join(temp_dir, "volume_sendcmd.txt")
+        with open(cmd_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(cmd_lines) + "\n")
+        cmd_file = os.path.basename(cmd_path)
+        return (
+            f"[{song_input_idx}:a]"
+            f"volume='{initial_linear:.4f}':eval=frame,"
+            f"asendcmd=f={cmd_file},"
+            f"aresample={COMPILER.SILENCE_SAMPLE_RATE}"
+            f"[music]"
+        )
+
+    return (
+        f"[{song_input_idx}:a]"
+        f"volume='{initial_linear:.4f}':eval=frame,"
+        f"aresample={COMPILER.SILENCE_SAMPLE_RATE}"
+        f"[music]"
+    )
 
 
 def _build_audio_filter_v2(
@@ -806,6 +854,8 @@ def _build_audio_filter_v2(
     song_input_idx: int,
     dialogue_specs: List[tuple[int, int, int, float]],
     mix_decisions: List[SlotAudioMix],
+    temp_dir: str,
+    dialogue_bus_idx: Optional[int] = None,
 ) -> str:
     """Build a two-pass FFmpeg audio filter graph with correct ducking.
 
@@ -813,77 +863,121 @@ def _build_audio_filter_v2(
     filters. That lets ``sidechaincompress`` use the gated dialogue bus as its
     sidechain input without hitting FFmpeg's limitation with mixed video/audio
     filter graphs.
+
+    Improvements over the original v2:
+      - Each dialogue track is gated *before* mixing so room tone / silence
+        from other tracks cannot open the sidechain.
+      - Dialogue buses are summed without normalization (preserve levels).
+      - A safety limiter prevents clipping on the final output.
+
+    When ``dialogue_bus_idx`` is provided, the dialogue tracks have already been
+    mixed into a single bus (with per-track delays/gating) and are referenced
+    directly. This keeps the final FFmpeg command line short when many clips
+    contain dialogue.
     """
     parts: List[str] = []
 
     # 1. Music: per-section volume curve + resample to 48k.
-    volume_segments = [
-        (slot.start_s, slot.start_s + slot.duration_s, dec.song_level_db)
-        for slot, dec in zip(slots, mix_decisions)
-    ]
-    volume_expr = _build_volume_expression(volume_segments)
     parts.append(
-        f"[{song_input_idx}:a]"
-        f"volume='{volume_expr}':eval=frame,"
-        f"aresample=48000"
-        f"[music]"
+        _build_music_volume_filter(slots, mix_decisions, song_input_idx, temp_dir)
     )
 
-    # 2. Dialogue tracks: fade, resample, delay to timeline position.
-    dialogue_labels: List[str] = []
+    # Pad sidechain inputs to the full output duration so sidechaincompress does
+    # not truncate the music bed to the length of the dialogue.
+    total_duration_s = slots[-1].start_s + slots[-1].duration_s if slots else 0.0
+    total_samples = int(total_duration_s * COMPILER.SILENCE_SAMPLE_RATE)
+
+    if dialogue_bus_idx is not None:
+        # Pre-built dialogue bus is already delayed, gated, and compressed.
+        # Split it so the sidechain input can be consumed separately from the
+        # dialogue stream used in the final mix.
+        parts.append(
+            f"[{dialogue_bus_idx}:a]"
+            f"alimiter=level_in=1:level_out=1:limit=0.95,"
+            f"asplit=2[dlg_sc][dlg_mix]"
+        )
+        if total_samples > 0:
+            parts.append(f"[dlg_sc]apad=whole_len={total_samples}[dlg_sc_padded]")
+        else:
+            parts.append("[dlg_sc]anull[dlg_sc_padded]")
+        parts.append(
+            "[music][dlg_sc_padded]sidechaincompress="
+            "threshold=0.12:"
+            "ratio=4:"
+            "attack=150:"
+            "release=350"
+            "[music_ducked]"
+        )
+        parts.append(
+            "[music_ducked][dlg_mix]"
+            "amix=inputs=2:duration=longest:weights='1.0 1.3':normalize=0"
+            ",alimiter=level_in=1:level_out=1:limit=0.95"
+            "[a_out]"
+        )
+        return ";".join(parts)
+
+    # 2. Dialogue tracks: fade, gate, resample, delay to timeline position.
+    #    asplit gives one stream for the sidechain key bus and one for the
+    #    final dialogue mix bus.
+    sc_labels: List[str] = []
+    mix_labels: List[str] = []
     for slot_idx, input_idx, t_start_ms, dur_s in dialogue_specs:
-        label = f"dlg_{slot_idx}"
-        fade_out_start = max(0.0, dur_s - 0.02)
+        sc_label = f"dlg_sc_{slot_idx}"
+        mix_label = f"dlg_mix_{slot_idx}"
+        fade_out_start = max(0.0, dur_s - 0.03)
         parts.append(
             f"[{input_idx}:a]"
-            f"afade=t=in:st=0:d=0.02,"
-            f"afade=t=out:st={fade_out_start:.3f}:d=0.02,"
-            f"aresample=48000,"
-            f"adelay={t_start_ms}|{t_start_ms}"
-            f"[{label}]"
+            f"afade=t=in:st=0:d=0.03,"
+            f"afade=t=out:st={fade_out_start:.3f}:d=0.03,"
+            f"agate=threshold=-45dB:ratio=10:attack=10:release=100,"
+            f"aresample={COMPILER.SILENCE_SAMPLE_RATE},"
+            f"adelay={t_start_ms}|{t_start_ms},"
+            f"asplit=2[{sc_label}][{mix_label}]"
         )
-        dialogue_labels.append(label)
+        sc_labels.append(sc_label)
+        mix_labels.append(mix_label)
 
-    if not dialogue_labels:
+    if not mix_labels:
         parts.append("[music]anull[a_out]")
         return ";".join(parts)
 
-    # 3. Mix dialogue bus (normalize to prevent clipping when many overlap).
-    mix_inputs = "".join(f"[{l}]" for l in dialogue_labels)
+    # 3. Sum gated dialogue streams for the sidechain key (no normalization).
+    sc_inputs = "".join(f"[{l}]" for l in sc_labels)
+    parts.append(
+        f"{sc_inputs}"
+        f"amix=inputs={len(sc_labels)}:duration=longest:normalize=0"
+        f",alimiter=level_in=1:level_out=1:limit=0.95"
+        f"[dlg_sc]"
+    )
+
+    # 4. Sum gated dialogue streams for the final mix (no normalization).
+    mix_inputs = "".join(f"[{l}]" for l in mix_labels)
     parts.append(
         f"{mix_inputs}"
-        f"amix=inputs={len(dialogue_labels)}:duration=longest:normalize=1"
-        f"[dlg_raw]"
+        f"amix=inputs={len(mix_labels)}:duration=longest:normalize=0"
+        f",alimiter=level_in=1:level_out=1:limit=0.95"
+        f"[dlg_mix]"
     )
 
-    # 4. Noise gate so silent padding/room tone does not duck the music.
-    # Split the gated bus into two copies: one drives the sidechain detector
-    # and one is mixed into the output. Reusing a single filter output for
-    # both tasks causes FFmpeg to report "matches no streams" once the graph
-    # has more than a couple of delayed dialogue inputs.
+    # 5. Sidechain duck music using the gated-only dialogue bus.
+    if total_samples > 0:
+        parts.append(f"[dlg_sc]apad=whole_len={total_samples}[dlg_sc_padded]")
+    else:
+        parts.append("[dlg_sc]anull[dlg_sc_padded]")
     parts.append(
-        "[dlg_raw]agate="
-        "threshold=-40dB:"
-        "ratio=10:"
-        "attack=20:"
-        "release=200,"
-        "asplit=2[dlg_sc][dlg_mix]"
-    )
-
-    # 5. Sidechain duck music using gated dialogue.
-    parts.append(
-        "[music][dlg_sc]sidechaincompress="
-        "threshold=0.15:"
+        "[music][dlg_sc_padded]sidechaincompress="
+        "threshold=0.12:"
         "ratio=4:"
-        "attack=200:"
-        "release=400"
+        "attack=150:"
+        "release=350"
         "[music_ducked]"
     )
 
     # 6. Final mix with dialogue slightly boosted over the ducked bed.
     parts.append(
         "[music_ducked][dlg_mix]"
-        "amix=inputs=2:duration=longest:weights='1.0 1.2':normalize=0"
+        "amix=inputs=2:duration=longest:weights='1.0 1.3':normalize=0"
+        ",alimiter=level_in=1:level_out=1:limit=0.95"
         "[a_out]"
     )
 
@@ -900,11 +994,15 @@ def _has_nvenc() -> bool:
 
 
 def _extract_segment(args) -> Optional[dict]:
-    """Extract and optionally mask a single slot segment."""
-    slot, clip_path, scaled_duration, config, temp_dir, relative_font, style_tier = args
+    """Extract and optionally mask/layer a single slot segment."""
+    slot, clip_path, scaled_duration, config, temp_dir, relative_font, style_tier, kinetic_overlays = args
     segment_path = os.path.join(temp_dir, f"slot_{slot.index:03d}.mp4")
 
-    start = float(slot.source_window_start_s if slot.source_window_start_s is not None else slot.start_s)
+    # If the ranker did not pick a source window, start from the beginning of
+    # the clip instead of using the arbitrary timeline time as a clip offset.
+    base_start = float(slot.source_window_start_s if slot.source_window_start_s is not None else 0.0)
+    anticipation = float(getattr(slot, "anticipation_offset_s", 0.0) or 0.0)
+    start = max(0.0, base_start + anticipation)
     clip_duration = _probe_duration(clip_path)
     duration = min(scaled_duration, max(0.0, clip_duration - start))
     if duration < 0.1:
@@ -960,10 +1058,40 @@ def _extract_segment(args) -> Optional[dict]:
         elif config.mask_paths and slot.selected_clip_id in config.mask_paths:
             raw_mask_path = config.mask_paths[slot.selected_clip_id]
     mask_path = raw_mask_path and _safe_path(raw_mask_path, must_exist=True)
-    if mask_path and os.path.exists(mask_path):
+    mask_exists = bool(mask_path and os.path.exists(mask_path))
+    if mask_exists:
         masked_segment_path = os.path.join(temp_dir, f"slot_{slot.index:03d}_masked.mp4")
         _apply_subject_mask(segment_path, mask_path, masked_segment_path, config, temp_dir)
         segment_path = masked_segment_path
+
+    # Kinetic text compositing: behind the subject when a mask exists, otherwise
+    # fall back to a global overlay so the render does not fail without SAM3.
+    if slot.enable_kinetic_text and slot.kinetic_text:
+        if slot.text_z_layer == "behind_subject" and mask_exists:
+            layered_path = os.path.join(temp_dir, f"slot_{slot.index:03d}_layered.mp4")
+            _render_layered_text(
+                segment_path,
+                mask_path,
+                layered_path,
+                slot,
+                config,
+                temp_dir,
+                relative_font,
+                animation="bold_bounce",
+            )
+            segment_path = layered_path
+        elif kinetic_overlays is not None:
+            kinetic_overlays.append(Overlay(
+                text=slot.kinetic_text,
+                start_s=slot.start_s,
+                end_s=slot.start_s + slot.duration_s,
+                position="center",
+                font="Inter",
+                font_size_px=64,
+                color="#FFFFFF",
+                stroke="#000000",
+                animation="pop",
+            ))
 
     return {
         "path": segment_path,
@@ -1007,6 +1135,65 @@ def _apply_subject_mask(
         output_path,
     ]
     _run_ffmpeg(cmd, "subject mask composite", cwd=temp_dir)
+
+
+def _render_layered_text(
+    segment_path: str,
+    mask_path: str,
+    output_path: str,
+    slot: Slot,
+    config: RenderConfig,
+    temp_dir: str,
+    relative_font: str,
+    animation: str = "bold_bounce",
+) -> None:
+    """Composite kinetic text behind a masked subject.
+
+    The segment is treated as the foreground subject (via the mask alpha matte)
+    and drawn over a text-filled background so the text appears behind the
+    protagonist.
+    """
+    width = config.width
+    height = config.height
+    fps = config.fps or 30.0
+    duration = _probe_duration(segment_path) or slot.duration_s or 1.0
+
+    if animation == "bold_bounce":
+        fontsize_expr = "48 + 24 * sin(t * 8)"
+    else:
+        fontsize_expr = "64"
+
+    font_clause = f"fontfile={relative_font}:" if relative_font else ""
+    enable = _enable_expr(0.0, duration)
+    text = _esc_text(slot.kinetic_text or "")
+
+    filter_complex = (
+        f"[1:v]format=gray,"
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        f"setsar=1[mask];"
+        f"[0:v][mask]alphamerge[fg];"
+        f"color=c=black:s={width}x{height}:r={fps}[bg];"
+        f"[bg]drawtext=text='{text}':"
+        f"x=(w-text_w)/2:y=(h-text_h)/2:"
+        f"fontsize={fontsize_expr}:"
+        f"fontcolor=white:"
+        f"{font_clause}"
+        f"borderw=2:bordercolor=black:"
+        f"enable='{enable}'[textbg];"
+        f"[textbg][fg]overlay=0:0:shortest=1:format=auto[out]"
+    )
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", segment_path,
+        "-i", mask_path,
+        "-filter_complex", filter_complex,
+        "-map", "[out]",
+        *_video_encode_args(config),
+        "-an",
+        output_path,
+    ]
+    _run_ffmpeg(cmd, f"layered kinetic text for slot {slot.index}", cwd=temp_dir)
 
 
 def compile_timeline(
@@ -1081,6 +1268,9 @@ def compile_timeline(
 
         # Extract slot segments in parallel.  Each slot is an independent FFmpeg
         # subprocess, so we saturate CPU/GPU by running several at once.
+        # Kinetic text that cannot be composited behind the subject is collected
+        # here and appended to the global overlay list after extraction.
+        kinetic_overlays: List[Overlay] = []
         extract_args = []
         for slot in cutlist.slots:
             clip_id = slot.selected_clip_id
@@ -1090,7 +1280,7 @@ def compile_timeline(
                 raise ValueError(f"Slot {slot.index} has negative start_s: {slot.start_s}")
             clip_path = sanitized_clip_paths[clip_id]
             scaled_duration = scaled_durations.get(slot.index, slot.duration_s)
-            extract_args.append((slot, clip_path, scaled_duration, config, temp_dir, relative_font, style_tier))
+            extract_args.append((slot, clip_path, scaled_duration, config, temp_dir, relative_font, style_tier, kinetic_overlays))
 
         workers = max(1, (os.cpu_count() or 1))
         # Do not oversubscribe the GPU if NVENC is used downstream; cap workers.
@@ -1102,6 +1292,10 @@ def compile_timeline(
 
         if not slot_segments:
             raise ValueError("No valid segments could be extracted")
+
+        # Append kinetic-text fallbacks collected during segment extraction.
+        if kinetic_overlays:
+            cutlist.overlays = list(cutlist.overlays) + kinetic_overlays
 
         # Stage 2: Build filter_complex for concatenation + transitions
         filter_parts = []
@@ -1276,14 +1470,17 @@ def compile_timeline(
             song_input_idx = 1
             audio_input_args = ["-i", video_only_path, "-i", config.song_path]
 
+            # Build a single pre-mixed dialogue bus.  This avoids a huge final
+            # FFmpeg command line when many clips contain dialogue and keeps the
+            # sidechain key + final dialogue mix perfectly aligned.
+            dialogue_bus_idx: Optional[int] = None
+            if dialogue_segments:
+                dialogue_bus_path = _build_dialogue_bus(dialogue_segments, temp_dir)
+                if dialogue_bus_path:
+                    dialogue_bus_idx = 2
+                    audio_input_args.extend(["-i", dialogue_bus_path])
+
             dialogue_specs: List[tuple[int, int, int, float]] = []
-            for track, wav_path in dialogue_segments:
-                input_idx = 1 + 1 + len(dialogue_specs)
-                audio_input_args.extend(["-i", wav_path])
-                start_ms = max(0, int(round(track.start_s * 1000)))
-                dur_s = max(0.05, track.end_s - track.start_s)
-                slot_idx = track.slot_index if track.slot_index is not None else 0
-                dialogue_specs.append((slot_idx, input_idx, start_ms, dur_s))
 
             mix_decisions: List[SlotAudioMix] = []
             for slot in cutlist.slots:
@@ -1304,6 +1501,8 @@ def compile_timeline(
                 song_input_idx,
                 dialogue_specs,
                 mix_decisions,
+                temp_dir,
+                dialogue_bus_idx=dialogue_bus_idx,
             )
 
             try:
@@ -1361,12 +1560,13 @@ def render_preview(
     style_tier: str = "full_remix",
 ) -> str:
     """Render a fast 360p preview."""
+    profile = QUALITY_PROFILES["preview"]
     config = RenderConfig(
         output_path=output_path,
         width=width,
         height=height,
-        video_preset="ultrafast",
-        video_crf=28,
+        video_preset=profile["preset"],
+        video_crf=profile["crf"],
     )
 
     preview_cutlist = cutlist.model_copy(deep=True)
