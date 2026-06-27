@@ -89,7 +89,15 @@ export const slotSchema = z
     confidence: z.number().min(0).max(1).optional(),
     maskAssetId: z.string().nullish(),
     maskEnabled: z.boolean().default(true),
+    identityIdsPresent: z.array(z.number().int()).default([]),
+    protagonistMatteEnabled: z.boolean().default(true),
+    enableKineticText: z.boolean().default(false),
+    textZLayer: z.enum(["on_top", "behind_subject"]).default("on_top"),
+    textDensity: z.enum(["low", "medium", "high"]).default("medium"),
+    kineticText: z.string().optional(),
     effects: z.array(effectSchema).default([]),
+    sourceWindowStartS: z.number().min(0).optional(),
+    anticipationOffsetS: z.number().default(0),
   })
   .strict();
 
@@ -238,5 +246,68 @@ export const patchTemplateSchema = z
 export const testProviderKeySchema = z
   .object({
     provider: z.string().min(1),
+  })
+  .strict();
+
+export const styleGenomeFamilySchema = z.object({
+  totalCuts: z.number().optional(),
+  avgCutDurationS: z.number().optional(),
+  stdCutDurationS: z.number().optional(),
+  minCutDurationS: z.number().optional(),
+  maxCutDurationS: z.number().optional(),
+  cutDensityPerMin: z.number().optional(),
+  verseCutDensity: z.number().optional(),
+  chorusCutDensity: z.number().optional(),
+  dropCutDensity: z.number().optional(),
+  introCutDensity: z.number().optional(),
+  outroCutDensity: z.number().optional(),
+  buildUpCutDensity: z.number().optional(),
+  hardCutRatio: z.number().optional(),
+  gradualTransitionRatio: z.number().optional(),
+  cutsOnDownbeatRatio: z.number().optional(),
+  cutsOffBeatRatio: z.number().optional(),
+  avgMotionEnergy: z.number().optional(),
+  maxMotionEnergy: z.number().optional(),
+  motionEnergyStd: z.number().optional(),
+  pctStillShots: z.number().optional(),
+  pctPanLeft: z.number().optional(),
+  pctPanRight: z.number().optional(),
+  pctTiltUp: z.number().optional(),
+  pctTiltDown: z.number().optional(),
+  pctZoomIn: z.number().optional(),
+  pctZoomOut: z.number().optional(),
+  pctHandheld: z.number().optional(),
+  pctGimbal: z.number().optional(),
+  avgFaceSizeRatio: z.number().optional(),
+  maxFaceSizeRatio: z.number().optional(),
+  avgSubjectsPerShot: z.number().optional(),
+  pctShotsWithFace: z.number().optional(),
+  avgFaceScreenTimeS: z.number().optional(),
+  protagonistPresentRatio: z.number().optional(),
+  avgShotSubjectCount: z.number().optional(),
+  faceSizeVariance: z.number().optional(),
+  cutToBeatAlignment: z.number().optional(),
+  cutToDownbeatAlignment: z.number().optional(),
+  verseCutToBeatRatio: z.number().optional(),
+  chorusCutToBeatRatio: z.number().optional(),
+  dropCutToBeatRatio: z.number().optional(),
+  avgCutToNearestBeatS: z.number().optional(),
+  musicDuckFrequency: z.number().optional(),
+  dialogueClipRatio: z.number().optional(),
+  iconicLineCount: z.number().optional(),
+  avgDialogueDurationS: z.number().optional(),
+  dominantShotSize: z.enum(["close_up", "medium", "wide"]).optional(),
+  pctCloseUp: z.number().optional(),
+  pctMediumShot: z.number().optional(),
+  pctWideShot: z.number().optional(),
+  ruleOfThirdsRatio: z.number().optional(),
+});
+
+export const styleGenomeSchema = z
+  .object({
+    version: z.string(),
+    featureCount: z.number().int().nonnegative(),
+    families: z.record(styleGenomeFamilySchema),
+    extractedAt: z.string().datetime().or(z.string()),
   })
   .strict();

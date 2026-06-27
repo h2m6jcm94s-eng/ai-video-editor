@@ -12,11 +12,12 @@ import httpx
 from temporalio import activity
 
 from style_worker.camera_motion import analyze_camera_motion
+from style_worker.genome.extract import extract_genome
 from style_worker.lut_extract import extract_lut_from_reference
 from style_worker.text_extract import extract_text_overlays
 from style_worker.transition_type import classify_transitions
 from shared_py.config import settings
-from shared_py.models import Overlay, ShotBoundary, StyleAnalysis
+from shared_py.models import BeatGrid, ShotBoundary, StyleAnalysis
 from shared_py.storage import download_asset, get_presigned_download_url, upload_file
 
 
@@ -128,6 +129,21 @@ async def classify_shot_transitions(video_path: str, shot_boundaries: List[dict]
     shots = [ShotBoundary(**s) for s in shot_boundaries]
     result = classify_transitions(video_path, shots)
     return [s.model_dump() for s in result]
+
+
+@activity.defn
+async def extract_genome_activity(
+    video_path: str,
+    beat_grid: Optional[List[dict]] = None,
+    shot_boundaries: Optional[List[dict]] = None,
+    style_analysis: Optional[dict] = None,
+    project_clips: Optional[Dict[str, dict]] = None,
+) -> dict:
+    """Extract a 50-feature Style Genome fingerprint from a reference video."""
+    bg = BeatGrid(**beat_grid) if beat_grid else None
+    sb = [ShotBoundary(**s) for s in shot_boundaries] if shot_boundaries else None
+    sa = StyleAnalysis(**style_analysis) if style_analysis else None
+    return extract_genome(video_path, bg, sb, sa, project_clips)
 
 
 @activity.defn

@@ -6,7 +6,7 @@
 import asyncio
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -124,4 +124,65 @@ class AnalyzeStyleWorkflow:
     @workflow.query
     def get_analysis(self) -> Optional[AnalyzeStyleOutput]:
         """Return the current analysis result, or None if still running."""
+        return self._output
+
+
+@dataclass
+class AnalyzeGenomeInput:
+    """Input for the standalone Style Genome extraction workflow."""
+
+    asset_id: str
+    storage_key: str
+    project_id: str = ""
+    beat_grid: Optional[dict] = None
+    shot_boundaries: List[dict] = field(default_factory=list)
+    style_analysis: Optional[dict] = None
+    project_clips: Optional[Dict[str, dict]] = None
+
+
+@workflow.defn
+class AnalyzeGenomeWorkflow:
+    """Extract a 50-feature Style Genome fingerprint from a reference video."""
+
+    def __init__(self) -> None:
+        self._output: Optional[dict] = None
+
+    @workflow.run
+    async def run(self, input: AnalyzeGenomeInput) -> dict:
+        retry = RetryPolicy(maximum_attempts=3)
+        timeout = timedelta(seconds=300)
+
+        reference_video_path = await workflow.execute_activity(
+            "download_reference_video",
+            args=(input.asset_id, input.storage_key),
+            start_to_close_timeout=timeout,
+            retry_policy=retry,
+        )
+
+        try:
+            genome = await workflow.execute_activity(
+                "extract_genome_activity",
+                args=(
+                    reference_video_path,
+                    input.beat_grid,
+                    input.shot_boundaries,
+                    input.style_analysis,
+                    input.project_clips,
+                ),
+                start_to_close_timeout=timeout,
+                retry_policy=retry,
+            )
+            self._output = genome
+            return genome
+        finally:
+            await workflow.execute_activity(
+                "cleanup_style_assets",
+                args=(reference_video_path, ""),
+                start_to_close_timeout=timedelta(seconds=60),
+                retry_policy=RetryPolicy(maximum_attempts=2),
+            )
+
+    @workflow.query
+    def get_genome(self) -> Optional[dict]:
+        """Return the current genome result, or None if still running."""
         return self._output

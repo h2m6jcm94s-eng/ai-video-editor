@@ -91,7 +91,7 @@ def _write_cube_file(path: str, lut_data: np.ndarray, lut_size: int = LUT_SIZE) 
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     lut_data = np.clip(lut_data, 0, 255).astype(np.float32)
     with open(path, "w", encoding="utf-8") as f:
-        f.write(f"TITLE \"Extracted LUT\"\n")
+        f.write("TITLE \"Extracted LUT\"\n")
         f.write(f"LUT_3D_SIZE {lut_size}\n")
         f.write("DOMAIN_MIN 0.0 0.0 0.0\n")
         f.write("DOMAIN_MAX 1.0 1.0 1.0\n")
