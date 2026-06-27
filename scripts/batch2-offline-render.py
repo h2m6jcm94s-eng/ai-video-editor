@@ -43,7 +43,7 @@ from reason_worker.cutlist_gen import generate_cutlist_programmatic
 from reason_worker.transition_select import select_xfade
 from reason_worker.audio_mix import build_audio_tracks
 from reason_worker.audio_scoring import ScoringConfig
-from render_worker.compiler import compile_timeline, _has_nvenc
+from render_worker.compiler import compile_timeline, _has_nvenc, QUALITY_PROFILES
 from shared_py.models import CutList, RenderConfig
 from shared_py.logging_config import StructuredLogger
 
@@ -51,7 +51,7 @@ logger = StructuredLogger("batch2_offline_render")
 
 BATCH_DIR = repo_root / "test files" / "batch 2"
 REFERENCE_NAME = "I CRIED WHILE I MADE THIS VIDEO  CYBERPUNK - Li Ray【AMV】 (1080p, h264, youtube).mp4"
-SONG_NAME = "Let You Down - Dawid Podsiadło.mp3"
+SONG_NAME = "Let You Down - Dawid Podsiadło.flac"
 OUTPUT_DIR = repo_root / "test files" / "batch 2" / "output"
 
 
@@ -68,6 +68,26 @@ def main():
     parser.add_argument("--tier", type=str, default="full_remix", help="Style tier")
     parser.add_argument("--skip-heatmap", action="store_true", help="Skip heatmap computation (faster, lower quality)")
     parser.add_argument("--preview", action="store_true", help="Render 360p 15s preview")
+    parser.add_argument(
+        "--quality",
+        type=str,
+        choices=list(QUALITY_PROFILES.keys()),
+        default="demo",
+        help="Encoding quality profile (default: demo)",
+    )
+    parser.add_argument(
+        "--clip-order",
+        type=str,
+        choices=["smart", "filename", "upload", "shuffle"],
+        default="smart",
+        help="Deterministic tie-break when smart ranking is weak (default: smart)",
+    )
+    parser.add_argument(
+        "--clip-order-threshold",
+        type=float,
+        default=0.15,
+        help="Score gap below which the clip-order tie-break is applied (default: 0.15)",
+    )
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -138,6 +158,8 @@ def main():
             "motion_energy": 0.5,
             "aesthetic_score": 0.5,
             "duration_sec": info.duration_sec,
+            "filename": cp.name,
+            "uploaded_at": 0,
             "heatmap": heatmap_to_metadata(heatmaps.get(str(cp), [])) if not args.skip_heatmap else [],
         }
         clip_id = f"clip_{idx:03d}"
@@ -173,6 +195,8 @@ def main():
         clip_metadata,
         fallback_policy="best_available",
         force_exhaust=True,
+        clip_order_fallback=args.clip_order,
+        clip_order_smart_threshold=args.clip_order_threshold,
     )
 
     # Apply selected clip IDs and window info
@@ -232,16 +256,36 @@ def main():
         width, height = width // 4, height // 4
     else:
         width, height = ASPECT_PRESETS.get(preset, (1920, 1080))
+    # Map quality profile to encoder settings.
+    quality = "preview" if args.preview else args.quality
+    profile = QUALITY_PROFILES[quality]
     use_nvenc = _has_nvenc() and not args.preview
+    if use_nvenc:
+        # Map x264 preset names to NVENC p-values (p1 slowest/best, p7 fastest).
+        preset_to_nvenc = {
+            "ultrafast": "p6",
+            "veryfast": "p5",
+            "medium": "p4",
+            "slow": "p3",
+            "veryslow": "p2",
+        }
+        video_preset = preset_to_nvenc.get(profile["preset"], "p4")
+        video_crf = profile["crf"]
+        video_codec = "h264_nvenc"
+    else:
+        video_preset = profile["preset"]
+        video_crf = profile["crf"]
+        video_codec = "libx264"
+
     config = RenderConfig(
         output_path=str(output_path),
         width=width,
         height=height,
         fps=30.0,
         song_path=str(song_path),
-        video_codec="h264_nvenc" if use_nvenc else "libx264",
-        video_preset="p4" if use_nvenc else "slow",
-        video_crf=18 if not use_nvenc else 20,
+        video_codec=video_codec,
+        video_preset=video_preset,
+        video_crf=video_crf,
     )
 
     start_render = time.time()

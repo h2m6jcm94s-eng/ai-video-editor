@@ -14,7 +14,10 @@ def __getattr__(name):
     if name == "render_preview":
         from render_worker.compiler import render_preview
         return render_preview
+    if name == "build_identity_masks":
+        from render_worker.identity_matte import build_identity_masks
+        return build_identity_masks
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["compile_timeline", "render_preview"]
+__all__ = ["compile_timeline", "render_preview", "build_identity_masks"]

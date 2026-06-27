@@ -14,4 +14,7 @@ def __getattr__(name):
     if name == "rank_clips_for_slots":
         from reason_worker.clip_rank import rank_clips_for_slots
         return rank_clips_for_slots
+    if name == "select_protagonists":
+        from reason_worker.protagonist_pick import select_protagonists
+        return select_protagonists
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

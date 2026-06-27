@@ -20,6 +20,7 @@ from shared_py.models import (
     CutList, CutListGlobals, Slot, Overlay, Effect, BeatGrid, ShotBoundary, SectionMarker, AudioTrack,
     ZoomPunchInParams, FocusPullParams, FilmGrainParams, VignetteParams,
 )
+from reason_worker.lyric_overlays import generate_slot_text_overlay
 
 logger = StructuredLogger("reason_worker.cutlist_gen")
 
@@ -383,20 +384,11 @@ def generate_cutlist_programmatic(
 
         is_section_boundary = section != next_section
 
-        # Always add section-boundary overlays, even when we skip a slot here.
-        if enable_text and is_section_boundary and (not section_change_beats or section_change_beats[-1]["label"] != next_section):
+        # Track section boundaries for possible future use (e.g. film grain),
+        # but do not burn section-name overlays into the output — they read
+        # as ugly subtitles.
+        if is_section_boundary and (not section_change_beats or section_change_beats[-1]["label"] != next_section):
             section_change_beats.append({"label": next_section.upper(), "start_s": next_beat})
-            overlays.append(Overlay(
-                text=next_section.upper(),
-                start_s=max(0.0, next_beat - 0.2),
-                end_s=min(content_end, next_beat + 1.5),
-                position="top",
-                font="Inter",
-                font_size_px=48,
-                color="#FFFFFF",
-                stroke="#000000",
-                animation="fade",
-            ))
 
         # Skip beats that are too close to the previous cut to avoid tiny slots.
         if beat_time < previous_slot_end + min_slot_gap - 1e-4 and beat_time > 0:
@@ -533,6 +525,14 @@ def generate_cutlist_programmatic(
         if len(slots) > max_slots:
             slots = slots[:max_slots]
 
+    # Assign kinetic text only when real lyrics are available. Section-label
+    # stubs are disabled by default because they are not the song's lyrics.
+    for slot in slots:
+        slot.kinetic_text = generate_slot_text_overlay(slot, beat_grid)
+        if enable_text and slot.kinetic_text and slot.section in ("chorus", "drop"):
+            slot.enable_kinetic_text = True
+            slot.text_z_layer = "behind_subject"
+
     # Overlays must not extend past the actual rendered content.
     actual_content_end = max(s.start_s + s.duration_s for s in slots) if slots else content_end
 
@@ -549,61 +549,9 @@ def generate_cutlist_programmatic(
             max_energy_slot.effects = max_energy_slot.effects[:2]
 
     # Add detected reference overlays (e.g., text/titles from the source video).
-    # Hard-coded promotional overlays like "LET'S GO" or "FOLLOW FOR MORE" are
-    # intentionally omitted; they are not derived from the reference or user
-    # intent and degrade every render. Instead we derive labels from the section
-    # names and energy curve already computed for the cutlist.
-    if enable_text and slots:
-        overlays.append(Overlay(
-            text=slots[0].section.upper(),
-            start_s=slots[0].start_s,
-            end_s=min(actual_content_end, slots[0].start_s + 1.5),
-            position="top",
-            font="Inter",
-            font_size_px=48,
-            color="#FFFFFF",
-            stroke="#000000",
-            animation="fade",
-        ))
-        # Place the DROP overlay on the real drop section when the structure
-        # analysis found one. Otherwise fall back to the highest-energy slot.
-        drop_segment = next((seg for seg in segments if seg.label == "drop"), None)
-        if drop_segment is not None and drop_segment.start < actual_content_end:
-            overlays.append(Overlay(
-                text="DROP",
-                start_s=drop_segment.start,
-                end_s=min(actual_content_end, drop_segment.start + 1.5),
-                position="center",
-                font="Inter",
-                font_size_px=64,
-                color="#FF2A6D",
-                stroke="#000000",
-                animation="fade",
-            ))
-        elif max_energy_slot is not None and max_energy_slot.energy_level > 0.7:
-            overlays.append(Overlay(
-                text="DROP",
-                start_s=max_energy_slot.start_s,
-                end_s=min(actual_content_end, max_energy_slot.start_s + 1.0),
-                position="center",
-                font="Inter",
-                font_size_px=64,
-                color="#FF2A6D",
-                stroke="#000000",
-                animation="fade",
-            ))
-        overlays.append(Overlay(
-            text="OUTRO",
-            start_s=max(0.0, actual_content_end - 2.0),
-            end_s=actual_content_end,
-            position="bottom",
-            font="Inter",
-            font_size_px=40,
-            color="#FFFFFF",
-            stroke="#000000",
-            animation="fade",
-        ))
-
+    # Hard-coded section labels (INTRO, DROP, OUTRO, etc.) are intentionally
+    # omitted — they read as ugly subtitles and degrade the viewing experience.
+    # Only overlays actually detected in the reference video are preserved.
     for overlay in (detected_overlays if enable_text else []):
         if isinstance(overlay, Overlay):
             overlays.append(overlay)

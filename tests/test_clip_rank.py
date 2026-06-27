@@ -143,7 +143,7 @@ class TestRankClipsForSlots:
             "C02": make_clip_meta(shot_type="medium", motion_energy=0.5, duration=2.0, aesthetic=0.5),
         }
 
-        rankings = rank_clips_for_slots(slots, clips)
+        rankings = rank_clips_for_slots(slots, clips, force_exhaust=False)
 
         score = rankings[0][0]
         expected = (
@@ -554,3 +554,145 @@ class TestFallbackRanking:
         slots = [make_slot(index=0)]
         rankings = rank_clips_for_slots(slots, {}, fallback_policy="round_robin")
         assert rankings[0] == []
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Exhaust / repetition fixes
+# ──────────────────────────────────────────────────────────────────────────────
+
+class TestExhaustAndRepetition:
+    def test_no_reuse_when_enough_clips(self):
+        """If slots <= clips, usage_cap=1 prevents any clip from repeating."""
+        slots = [
+            make_slot(index=0, shot_type="wide"),
+            make_slot(index=1, shot_type="medium"),
+            make_slot(index=2, shot_type="close_up"),
+        ]
+        clips = {
+            "C01": make_clip_meta(shot_type="wide"),
+            "C02": make_clip_meta(shot_type="medium"),
+            "C03": make_clip_meta(shot_type="close_up"),
+            "C04": make_clip_meta(shot_type="wide"),
+            "C05": make_clip_meta(shot_type="medium"),
+        }
+
+        rankings = rank_clips_for_slots(slots, clips)
+        selected = [rankings[i][0].clip_id for i in range(len(slots))]
+        assert len(set(selected)) == len(selected), f"Clips repeated: {selected}"
+
+    def test_exhaust_spreads_usage_before_repeating(self):
+        """With more slots than clips, every clip is used before any repeats."""
+        slots = [make_slot(index=i) for i in range(6)]
+        clips = {
+            "C01": make_clip_meta(),
+            "C02": make_clip_meta(),
+            "C03": make_clip_meta(),
+        }
+
+        rankings = rank_clips_for_slots(slots, clips)
+        selected = [rankings[i][0].clip_id for i in range(len(slots))]
+        # First three slots should use all three clips.
+        assert set(selected[:3]) == {"C01", "C02", "C03"}, selected
+        # Usage cap for 6 slots / 3 clips = ceil(2 * 1.2) = 2.
+        from collections import Counter
+        counts = Counter(selected)
+        assert all(c <= 2 for c in counts.values()), counts
+
+
+class TestMomentumFixes:
+    def test_same_clip_continuation_gets_zero_momentum_bonus(self):
+        """Continuing the same clip should not be rewarded by momentum."""
+        from unittest.mock import patch
+        from reason_worker.clip_rank import rerank_with_momentum
+
+        slots = [
+            make_slot(index=0, shot_type="wide"),
+            make_slot(index=1, shot_type="wide"),
+        ]
+        # Identical scores; momentum would flip order if bonus applied.
+        scores = [
+            ClipScore(clip_id="C01", total_score=1.0),
+            ClipScore(clip_id="C02", total_score=1.0),
+        ]
+        rankings = {0: list(scores), 1: list(scores)}
+        clip_paths = {"C01": "fake_c01.mp4", "C02": "fake_c02.mp4"}
+
+        with patch("reason_worker.clip_rank.compute_mean_flow_vector", return_value=(1.0, 0.0)):
+            with patch("reason_worker.clip_rank.momentum_coherence", return_value=1.0):
+                new_rankings, chosen = rerank_with_momentum(
+                    rankings, slots, {}, clip_paths=clip_paths
+                )
+
+        # Slot 0 picks C01 (first in sorted order). Slot 1 should NOT keep C01
+        # just because it is the same clip; momentum bonus for same-clip
+        # continuation is zeroed, while C02 gets the full momentum reward.
+        assert chosen[0] == "C01"
+        assert chosen[1] == "C02"
+        # More importantly: the bonus applied to C01 in slot 1 is zero.
+        slot1_scores = {s.clip_id: s.total_score for s in new_rankings[1]}
+        assert slot1_scores["C01"] == 1.0
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Deterministic clip ordering fallback
+# ──────────────────────────────────────────────────────────────────────────────
+
+class TestDeterministicOrderingFallback:
+    def test_filename_fallback_sorts_alphabetically_on_tie(self):
+        slots = [make_slot(index=0)]
+        clips = {
+            "C02": make_clip_meta(),
+            "C01": make_clip_meta(),
+            "C03": make_clip_meta(),
+        }
+        # Give each clip a filename so tie-break can use it.
+        for clip_id in clips:
+            clips[clip_id]["filename"] = f"video_{clip_id}.mp4"
+
+        rankings = rank_clips_for_slots(
+            slots,
+            clips,
+            force_exhaust=False,
+            clip_order_fallback="filename",
+            clip_order_smart_threshold=1.0,  # force fallback
+        )
+        # Identical scores trigger fallback; alphabetical filename wins.
+        assert rankings[0][0].clip_id == "C01"
+
+    def test_shuffle_fallback_is_deterministic_per_slot(self):
+        slots = [make_slot(index=0), make_slot(index=1)]
+        clips = {f"C{i:02d}": make_clip_meta() for i in range(10)}
+
+        run1 = rank_clips_for_slots(
+            slots,
+            clips,
+            force_exhaust=False,
+            clip_order_fallback="shuffle",
+            clip_order_smart_threshold=1.0,
+        )
+        run2 = rank_clips_for_slots(
+            slots,
+            clips,
+            force_exhaust=False,
+            clip_order_fallback="shuffle",
+            clip_order_smart_threshold=1.0,
+        )
+        # Same seed per slot index should give identical order.
+        assert [s.clip_id for s in run1[0]] == [s.clip_id for s in run2[0]]
+        assert [s.clip_id for s in run1[1]] == [s.clip_id for s in run2[1]]
+
+    def test_smart_fallback_does_not_change_order(self):
+        slots = [make_slot(index=0)]
+        clips = {
+            "C01": make_clip_meta(),
+            "C02": make_clip_meta(),
+        }
+        rankings = rank_clips_for_slots(
+            slots,
+            clips,
+            force_exhaust=False,
+            clip_order_fallback="smart",
+        )
+        # With identical metadata and smart fallback, both are valid; just
+        # ensure no exception and order is stable.
+        assert len(rankings[0]) == 2
