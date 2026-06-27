@@ -60,7 +60,7 @@ describe("RenderButton", () => {
     await user.click(screen.getByRole("button", { name: /render/i }));
     await user.click(screen.getByRole("button", { name: /start render/i }));
 
-    await waitFor(() => expect(start).toHaveBeenCalledWith("proj-1", { exportPreset: "reels_9_16" }));
+    await waitFor(() => expect(start).toHaveBeenCalledWith("proj-1", {}));
   });
 
   it("disables the button when required assets are missing", () => {
