@@ -2,7 +2,7 @@
 name = "ai-video-editor-tests"
 version = "0.1.0"
 description = "Comprehensive test suite for AI Video Editor backend"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
@@ -20,6 +20,9 @@ dependencies = [
     "upscale-worker",
     "guardrails",
     "segment-worker",
+    "insightface>=1.0.1",
+    "onnxruntime-gpu>=1.27.0",
+    "scikit-learn>=1.9.0",
 ]
 
 [project.optional-dependencies]
@@ -32,7 +35,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "services/shared-py/tests", "services/segment-worker/tests", "services/reason-worker/tests", "services/style-worker/tests"]
+testpaths = ["tests", "services/shared-py/tests", "services/segment-worker/tests", "services/reason-worker/tests", "services/ingest-worker/tests", "services/render-worker/tests", "services/style-worker/tests"]
 pythonpath = [
     "services/shared-py/src",
     "services/ingest-worker/src",

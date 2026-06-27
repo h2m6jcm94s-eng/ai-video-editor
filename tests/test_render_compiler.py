@@ -17,7 +17,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "services", "sh
 import warnings
 
 from PIL import Image
-from render_worker.compiler import compile_timeline, render_preview, resolve_render_dimensions, XFADE_MAP, _get_fontconfig_file, _build_audio_filter
+from render_worker.compiler import (
+    compile_timeline,
+    render_preview,
+    resolve_render_dimensions,
+    XFADE_MAP,
+    _get_fontconfig_file,
+    _build_audio_filter,
+    _build_audio_filter_v2,
+    _video_encode_args,
+    _segment_video_args,
+)
 from shared_py.models import CutList, CutListGlobals, Slot, Overlay, RenderConfig, Effect, Subtitle, AudioTrack
 
 
@@ -531,25 +541,27 @@ def _write_identity_cube(path: str, size: int = 2) -> None:
 class TestResolveRenderDimensions:
     def test_all_export_presets(self):
         expected = {
-            "youtube_16_9": (1280, 720),
-            "reels_9_16": (720, 1280),
-            "tiktok_9_16": (720, 1280),
-            "square_1_1": (720, 720),
+            "youtube_16_9": (1920, 1080),
+            "youtube_4k_16_9": (3840, 2160),
+            "reels_9_16": (1080, 1920),
+            "tiktok_9_16": (1080, 1920),
+            "square_1_1": (1080, 1080),
+            "preview_360p_16_9": (640, 360),
         }
         for preset, dims in expected.items():
             assert resolve_render_dimensions(preset, None) == dims
 
     def test_preset_wins_over_aspect_ratio(self):
-        assert resolve_render_dimensions("youtube_16_9", "9:16") == (1280, 720)
+        assert resolve_render_dimensions("youtube_16_9", "9:16") == (1920, 1080)
 
     def test_aspect_ratio_fallbacks(self):
-        assert resolve_render_dimensions(None, "16:9") == (1280, 720)
-        assert resolve_render_dimensions(None, "9:16") == (720, 1280)
-        assert resolve_render_dimensions(None, "4:5") == (720, 900)
-        assert resolve_render_dimensions(None, "1:1") == (720, 720)
+        assert resolve_render_dimensions(None, "16:9") == (1920, 1080)
+        assert resolve_render_dimensions(None, "9:16") == (1080, 1920)
+        assert resolve_render_dimensions(None, "4:5") == (1080, 1350)
+        assert resolve_render_dimensions(None, "1:1") == (1080, 1080)
 
     def test_unknown_values_fallback_to_vertical(self):
-        assert resolve_render_dimensions("unknown_preset", "unknown_ratio") == (720, 1280)
+        assert resolve_render_dimensions("unknown_preset", "unknown_ratio") == (1080, 1920)
 
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg not available")
@@ -738,3 +750,202 @@ class TestAudioDucking:
         assert filt == ""
         assert next_idx == -1
         assert extra == []
+
+
+class TestHardwareEncodeArgs:
+    """NVENC / libx264 encoder flag selection."""
+
+    def test_video_encode_args_defaults_to_libx264(self):
+        config = RenderConfig(output_path="/tmp/out.mp4")
+        args = _video_encode_args(config)
+        assert "-c:v" in args
+        assert "libx264" in args
+        assert "-crf" in args
+        assert "-cq" not in args
+
+    def test_video_encode_args_uses_nvenc_when_flag_set(self):
+        config = RenderConfig(
+            output_path="/tmp/out.mp4",
+            use_nvenc=True,
+            nvenc_preset="p5",
+            nvenc_cq=19,
+        )
+        args = _video_encode_args(config)
+        assert "h264_nvenc" in args
+        assert "p5" in args
+        assert "-tune" in args
+        assert "hq" in args
+        assert "-rc" in args
+        assert "vbr" in args
+        assert "-cq" in args
+        assert "19" in args
+
+    def test_segment_video_args_uses_nvenc_when_flag_set(self):
+        config = RenderConfig(
+            output_path="/tmp/out.mp4",
+            use_nvenc=True,
+            nvenc_preset="p5",
+            nvenc_cq=19,
+        )
+        args = _segment_video_args(config)
+        assert "h264_nvenc" in args
+        assert "p5" in args
+        assert "-cq" in args
+        assert "19" in args
+        assert "-an" in args
+
+    def test_segment_video_args_defaults_to_libx264(self):
+        config = RenderConfig(output_path="/tmp/out.mp4")
+        args = _segment_video_args(config)
+        assert "libx264" in args
+        assert "-crf" in args
+        assert "-an" in args
+
+    def test_segment_video_args_falls_back_to_safe_presets(self):
+        config = RenderConfig(
+            output_path="/tmp/out.mp4",
+            use_nvenc=True,
+            nvenc_preset="not-a-preset",
+        )
+        args = _segment_video_args(config)
+        assert "p5" in args
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg not available")
+class TestHardwareEncoding:
+    """End-to-end smoke test for NVENC hardware encoding path."""
+
+    def test_nvenc_render_produces_h264_video(self, tmp_path):
+        from render_worker.compiler import _has_nvenc
+        if not _has_nvenc():
+            pytest.skip("NVENC not available on this runner")
+
+        clip1 = create_test_video(str(tmp_path / "a.mp4"), duration=2.0, resolution=(640, 480))
+        clip2 = create_test_video(str(tmp_path / "b.mp4"), duration=2.0, resolution=(640, 480))
+
+        cutlist = CutList(
+            globals=CutListGlobals(total_duration_s=3.0, tempo_bpm=120.0),
+            slots=[
+                Slot(
+                    index=0,
+                    start_s=0.0,
+                    duration_s=1.5,
+                    beat_index=0,
+                    section="verse",
+                    target_shot_type="wide",
+                    subject_hint="person",
+                    motion_hint="static",
+                    energy_level=0.5,
+                    selected_clip_id="a",
+                ),
+                Slot(
+                    index=1,
+                    start_s=1.5,
+                    duration_s=1.5,
+                    beat_index=1,
+                    section="verse",
+                    target_shot_type="wide",
+                    subject_hint="person",
+                    motion_hint="static",
+                    energy_level=0.5,
+                    selected_clip_id="b",
+                ),
+            ],
+        )
+
+        output_path = str(tmp_path / "out.mp4")
+        config = RenderConfig(
+            output_path=output_path,
+            width=640,
+            height=480,
+            fps=30.0,
+            use_nvenc=True,
+            nvenc_preset="p5",
+            nvenc_cq=19,
+        )
+
+        result = compile_timeline(cutlist, {"a": clip1, "b": clip2}, output_path, config)
+        assert os.path.exists(result)
+
+        # Verify the output was encoded with NVENC.
+        probe = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=codec_name",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                output_path,
+            ],
+            check=True, capture_output=True, text=True,
+        )
+        assert "h264" in probe.stdout.lower()
+
+class TestAudioFilterV2:
+    """Unit tests for the two-pass adaptive ducking filter graph."""
+
+    def _make_slot(self, idx: int, start_s: float, duration_s: float, song_db: float = 0.0, has_dialogue: bool = True):
+        from render_worker.compiler import SlotAudioMix
+        slot = Slot(
+            index=idx,
+            start_s=start_s,
+            duration_s=duration_s,
+            beat_index=idx,
+            section="verse",
+            target_shot_type="medium_shot",
+            subject_hint="protagonist",
+            motion_hint="still",
+            energy_level=0.5,
+        )
+        mix = SlotAudioMix(song_level_db=song_db, clip_audio_enabled=has_dialogue)
+        return slot, mix
+
+    def test_no_dialogue_returns_music_only(self, tmp_path):
+        slot, mix = self._make_slot(0, 0.0, 5.0, has_dialogue=False)
+        filt = _build_audio_filter_v2([slot], 1, [], [mix], str(tmp_path))
+        assert "[music]anull[a_out]" in filt
+        assert "sidechaincompress" not in filt
+
+    def test_single_dialogue_has_sidechain(self, tmp_path):
+        slot, mix = self._make_slot(0, 0.0, 5.0, has_dialogue=True)
+        dialogue_specs = [(0, 2, 0, 5.0)]
+        filt = _build_audio_filter_v2([slot], 1, dialogue_specs, [mix], str(tmp_path))
+        assert "sidechaincompress" in filt
+        assert "[music][dlg_sc_padded]sidechaincompress" in filt
+        assert "[dlg_sc]apad=" in filt
+        assert "[a_out]" in filt
+
+    def test_multiple_dialogues_have_sidechain(self, tmp_path):
+        slots, mixes = [], []
+        dialogue_specs = []
+        for i in range(3):
+            slot, mix = self._make_slot(i, i * 5.0, 5.0, has_dialogue=True)
+            slots.append(slot)
+            mixes.append(mix)
+            dialogue_specs.append((i, 2 + i, int(i * 5000), 5.0))
+        filt = _build_audio_filter_v2(slots, 1, dialogue_specs, mixes, str(tmp_path))
+        assert "sidechaincompress" in filt
+        assert filt.count("agate=") == 3
+        assert "amix=inputs=3" in filt
+
+    def test_each_dialogue_is_gated_before_mix(self, tmp_path):
+        slot, mix = self._make_slot(0, 0.0, 5.0, has_dialogue=True)
+        dialogue_specs = [(0, 2, 0, 5.0)]
+        filt = _build_audio_filter_v2([slot], 1, dialogue_specs, [mix], str(tmp_path))
+        assert "agate=threshold=-45dB" in filt
+        assert "asplit=2[dlg_sc_0][dlg_mix_0]" in filt
+
+    def test_final_mix_has_limiter(self, tmp_path):
+        slot, mix = self._make_slot(0, 0.0, 5.0, has_dialogue=True)
+        dialogue_specs = [(0, 2, 0, 5.0)]
+        filt = _build_audio_filter_v2([slot], 1, dialogue_specs, [mix], str(tmp_path))
+        assert "alimiter" in filt
+
+    def test_music_gain_changes_use_asendcmd(self, tmp_path):
+        slots, mixes = [], []
+        for i in range(3):
+            slot, mix = self._make_slot(i, i * 5.0, 5.0, song_db=float(i * -2), has_dialogue=False)
+            slots.append(slot)
+            mixes.append(mix)
+        filt = _build_audio_filter_v2(slots, 1, [], mixes, str(tmp_path))
+        assert "asendcmd=f=volume_sendcmd.txt" in filt
+        assert (tmp_path / "volume_sendcmd.txt").exists()

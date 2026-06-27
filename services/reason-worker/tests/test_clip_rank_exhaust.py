@@ -39,6 +39,32 @@ def test_exhaust_then_reuse_with_three_clips_nine_slots():
     assert first_three == {"clip-a", "clip-b", "clip-c"}
 
 
+def test_full_exhaust_prevents_repeats_until_all_clips_used():
+    """PR #12: a higher-scoring clip cannot repeat before every clip is used once."""
+    slots = [_make_slot(i, start_s=i * 1.0) for i in range(4)]
+    clip_metadata = {
+        "clip-a": {
+            "shot_type": "wide",
+            "motion_energy": 0.5,
+            "aesthetic_score": 0.9,
+            "duration_sec": 5.0,
+        },
+        "clip-b": {
+            "shot_type": "wide",
+            "motion_energy": 0.5,
+            "aesthetic_score": 0.3,
+            "duration_sec": 5.0,
+        },
+    }
+
+    rankings = rank_clips_for_slots(slots, clip_metadata, force_exhaust=True)
+    selected = [rankings[i][0].clip_id for i in range(len(slots))]
+
+    assert set(selected[:2]) == {"clip-a", "clip-b"}
+    # After both clips are exhausted, repeats are allowed.
+    assert len(selected) == 4
+
+
 def test_heatmap_window_influences_selection():
     """A clip with a high heatmap window should win over an otherwise equal clip."""
     slots = [_make_slot(0, start_s=0.5, duration_s=1.0)]

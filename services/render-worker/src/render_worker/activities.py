@@ -10,7 +10,8 @@ from typing import Dict, List, Optional
 import httpx
 from temporalio import activity
 
-from render_worker.compiler import compile_timeline, resolve_render_dimensions
+from render_worker.compiler import compile_timeline, resolve_render_dimensions, _has_nvenc
+from render_worker.identity_matte import build_identity_masks
 from shared_py.config import settings
 from shared_py.models import CutList, RenderConfig
 from shared_py.storage import download_asset, get_presigned_download_url, upload_file
@@ -103,6 +104,19 @@ async def compile_render(
         if clip_id and clip_id in local_paths:
             clip_paths[clip_id] = local_paths[clip_id]
 
+    # Build identity-aware masks.  When SAM3 is unavailable this still populates
+    # slot.identity_ids_present and simply omits mask paths.
+    identity_mask_paths: Dict[str, str] = {}
+    try:
+        identity_mask_paths, slot_identity_info = build_identity_masks(
+            cutlist_obj, clip_paths, tempfile.gettempdir()
+        )
+        for slot in cutlist_obj.slots:
+            slot.identity_ids_present = slot_identity_info.get(slot.index, [])
+    except Exception as e:
+        activity.logger.warning(f"Identity-aware matting failed, continuing without masks: {e}")
+        identity_mask_paths = {}
+
     # Resolve song path if available
     song_path = local_paths.get(song_asset_id) if song_asset_id else None
 
@@ -166,6 +180,10 @@ async def compile_render(
         except Exception as e:
             activity.logger.warning(f"Failed to download mask {mask_storage_key} for slot {slot_index}: {e}")
 
+    # Merge identity-aware masks. These take precedence over legacy masks
+    # because they were generated specifically for this render.
+    mask_paths.update(identity_mask_paths)
+
     # Legacy per-clip masks (keyed by clip_id).
     for clip_id, mask_storage_key in mask_source_map.items():
         # Skip entries that are actually slot mask asset ids, not clip ids.
@@ -193,12 +211,18 @@ async def compile_render(
         f"ave_render_{width}x{height}_{cutlist_obj.globals.total_duration_s:.0f}s_{_activity_run_id()}.mp4",
     )
 
+    # Auto-enable NVENC when the worker has a capable NVIDIA GPU.  Operators can
+    # opt out by setting AVE_DISABLE_NVENC=1.  CUDA decode is opt-in via
+    # AVE_USE_HWACCEL=1 because some source files/filters still need software decode.
+    use_nvenc = _has_nvenc() and not os.environ.get("AVE_DISABLE_NVENC")
+    use_hwaccel = os.environ.get("AVE_USE_HWACCEL", "0") == "1"
+
     config = RenderConfig(
         output_path=output_path,
         width=width,
         height=height,
         fps=30,
-        video_codec="libx264",
+        video_codec="h264_nvenc" if use_nvenc else "libx264",
         video_preset="slow",
         video_crf=23,
         audio_codec="aac",
@@ -210,6 +234,8 @@ async def compile_render(
         lut_path=lut_path,
         mask_paths=mask_paths,
         slot_mask_paths=slot_mask_paths,
+        use_nvenc=use_nvenc,
+        use_hwaccel=use_hwaccel,
     )
 
     compile_timeline(cutlist_obj, clip_paths, output_path, config, style_tier=style_tier)

@@ -1,9 +1,14 @@
 ﻿# Copyright (c) 2025 Devayan Dewri. All rights reserved.
 # Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 # Commercial SaaS use is prohibited without written permission.
+from datetime import datetime, timezone
 from typing import List, Optional, Literal, Any, Dict
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
+
+
+TextZLayer = Literal["on_top", "behind_subject"]
+TextDensity = Literal["low", "medium", "high"]
 
 
 class BaseModelCamel(BaseModel):
@@ -12,6 +17,18 @@ class BaseModelCamel(BaseModel):
         populate_by_name=True,
         from_attributes=True,
     )
+
+
+class ClipIdentityInfo(BaseModelCamel):
+    clip_id: str
+    identity_ids: List[int] = Field(default_factory=list)
+    screen_time_s: float = 0.0
+
+
+class ProjectIdentities(BaseModelCamel):
+    identities: List[Dict[str, Any]] = Field(default_factory=list)
+    protagonists: List[int] = Field(default_factory=list)
+    clip_identity_map: Dict[str, List[int]] = Field(default_factory=dict)
 
 
 class EffectParams(BaseModelCamel):
@@ -157,8 +174,15 @@ class Slot(BaseModelCamel):
     confidence: Optional[float] = None
     mask_asset_id: Optional[str] = None
     mask_enabled: bool = True
+    identity_ids_present: List[int] = Field(default_factory=list)
+    protagonist_matte_enabled: bool = True
+    enable_kinetic_text: bool = False
+    text_z_layer: TextZLayer = "on_top"
+    text_density: TextDensity = "medium"
+    kinetic_text: Optional[str] = None
     effects: List[Effect] = Field(default_factory=list)
     source_window_start_s: Optional[float] = None
+    anticipation_offset_s: float = 0.0
     heatmap_score: Optional[float] = None
 
 
@@ -262,68 +286,68 @@ class StyleAnalysis(BaseModelCamel):
 
 
 class CutRhythmFamily(BaseModelCamel):
-    total_cuts: Optional[int] = None
-    avg_cut_duration_s: Optional[float] = None
-    std_cut_duration_s: Optional[float] = None
-    min_cut_duration_s: Optional[float] = None
-    max_cut_duration_s: Optional[float] = None
-    cut_density_per_min: Optional[float] = None
-    verse_cut_density: Optional[float] = None
-    chorus_cut_density: Optional[float] = None
-    drop_cut_density: Optional[float] = None
-    intro_cut_density: Optional[float] = None
-    outro_cut_density: Optional[float] = None
-    build_up_cut_density: Optional[float] = None
-    hard_cut_ratio: Optional[float] = None
-    gradual_transition_ratio: Optional[float] = None
-    cuts_on_downbeat_ratio: Optional[float] = None
+    total_cuts: int = 0
+    avg_cut_duration_s: float = 0.0
+    std_cut_duration_s: float = 0.0
+    min_cut_duration_s: float = 0.0
+    max_cut_duration_s: float = 0.0
+    cut_density_per_min: float = 0.0
+    verse_cut_density: float = 0.0
+    chorus_cut_density: float = 0.0
+    drop_cut_density: float = 0.0
+    intro_cut_density: float = 0.0
+    outro_cut_density: float = 0.0
+    build_up_cut_density: float = 0.0
+    hard_cut_ratio: float = 0.0
+    gradual_transition_ratio: float = 0.0
+    cuts_on_downbeat_ratio: float = 0.0
 
 
 class MotionFamily(BaseModelCamel):
-    avg_motion_energy: Optional[float] = None
-    max_motion_energy: Optional[float] = None
-    motion_energy_std: Optional[float] = None
-    pct_still_shots: Optional[float] = None
-    pct_pan_left: Optional[float] = None
-    pct_pan_right: Optional[float] = None
-    pct_tilt_up: Optional[float] = None
-    pct_tilt_down: Optional[float] = None
-    pct_zoom_in: Optional[float] = None
-    pct_zoom_out: Optional[float] = None
-    pct_handheld: Optional[float] = None
-    pct_gimbal: Optional[float] = None
+    avg_motion_energy: float = 0.0
+    max_motion_energy: float = 0.0
+    motion_energy_std: float = 0.0
+    pct_still_shots: float = 0.0
+    pct_pan_left: float = 0.0
+    pct_pan_right: float = 0.0
+    pct_tilt_up: float = 0.0
+    pct_tilt_down: float = 0.0
+    pct_zoom_in: float = 0.0
+    pct_zoom_out: float = 0.0
+    pct_handheld: float = 0.0
+    pct_gimbal: float = 0.0
 
 
 class DwellFamily(BaseModelCamel):
-    avg_face_size_ratio: Optional[float] = None
-    max_face_size_ratio: Optional[float] = None
-    avg_subjects_per_shot: Optional[float] = None
-    pct_shots_with_face: Optional[float] = None
-    avg_face_screen_time_s: Optional[float] = None
-    protagonist_present_ratio: Optional[float] = None
-    avg_shot_subject_count: Optional[float] = None
-    face_size_variance: Optional[float] = None
+    avg_face_size_ratio: float = 0.0
+    max_face_size_ratio: float = 0.0
+    avg_subjects_per_shot: float = 0.0
+    pct_shots_with_face: float = 0.0
+    avg_face_screen_time_s: float = 0.0
+    protagonist_present_ratio: float = 0.0
+    avg_shot_subject_count: float = 0.0
+    face_size_variance: float = 0.0
 
 
 class AudioAlignFamily(BaseModelCamel):
-    cut_to_beat_alignment: Optional[float] = None
-    cut_to_downbeat_alignment: Optional[float] = None
-    verse_cut_to_beat_ratio: Optional[float] = None
-    chorus_cut_to_beat_ratio: Optional[float] = None
-    drop_cut_to_beat_ratio: Optional[float] = None
-    avg_cut_to_nearest_beat_s: Optional[float] = None
-    music_duck_frequency: Optional[float] = None
-    dialogue_clip_ratio: Optional[float] = None
-    iconic_line_count: Optional[int] = None
-    avg_dialogue_duration_s: Optional[float] = None
+    cut_to_beat_alignment: float = 0.0
+    cut_to_downbeat_alignment: float = 0.0
+    verse_cut_to_beat_ratio: float = 0.0
+    chorus_cut_to_beat_ratio: float = 0.0
+    drop_cut_to_beat_ratio: float = 0.0
+    avg_cut_to_nearest_beat_s: float = 0.0
+    music_duck_frequency: float = 0.0
+    dialogue_clip_ratio: float = 0.0
+    iconic_line_count: int = 0
+    avg_dialogue_duration_s: float = 0.0
 
 
 class CompositionFamily(BaseModelCamel):
-    dominant_shot_size: Optional[Literal["close_up", "medium", "wide"]] = None
-    pct_close_up: Optional[float] = None
-    pct_medium_shot: Optional[float] = None
-    pct_wide_shot: Optional[float] = None
-    rule_of_thirds_ratio: Optional[float] = None
+    dominant_shot_size: Literal["close_up", "medium", "wide"] = "medium"
+    pct_close_up: float = 0.0
+    pct_medium_shot: float = 0.0
+    pct_wide_shot: float = 0.0
+    rule_of_thirds_ratio: float = 0.0
 
 
 class StyleGenomeFamilies(BaseModelCamel):
@@ -334,11 +358,15 @@ class StyleGenomeFamilies(BaseModelCamel):
     composition: CompositionFamily = Field(default_factory=CompositionFamily)
 
 
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
 class StyleGenome(BaseModelCamel):
     version: str = "0.1.0"
     feature_count: int = 50
     families: StyleGenomeFamilies = Field(default_factory=StyleGenomeFamilies)
-    extracted_at: Optional[str] = None
+    extracted_at: str = Field(default_factory=_utc_now_iso)
 
 
 class ClipScore(BaseModelCamel):
@@ -373,3 +401,12 @@ class RenderConfig(BaseModelCamel):
     slot_mask_paths: Dict[int, str] = Field(default_factory=dict)
     audio_tracks: List[AudioTrack] = Field(default_factory=list)
     audio_paths: Dict[str, str] = Field(default_factory=dict)
+    # Hardware-acceleration flags.  These are hints: the compiler falls back to
+    # software encode/decode automatically if the requested path fails.
+    use_nvenc: bool = False
+    nvenc_preset: str = "p5"
+    nvenc_cq: int = 19
+    use_hwaccel: bool = False
+
+    clip_order_fallback: str = "smart"
+    clip_order_smart_threshold: float = 0.15

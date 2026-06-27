@@ -208,8 +208,8 @@ class TestProgrammaticCutlist:
             assert not slot.effects
         assert not cutlist.overlays
 
-    def test_with_text_tier_has_overlays_but_no_effects(self):
-        """Text tier should generate overlays but not slot effects/transitions."""
+    def test_with_text_tier_preserves_detected_overlays_but_no_effects(self):
+        """Text tier should preserve detected reference overlays but not slot effects/transitions."""
         beats = make_beat_grid(
             bpm=120,
             segments=[
@@ -220,16 +220,31 @@ class TestProgrammaticCutlist:
         shots = make_shots(n=2)
         energy = [0.9] * 10
         available = ["wide", "medium", "close_up"]
+        style_analysis = {
+            "detectedOverlays": [
+                {
+                    "text": "REFERENCE TITLE",
+                    "startS": 0.0,
+                    "endS": 2.0,
+                    "position": "center",
+                    "font": "Inter",
+                    "fontSizePx": 48,
+                    "color": "#FFFFFF",
+                    "stroke": "#000000",
+                    "animation": "fade",
+                }
+            ]
+        }
 
         cutlist = generate_cutlist_programmatic(
-            beats, shots, energy, available, total_duration=10.0, style_tier="with_text"
+            beats, shots, energy, available, total_duration=10.0, style_tier="with_text", style_analysis=style_analysis
         )
 
         for slot in cutlist.slots:
             assert slot.transition_in == "hard_cut"
             assert slot.transition_out == "hard_cut"
             assert not slot.effects
-        assert cutlist.overlays
+        assert any(o.text == "REFERENCE TITLE" for o in cutlist.overlays)
 
     def test_globals_section_markers(self):
         beats = make_beat_grid()
@@ -285,8 +300,8 @@ class TestEffectsAndOverlays:
         )
         assert vignette_count == 1
 
-    def test_section_boundary_gets_film_grain_and_overlay(self):
-        """Section boundaries should add film_grain and a text overlay."""
+    def test_section_boundary_gets_film_grain(self):
+        """Section boundaries should add film_grain but no section-name overlay."""
         beats = make_beat_grid(
             bpm=120,
             segments=[
@@ -306,7 +321,7 @@ class TestEffectsAndOverlays:
             if e.type == "film_grain"
         )
         assert grain_count > 0
-        assert any("VERSE" in o.text for o in cutlist.overlays)
+        assert not any(o.text in {"INTRO", "VERSE", "CHORUS", "OUTRO", "DROP", "BRIDGE"} for o in cutlist.overlays)
 
     def test_no_hard_coded_promotional_overlays(self):
         """Programmatic generation must not inject generic CTAs or hook text.
