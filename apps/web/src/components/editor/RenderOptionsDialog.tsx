@@ -10,7 +10,8 @@ import { toast } from "sonner";
 import type { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Form, FormControl, FormField, FormItem, FormLabel } from "@/components/ui/form";
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useApi } from "@/lib/api/client";
 import { APIError } from "@/lib/api/error";
@@ -30,13 +31,20 @@ export function RenderOptionsDialog({ open, onOpenChange, projectId, onJobStart 
 
   const form = useForm<RenderForm>({
     resolver: zodResolver(renderOptionsSchema),
-    defaultValues: { exportPreset: "reels_9_16" },
+    defaultValues: { exportPreset: undefined, durationSec: undefined },
     mode: "onChange",
   });
 
   const onSubmit = async (values: RenderForm) => {
     try {
-      const res = await api.renders.start(projectId, { exportPreset: values.exportPreset });
+      const options: Record<string, unknown> = {};
+      if (values.exportPreset && values.exportPreset !== "auto") {
+        options.exportPreset = values.exportPreset;
+      }
+      if (typeof values.durationSec === "number" && !Number.isNaN(values.durationSec)) {
+        options.durationSec = values.durationSec;
+      }
+      const res = await api.renders.start(projectId, options);
       toast.success("Render started", { description: `Job ID: ${res.job.id}` });
       onJobStart?.(res.job.id);
       onOpenChange(false);
@@ -88,6 +96,9 @@ export function RenderOptionsDialog({ open, onOpenChange, projectId, onJobStart 
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent className="bg-zinc-950 border-zinc-800">
+                      <SelectItem value="auto" className="text-xs">
+                        Auto (match reference)
+                      </SelectItem>
                       {EXPORT_PRESETS.map((p) => (
                         <SelectItem key={p.value} value={p.value} className="text-xs">
                           {p.label}
@@ -95,6 +106,38 @@ export function RenderOptionsDialog({ open, onOpenChange, projectId, onJobStart 
                       ))}
                     </SelectContent>
                   </Select>
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="durationSec"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-xs">Duration (seconds)</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="number"
+                      min={5}
+                      max={600}
+                      step={1}
+                      placeholder="Auto"
+                      className="bg-zinc-900 border-zinc-800 h-8 text-xs"
+                      value={field.value ?? ""}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        if (raw === "") {
+                          field.onChange(undefined);
+                        } else {
+                          const parsed = parseInt(raw, 10);
+                          field.onChange(Number.isNaN(parsed) ? undefined : parsed);
+                        }
+                      }}
+                    />
+                  </FormControl>
+                  <FormDescription className="text-zinc-500 text-[10px]">
+                    Leave empty to match reference length.
+                  </FormDescription>
                 </FormItem>
               )}
             />

@@ -3,6 +3,7 @@
 # Commercial SaaS use is prohibited without written permission.
 """Rank user clips for each slot using weighted scoring + diversity."""
 
+import math
 from typing import List, Dict, Optional
 import numpy as np
 
@@ -50,6 +51,46 @@ def _semantic_score(
     return 0.7
 
 
+def _best_window(
+    meta: dict,
+    slot_duration_s: float,
+    used_windows: Dict[str, List[float]],
+    clip_id: str,
+):
+    """Pick the best usable heatmap window for a slot.
+
+    Heatmap windows are clip-relative, so comparing them to the global slot
+    timeline was meaningless. Instead we pick the highest-scoring window that
+    leaves enough room for the full slot duration and has not already been used
+    for this clip.
+    """
+    heatmap = meta.get("heatmap", [])
+    if not heatmap:
+        return None, 0.5, "still"
+
+    clip_dur = meta.get("duration_sec", 5.0)
+
+    def _window_score(window: dict) -> float:
+        base = window.get("score", 0.0)
+        # Penalise reusing the exact same window so repeated clips still vary.
+        if window.get("start_s") in used_windows.get(clip_id, []):
+            base -= 0.5
+        return base
+
+    # Only windows that leave enough room for the full slot duration.
+    valid = [
+        w for w in heatmap
+        if w.get("start_s", 0.0) + slot_duration_s <= clip_dur + 0.1
+    ]
+    candidates = valid or heatmap
+    best = max(candidates, key=_window_score)
+    return (
+        best.get("start_s"),
+        float(_window_score(best)),
+        best.get("dominant_motion", "still"),
+    )
+
+
 def _score_clip(
     slot: Slot,
     clip_id: str,
@@ -58,11 +99,16 @@ def _score_clip(
     slot_embeddings: Dict[int, np.ndarray],
     chosen_embeddings: List[np.ndarray],
     repeat_count: int = 0,
+    exhaust_bonus: float = 0.0,
+    used_windows: Optional[Dict[str, List[float]]] = None,
+    last_chosen_clip_id: Optional[str] = None,
+    at_usage_cap: bool = False,
 ) -> ClipScore:
     """Compute a single ClipScore for a slot/clip pair.
 
     Applies a repetition penalty so that clips already chosen for previous
     slots are less likely to win again, even when no embeddings are available.
+    The ``exhaust_bonus`` rewards using clips that have not been used yet.
     """
     semantic = _semantic_score(slot, clip_id, embeddings, slot_embeddings)
     shot_type_score = 1.0 if meta.get("shot_type") == slot.target_shot_type else 0.3
@@ -72,23 +118,37 @@ def _score_clip(
     duration_diff = abs(clip_dur - slot.duration_s)
     duration_score = np.exp(-(duration_diff / max(slot.duration_s, 0.1)) ** 2 / 0.5)
 
+    used_windows = used_windows or {}
+    window_start_s, window_score, dominant_motion = _best_window(
+        meta, slot.duration_s, used_windows, clip_id
+    )
+
     diversity = 0.0
     if embeddings and clip_id in embeddings and chosen_embeddings:
         emb = embeddings[clip_id]
         similarities = [float(_cosine_similarity(emb, ce)) for ce in chosen_embeddings]
         diversity = max(similarities) if similarities else 0.0
 
-    # Repetition penalty grows with each prior selection of this clip.
-    repetition_penalty = 0.15 * repeat_count
+    # Strong repetition penalty: grows with each prior selection and spikes if
+    # the same clip was just used in the previous slot.
+    repetition_penalty = 0.25 * repeat_count
+    if last_chosen_clip_id == clip_id:
+        repetition_penalty += 0.4
+
+    # Hard cap: once a clip has been used enough times, refuse to pick it again.
+    if at_usage_cap:
+        repetition_penalty += 10.0
 
     total = (
-        0.40 * semantic
-        + 0.20 * shot_type_score
-        + 0.15 * aesthetic
-        + 0.15 * motion_score
-        + 0.10 * duration_score
+        0.30 * semantic
+        + 0.15 * shot_type_score
+        + 0.10 * aesthetic
+        + 0.10 * motion_score
+        + 0.05 * duration_score
+        + 0.25 * window_score
         - 0.40 * diversity
         - repetition_penalty
+        - exhaust_bonus
     )
 
     return ClipScore(
@@ -98,6 +158,9 @@ def _score_clip(
         aesthetic_score=aesthetic,
         motion_score=motion_score,
         duration_score=duration_score,
+        window_score=window_score,
+        window_start_s=window_start_s,
+        dominant_motion=dominant_motion,
         diversity_penalty=diversity,
         repetition_penalty=repetition_penalty,
         total_score=total,
@@ -110,6 +173,7 @@ def rank_clips_for_slots(
     embeddings: Dict[str, np.ndarray] = None,
     marengo_client=None,
     fallback_policy: str = "round_robin",
+    force_exhaust: bool = True,
 ) -> Dict[int, List[ClipScore]]:
     """Rank clips for each slot using weighted scoring.
 
@@ -125,11 +189,22 @@ def rank_clips_for_slots(
             ``round_robin`` (cycle through available clips) or ``best_available``
             (reuse the globally highest-scoring clip). Empty rankings are left
             untouched when ``clip_metadata`` is empty.
+        force_exhaust: When True and there are at least as many slots as clips,
+            apply a large bonus to clips that have not been used yet so every
+            clip is chosen at least once before any clip repeats.
     """
     embeddings = embeddings or {}
     rankings: Dict[int, List[ClipScore]] = {}
     chosen_embeddings: List[np.ndarray] = []
     chosen_clip_counts: Dict[str, int] = {}
+    used_windows: Dict[str, List[float]] = {}
+
+    num_clips = len(clip_metadata)
+    num_slots = len(slots)
+    apply_exhaust_bonus = force_exhaust and num_clips > 0 and num_clips <= num_slots
+    # Allow a clip to be reused, but cap it so one high-scoring clip cannot
+    # dominate the whole edit.
+    usage_cap = max(2, math.ceil(num_slots / max(num_clips, 1)) + 1)
 
     # Precompute slot text embeddings via Marengo when available.
     slot_embeddings: Dict[int, np.ndarray] = {}
@@ -140,19 +215,36 @@ def rank_clips_for_slots(
             if emb is not None:
                 slot_embeddings[slot.index] = emb
 
+    last_chosen_clip_id: Optional[str] = None
     for slot in slots:
-        scores = [
-            _score_clip(
-                slot,
-                clip_id,
-                meta,
-                embeddings,
-                slot_embeddings,
-                chosen_embeddings,
-                repeat_count=chosen_clip_counts.get(clip_id, 0),
+        scores = []
+        for clip_id, meta in clip_metadata.items():
+            repeat_count = chosen_clip_counts.get(clip_id, 0)
+            exhaust_bonus = 0.0
+            if apply_exhaust_bonus:
+                # Strong bonus for completely unused clips; moderate bonus for
+                # clips used less than the fair share.
+                fair_share = num_slots / num_clips
+                if repeat_count == 0:
+                    exhaust_bonus = -0.6
+                elif repeat_count < fair_share:
+                    exhaust_bonus = -0.2
+            at_cap = repeat_count >= usage_cap
+            scores.append(
+                _score_clip(
+                    slot,
+                    clip_id,
+                    meta,
+                    embeddings,
+                    slot_embeddings,
+                    chosen_embeddings,
+                    repeat_count=repeat_count,
+                    exhaust_bonus=exhaust_bonus,
+                    used_windows=used_windows,
+                    last_chosen_clip_id=last_chosen_clip_id,
+                    at_usage_cap=at_cap,
+                )
             )
-            for clip_id, meta in clip_metadata.items()
-        ]
 
         # Sort by total score descending
         scores.sort(key=lambda x: x.total_score, reverse=True)
@@ -162,6 +254,8 @@ def rank_clips_for_slots(
         if scores:
             top = scores[0]
             chosen_clip_counts[top.clip_id] = chosen_clip_counts.get(top.clip_id, 0) + 1
+            used_windows.setdefault(top.clip_id, []).append(top.window_start_s)
+            last_chosen_clip_id = top.clip_id
             if embeddings and top.clip_id in embeddings:
                 chosen_embeddings.append(embeddings[top.clip_id])
 

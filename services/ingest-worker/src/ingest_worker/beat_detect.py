@@ -6,7 +6,7 @@
 import os
 import subprocess
 import tempfile
-from typing import Optional
+from typing import List, Optional, Tuple
 import numpy as np
 
 try:
@@ -74,6 +74,106 @@ def detect_beats_allin1(audio_path: str) -> Optional[BeatGrid]:
         return None
 
 
+def _label_structure_segments(boundary_times: List[float], energies: List[float]) -> List[str]:
+    """Assign conventional song-section labels to detected boundaries.
+
+    Labels are inferred from the relative energy and temporal order of each
+    segment. This is a heuristic fallback; when allin1 is available it provides
+    real section labels from a trained model.
+    """
+    n = len(energies)
+    labels = [""] * n
+    labels[0] = "intro"
+    labels[-1] = "outro"
+
+    # Energy-ranked candidates among interior segments.
+    ranked = sorted(((energies[i], i) for i in range(1, n - 1)), reverse=True)
+    if ranked:
+        labels[ranked[0][1]] = "drop"
+    if len(ranked) > 1:
+        labels[ranked[1][1]] = "chorus"
+
+    drop_idx = next((i for i, l in enumerate(labels) if l == "drop"), None)
+    chorus_idx = next((i for i, l in enumerate(labels) if l == "chorus"), None)
+    ref = drop_idx if drop_idx is not None else chorus_idx
+
+    for i in range(1, n - 1):
+        if labels[i]:
+            continue
+        labels[i] = "verse" if ref is None or i < ref else "bridge"
+
+    return labels
+
+
+def _detect_structure_librosa(audio_path: str, beat_times: np.ndarray) -> List[BeatSegment]:
+    """Detect real song structure using chroma + energy clustering.
+
+    Returns a list of BeatSegment objects with labels like intro, verse,
+    chorus, drop, bridge, outro. Falls back to equal-duration chunks if any
+    step fails so the pipeline never crashes.
+    """
+    try:
+        y, sr = librosa.load(audio_path, sr=22050, mono=True)
+        duration = librosa.get_duration(y=y, sr=sr)
+        hop = 512
+
+        # Map reference beat times to frame indices at the analysis sr.
+        beat_frames = librosa.time_to_frames(beat_times, sr=sr, hop_length=hop)
+        beat_frames = np.unique(np.clip(beat_frames, 0, len(y) - 1))
+        if len(beat_frames) < 4:
+            raise ValueError("Too few beats for structure analysis")
+
+        def _sync(feature: np.ndarray, frames: np.ndarray) -> np.ndarray:
+            return librosa.util.sync(feature, frames, aggregate=np.mean)
+
+        chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=hop)
+        mel = librosa.feature.melspectrogram(y=y, sr=sr, hop_length=hop)
+        logmel = librosa.power_to_db(mel, ref=np.max)
+        rms = librosa.feature.rms(y=y, hop_length=hop)[0]
+
+        chroma_sync = _sync(chroma, beat_frames)
+        logmel_sync = _sync(logmel, beat_frames)
+        rms_sync = _sync(rms.reshape(1, -1), beat_frames)
+
+        # Weight RMS so energy influences the clustering while still respecting
+        # harmonic similarity via chroma/log-mel.
+        features = np.vstack([chroma_sync, logmel_sync, rms_sync * 5])
+
+        # Determine a sensible number of segments based on duration.
+        k = max(3, min(6, int(duration // 20)))
+        k = min(k, len(beat_frames) // 2)
+
+        # Affinity recurrence matrix + agglomerative segmentation.
+        R = librosa.segment.recurrence_matrix(features, mode="affinity", width=3, sym=True)
+        R = librosa.segment.path_enhance(R, 5)
+        boundary_indices = librosa.segment.agglomerative(features, k)
+        boundary_indices = sorted(set([0] + boundary_indices.tolist() + [len(beat_frames)]))
+
+        boundary_times = [float(beat_times[min(i, len(beat_times) - 1)]) for i in boundary_indices]
+        seg_energy = [
+            float(np.mean(rms_sync[0, s:e]))
+            for s, e in zip(boundary_indices[:-1], boundary_indices[1:])
+        ]
+        labels = _label_structure_segments(boundary_times, seg_energy)
+
+        return [
+            BeatSegment(start=start, end=end, label=label)
+            for start, end, label in zip(boundary_times[:-1], boundary_times[1:], labels)
+        ]
+    except Exception as e:
+        logger.warning("librosa structure analysis failed, falling back to equal chunks", error=str(e))
+        try:
+            y, sr = librosa.load(audio_path, sr=22050, mono=True)
+            duration = librosa.get_duration(y=y, sr=sr)
+        except Exception:
+            duration = float(beat_times[-1]) if len(beat_times) else 30.0
+        segment_len = max(duration / 4, 1.0)
+        return [
+            BeatSegment(start=i * segment_len, end=min((i + 1) * segment_len, duration), label=label)
+            for i, label in enumerate(["intro", "verse", "chorus", "outro"])
+        ]
+
+
 def detect_beats_librosa(audio_path: str) -> BeatGrid:
     """Fallback beat detection using librosa."""
     if not _HAS_LIBROSA:
@@ -111,13 +211,9 @@ def detect_beats_librosa(audio_path: str) -> BeatGrid:
     # Downbeats: assume first beat is downbeat, then every 4th
     downbeats = beat_times[::4].tolist() if len(beat_times) > 0 else []
 
-    # Simple section detection using onset strength clustering
-    # Divide into 4 roughly equal segments as a naive approach
-    segment_len = duration / 4
-    segments = [
-        BeatSegment(start=i * segment_len, end=min((i + 1) * segment_len, duration), label=label)
-        for i, label in enumerate(["intro", "verse", "chorus", "outro"])
-    ]
+    # Real song-structure detection via chroma/energy clustering. If the
+    # analysis fails for any reason we still fall back to equal chunks.
+    segments = _detect_structure_librosa(audio_path, beat_times)
 
     bpm_value = _bpm_from_result(tempo)
     if bpm_value <= 0 or not np.isfinite(bpm_value):
@@ -152,15 +248,15 @@ def detect_beats(audio_path: str) -> BeatGrid:
             os.remove(wav_path)
 
 
-def compute_energy_curve(audio_path: str, n_points: int = 10) -> list:
+def compute_energy_curve(audio_path: str, num_points: int = 64) -> list:
     """Compute normalized energy curve for the audio.
 
     If librosa is not installed, returns a flat default curve so callers do not
     crash with a ``NameError``.
     """
     if not _HAS_LIBROSA:
-        logger.warning("librosa unavailable; returning flat energy curve", n_points=n_points)
-        return [0.0] * n_points
+        logger.warning("librosa unavailable; returning flat energy curve", num_points=num_points)
+        return [0.0] * num_points
 
     y, sr = librosa.load(audio_path, sr=22050, mono=True)
     rms = librosa.feature.rms(y=y, hop_length=512)[0]
@@ -169,8 +265,8 @@ def compute_energy_curve(audio_path: str, n_points: int = 10) -> list:
     from scipy.ndimage import gaussian_filter1d
     rms_smooth = gaussian_filter1d(rms, sigma=sr / 512 * 0.2)
 
-    # Sample n_points evenly
-    indices = np.linspace(0, len(rms_smooth) - 1, n_points, dtype=int)
+    # Sample num_points evenly
+    indices = np.linspace(0, len(rms_smooth) - 1, num_points, dtype=int)
     samples = rms_smooth[indices]
 
     # Normalize to 0-1

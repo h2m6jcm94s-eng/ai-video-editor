@@ -12,6 +12,26 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 
+def _derive_transition_archetypes(transitions_list: List[dict]) -> List[str]:
+    """Map per-boundary transition classifications to high-level archetypes."""
+    archetypes = []
+    for boundary in transitions_list:
+        transition_in = boundary.get("transition_in", "hard_cut")
+        is_gradual = boundary.get("is_gradual", False)
+        span = boundary.get("end_frame", 0) - boundary.get("start_frame", 0)
+
+        if is_gradual or transition_in in {"dissolve", "fade"}:
+            archetypes.append(transition_in if transition_in in {"fade", "dissolve"} else "dissolve")
+            continue
+
+        if transition_in == "whip" or span <= 10:
+            archetypes.append("whip")
+            continue
+
+        archetypes.append("hard_cut")
+    return archetypes
+
+
 @dataclass
 class AnalyzeStyleInput:
     """Input for the standalone style-analysis workflow.
@@ -38,6 +58,7 @@ class AnalyzeStyleOutput:
     lut_extracted: bool = False
     lut_storage_key: Optional[str] = None
     detected_transitions: List[str] = field(default_factory=list)
+    detected_transition_types: List[str] = field(default_factory=list)
     detected_overlays: List[dict] = field(default_factory=list)
     camera_motions: List[str] = field(default_factory=list)
     pacing: str = "medium"
@@ -101,6 +122,9 @@ class AnalyzeStyleWorkflow:
             transitions_list = transitions or []
             detected_transitions = [s.get("transition_in", "hard_cut") for s in transitions_list]
 
+            # Derive transition archetypes from the classified boundaries.
+            detected_transition_types = _derive_transition_archetypes(transitions_list)
+
             self._output = AnalyzeStyleOutput(
                 color_palette=lut_result.get("color_palette", []),
                 contrast_level=lut_result.get("contrast_level", 1.0),
@@ -109,6 +133,7 @@ class AnalyzeStyleWorkflow:
                 lut_extracted=lut_result.get("lut_extracted", False),
                 lut_storage_key=lut_result.get("lut_storage_key"),
                 detected_transitions=detected_transitions,
+                detected_transition_types=detected_transition_types,
                 detected_overlays=overlays or [],
                 camera_motions=motions or [],
             )

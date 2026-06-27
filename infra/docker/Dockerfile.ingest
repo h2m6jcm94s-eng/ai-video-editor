@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.10-slim
 
 RUN apt-get update && apt-get install -y \
     ffmpeg \
@@ -14,6 +14,7 @@ COPY services/ingest-worker ./ingest-worker
 COPY pyproject.toml .
 COPY uv.lock .
 
-RUN pip install --no-cache-dir ./shared-py ./ingest-worker
+RUN pip install --no-cache-dir ./shared-py && \
+    pip install --no-cache-dir ./ingest-worker[real_structure]
 
 CMD ["python", "-m", "ingest_worker"]
