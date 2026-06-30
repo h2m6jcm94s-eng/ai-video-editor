@@ -31,13 +31,14 @@ logger = StructuredLogger("reason_worker.kinetic_compose")
 
 # Style presets mapped to a simple visual bundle.
 STYLE_PRESETS = {
-    "anime_impact": {"color": "#FFE600", "outline": True, "size_pct": 0.45, "animation": "pop"},
+    "anime_impact": {"color": "#FFE600", "outline": True, "size_pct": 0.45, "animation": "punch_in_3f"},
     "cinematic_serif": {"color": "#F5F0E8", "outline": False, "size_pct": 0.35, "animation": "fade"},
     "trailer_block": {"color": "#FFFFFF", "outline": True, "size_pct": 0.50, "animation": "type_on"},
     "lowercase_intimate": {"color": "#C7C0B5", "outline": False, "size_pct": 0.30, "animation": "fade"},
     "neon_glitch": {"color": "#00F0FF", "outline": True, "size_pct": 0.40, "animation": "glitch"},
-    "stamp_white": {"color": "#FFFFFF", "outline": True, "size_pct": 0.55, "animation": "smash"},
+    "stamp_white": {"color": "#FFFFFF", "outline": True, "size_pct": 0.55, "animation": "smash_cut_2f"},
     "handwritten_pen": {"color": "#000000", "outline": False, "size_pct": 0.35, "animation": "type_on"},
+    "shake_emphasis": {"color": "#FFFFFF", "outline": True, "size_pct": 0.50, "animation": "shake_3f"},
 }
 
 KT3_PEAK_BEATS = {

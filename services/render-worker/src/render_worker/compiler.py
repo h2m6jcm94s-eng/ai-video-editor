@@ -636,26 +636,41 @@ def _drawtext_filter(
     alpha_expr = ""
     x_anim_expr = x_expr
 
-    if animation in ("pop", "scale"):
-        # FFmpeg's drawtext fontsize expression crashes when spawned from Python
-        # on this Windows build, so we approximate scale with a fast alpha fade-in.
-        frames = 3 if animation == "pop" else 6
+    # T.7 H4: cinematic kinetic-text animations.  We avoid fontsize expressions
+    # because they crash the Windows FFmpeg build when spawned from Python, so
+    # scale is approximated with fast alpha + position offsets.
+    if animation in ("pop", "scale", "punch_in", "punch_in_3f"):
+        # Punch-in: fast alpha ramp + slight vertical settle over 3 frames.
+        frames = 3 if animation in ("pop", "punch_in", "punch_in_3f") else 6
         dur = max(0.001, frames / fps)
         alpha_expr = f"if(lt(t\\,{start_s})\\,0\\,if(lt(t\\,{start_s}+{dur})\\,(t-{start_s})/{dur}\\,1))"
+        y_offset = int(font_size_px * 0.15)
+        y_anim_expr = (
+            f"{y_expr}-if(lt(t\\,{start_s}+{dur})\\,{y_offset}*(1-(t-{start_s})/{dur})\\,0)"
+        )
     elif animation == "fade":
         dur = max(0.001, 10 / fps)
         alpha_expr = f"if(lt(t\\,{start_s})\\,0\\,if(lt(t\\,{start_s}+{dur})\\,(t-{start_s})/{dur}\\,1))"
-    elif animation == "typewriter":
+    elif animation in ("typewriter", "type_on"):
         # Progressive reveal approximated as an alpha sweep over 12 frames.
         dur = max(0.001, 12 / fps)
         alpha_expr = f"if(lt(t\\,{start_s})\\,0\\,if(lt(t\\,{start_s}+{dur})\\,(t-{start_s})/{dur}\\,1))"
-    elif animation == "smash":
-        # Fade out over the last 2 frames (size expression avoided due to crash).
+    elif animation in ("smash", "smash_cut", "smash_cut_2f"):
+        # Smash-cut out: fade out + jitter over the last 2 frames.
         fade_dur = max(0.001, 2 / fps)
         alpha_expr = f"if(lt(t\\,{end_s}-{fade_dur})\\,1\\,({end_s}-t)/{fade_dur})"
-    elif animation == "glitch":
+        x_anim_expr = (
+            f"{x_expr}+if(between(t\\,{end_s}-{fade_dur}\\,{end_s})\\,random(1)*10-5\\,0)"
+        )
+    elif animation in ("glitch", "glitch_in"):
         # Random x offset bursts every 200ms.
         x_anim_expr = f"{x_expr}+if(between(mod(t*1000\\,200)\\,0\\,100)\\,random(1)*20-10\\,0)"
+    elif animation in ("shake", "shake_3f"):
+        # Shake: random +/-5px translate for the first 3 frames, then hold.
+        shake_dur = max(0.001, 3 / fps)
+        x_anim_expr = (
+            f"{x_expr}+if(lt(t\\,{start_s}+{shake_dur})\\,random(1)*10-5\\,0)"
+        )
     elif animation == "bold_bounce":
         # Fontsize expression is unstable from Python subprocess; use alpha pulse.
         alpha_expr = f"0.75+0.25*sin(t*8)"
@@ -664,7 +679,7 @@ def _drawtext_filter(
 
     return (
         f"drawtext=text='{_esc_text(text)}':"
-        f"x={x_anim_expr}:y={y_expr}:"
+        f"x={x_anim_expr}:y={y_anim_expr}:"
         f"fontsize={fontsize_expr}:"
         f"fontcolor={color}:"
         f"{alpha_clause}"

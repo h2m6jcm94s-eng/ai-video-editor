@@ -7,20 +7,38 @@
 ## 0. Latest Session Snapshot
 
 **Current branch:** `main`  
-**Latest commit:** (working tree — Airtightening PRs A5–A10 applied + session 7 E2E fixes)
+**Latest commit:** `6cbec75` — wip: checkpoint current working state (T.7 validation + H4 animations + T.8 narrative rewrite + Golden Render Suite)
 
 ### What just happened
 
-- **E2E pipeline suite is green again.**
-  - Fixed `CUTLIST_SCHEMA_DRIFT` in `apps/api/src/services/ai.ts` by normalizing the AI-patched cutlist before validating it. Effects with missing `startS`/`params` are now repaired with safe defaults.
-  - Fixed the Render button being unclickable in Playwright by adding `pointer-events-none` to the fixed notification-bell wrapper in `apps/web/src/app/layout.tsx`.
-  - Refreshed `e2e/specs/pipeline.spec.ts` to create projects via the dashboard dialog, upload reference videos where required by `RenderButton`, assert the actual `1920×1080` YouTube 16:9 output, and skip Scenario B pending a fix to the deadlocking `AnalyzeStyleWorkflow`.
-- **Local infra and workers are running.** Docker Desktop is up; `infra/local/docker-compose.yml` services (Postgres, Redis, Temporal, MinIO) are healthy. Temporal workers are running with `STORAGE_BACKEND=r2` and MinIO credentials so uploaded assets are read from object storage.
-- Verification:
-  - `pnpm e2e --project=chromium -- e2e/specs/pipeline.spec.ts` → **3 passed, 1 skipped**.
-  - `pnpm e2e --project=chromium -- e2e/specs/smoke` → **9 passed**.
-  - `pnpm e2e --project=mobile-safari -- e2e/specs/smoke` → **9 passed**.
-  - See `docs/runbooks/e2e-pipeline-handoff.md` for the full handoff.
+- **T.7 Sprint A regression audit completed.**
+  - H1 (kinetic text unrelated to scenes) was a stale diagnosis: `cutlist_gen.py` uses `KINETIC_TEXT_LLM=1` by default and the LLM path is active. The word bank exists only as historical fallback code, not the active path.
+  - H2 (speed-ramp freeze) ✅ shipped — `compiler.py` clamps source duration before applying speed ramps.
+  - H3 (captions don't match scene) ✅ shipped — `captions.py` gates on `speaker_visible_in_frame` via face detection.
+  - H4 (hideous text) ✅ shipped now — 77 cinematic display fonts bundled at `E:\ai-video-editor-storage\fonts\display\`; `compiler.py` now implements `punch_in_3f`, `shake_3f`, and `smash_cut_2f` kinetic-text animations; `kinetic_compose.py` presets map to them.
+  - H5 (clip repetition) ✅ shipped — `batch2-offline-render.py` asserts `clip_count >= slot_count * 1.2`.
+  - GPU-6 faster-whisper ✅ already active in `audio_scoring.py` (`from faster_whisper import WhisperModel`).
+- **T.8 Narrative algorithm rewrite shipped.**
+  - Per-clip emotion profiles (`clip_emotion.py`), arc template library (`narrative_arcs.py`), arc-to-song anchor mapping (`arc_anchor.py`), arc-aware clip ranking (`clip_rank.py`), arc-aware kinetic text (`kinetic_compose.py`), and past/glimpse interleaving.
+  - Gated behind `AdaptiveFeatures.use_emotion_led_cuts`.
+- **Golden Render Regression Suite shipped.**
+  - Runner: `scripts/golden-render-suite.py`.
+  - Plan-compliant wrapper: `tests/golden_render/run.py` + `tests/golden_render/expected/expected_signatures.json`.
+  - Phase 1 gate: **16/16** criteria pass.
+  - Phase 2 gate: **21/21** criteria pass with `--feature-emotion-led-cuts`.
+- **Anti-decoration rule codified (T.7.3).**
+  - Banned: disabling a feature to make tests pass, placeholder constants, skipped tests for broken features, random/word-bank fallbacks pretending to be real output.
+  - If a feature cannot be fixed in time, set `capability_status="blocked_<reason>"` and let the Golden Render gate show the honest missing state.
+- **Amitansu Priyadarsan** (`Amitansu-priyadarsan`) added as collaborator with push access.
+
+### Verification
+
+- `scripts/golden-render-suite.py --json` → Phase 1 **16/16** pass.
+- `scripts/golden-render-suite.py --json --feature-emotion-led-cuts` → Phase 2 **21/21** pass.
+- `services/reason-worker/tests/test_kinetic_compose.py` → **8 passed**.
+- `services/reason-worker/tests/test_arc_anchor.py test_clip_rank_arc.py test_glimpse_interleave.py test_narrative_arcs.py` → **22 passed**.
+- `services/ingest-worker/tests/test_clip_emotion.py` → **10 passed**.
+- `services/render-worker/tests/test_compiler.py` → **1 passed**.
 
 ### Next priority
 
@@ -29,6 +47,28 @@
 - Wire up the guardrails service so it is reachable instead of failing open.
 - Continue Section N external-service setup (SAM 3 server, ComfyUI/SDXL inpaint, Wan 2.2) when ready.
 - Fix the pre-existing Vitest/CommonJS test-runner config issue so `pnpm test` runs cleanly.
+
+---
+
+## Anti-Decoration Rule (T.7.3)
+
+**FORBIDDEN: Disabling a feature to make tests pass.**
+
+Specifically, the following patterns are BANNED:
+- `use_llm=False` / `use_X=False` as a "fix" for an LLM JSON parse bug.
+- `max_candidates=0` / `threshold=999` as a "fix" for a downstream filter.
+- Returning a placeholder constant from a function whose real implementation is failing.
+- Replacing real feature output with a hardcoded list / random choice / word bank.
+- Marking a test as "skipped" or "expected_failure" because the feature is broken.
+
+If you can't make a feature work in the time you have:
+1. STOP. Document the underlying bug in this file.
+2. Set the feature's `capability_status="not_implemented"` or `="blocked_<reason>"`.
+3. The Golden Render gate will mark it as missing — that is the HONEST output.
+4. Move to the next task or ask the user.
+
+**Never ship a feature that's "always-on" but produces meaningless output.**
+The Golden Render Suite will catch this; if it doesn't catch this, ADD the check.
 
 ---
 
