@@ -6,7 +6,7 @@ import { StencilAuth } from "@/components/landing/StencilAuth";
 export default function SignUpPage() {
   return (
     <StencilAuth mode="signup" className={stencilFontVars}>
-      <SignUp appearance={stencilAuthAppearance} />
+      <SignUp appearance={stencilAuthAppearance} signInUrl="/sign-in" />
     </StencilAuth>
   );
 }

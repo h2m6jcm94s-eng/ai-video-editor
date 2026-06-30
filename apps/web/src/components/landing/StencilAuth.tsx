@@ -80,7 +80,6 @@ export function StencilAuth({
           </Link>
           <AuthBackdrop />
           <div className="auth-side-content">
-            <span className="mono accent">§ Issue №01 · May 2026</span>
             <div>
               <h2>
                 {signup ? (

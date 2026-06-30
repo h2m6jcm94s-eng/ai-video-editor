@@ -139,35 +139,203 @@
   justify-content: center;
 }
 
-/* Blend the Clerk card into the panel — keep colors/spacing from appearance. */
+/*
+ * Stencil theming for the real Clerk widget.
+ * Clerk ships its own (fairly high-specificity) CSS-in-JS, so the visual
+ * properties below use !important to reliably win — otherwise the widget
+ * falls back to its stock "normal" look. Colors / radius / fonts come from
+ * the design tokens in landing.css so the form reads as one with the panel.
+ * Structure and behavior are untouched; this is purely cosmetic.
+ */
+
+/* Card: dissolve Clerk's chrome into the panel. */
+.stencil .auth-clerk .cl-rootBox,
 .stencil .auth-clerk .cl-cardBox,
 .stencil .auth-clerk .cl-card {
-  background: transparent;
-  box-shadow: none;
-  border: 0;
-  width: 100%;
+  background: transparent !important;
+  box-shadow: none !important;
+  border: 0 !important;
+  width: 100% !important;
+}
+.stencil .auth-clerk .cl-card {
+  padding: 0 !important;
+  gap: 18px !important;
+}
+
+/* Header — serif italic display title, like the panel headline. */
+.stencil .auth-clerk .cl-header {
+  text-align: left !important;
 }
 .stencil .auth-clerk .cl-headerTitle {
-  font-family: var(--serif);
-  font-style: italic;
-  font-size: 40px;
-  line-height: 0.95;
-  font-weight: 400;
+  font-family: var(--serif) !important;
+  font-style: italic !important;
+  font-size: clamp(40px, 5vw, 56px) !important;
+  line-height: 0.95 !important;
+  font-weight: 400 !important;
+  letter-spacing: -0.02em !important;
+  color: var(--fg) !important;
 }
 .stencil .auth-clerk .cl-headerSubtitle {
-  font-family: var(--body);
+  font-family: var(--body) !important;
+  font-size: 16px !important;
+  color: var(--fg-dim) !important;
 }
-.stencil .auth-clerk .cl-formFieldLabel,
-.stencil .auth-clerk .cl-dividerText,
-.stencil .auth-clerk .cl-socialButtonsBlockButtonText,
-.stencil .auth-clerk .cl-footerActionText {
-  font-family: var(--mono);
-  letter-spacing: 0.06em;
+
+/* Social providers — pill buttons matching the landing nav/CTA. */
+.stencil .auth-clerk .cl-socialButtons {
+  gap: 8px !important;
 }
+.stencil .auth-clerk .cl-socialButtonsBlockButton,
+.stencil .auth-clerk .cl-socialButtonsIconButton {
+  border: 1px solid var(--hairline) !important;
+  border-radius: 999px !important;
+  background: transparent !important;
+  color: var(--fg) !important;
+  min-height: 50px !important;
+  padding: 12px 16px !important;
+  box-shadow: none !important;
+  transition: border-color 0.15s, background 0.15s !important;
+}
+.stencil .auth-clerk .cl-socialButtonsBlockButton:hover,
+.stencil .auth-clerk .cl-socialButtonsIconButton:hover {
+  border-color: var(--fg) !important;
+  background: color-mix(in oklab, var(--fg) 5%, transparent) !important;
+}
+.stencil .auth-clerk .cl-socialButtonsBlockButtonText {
+  font-family: var(--mono) !important;
+  font-size: 0.7rem !important;
+  letter-spacing: 0.16em !important;
+  text-transform: uppercase !important;
+  color: var(--fg) !important;
+}
+
+/* Divider — mono, uppercase, hairline rules. */
+.stencil .auth-clerk .cl-dividerLine {
+  background: var(--hairline) !important;
+}
+.stencil .auth-clerk .cl-dividerText {
+  font-family: var(--mono) !important;
+  font-size: 0.66rem !important;
+  letter-spacing: 0.18em !important;
+  text-transform: uppercase !important;
+  color: var(--fg-muted) !important;
+}
+
+/* Field labels — mono, uppercase, muted. */
+.stencil .auth-clerk .cl-formFieldLabel {
+  font-family: var(--mono) !important;
+  font-size: 0.66rem !important;
+  letter-spacing: 0.18em !important;
+  text-transform: uppercase !important;
+  color: var(--fg-muted) !important;
+}
+
+/* Inputs — tall, slightly-rounded, hairline border, accent focus ring. */
+.stencil .auth-clerk .cl-formFieldInput,
+.stencil .auth-clerk .cl-input {
+  background: var(--bg) !important;
+  border: 1px solid var(--hairline) !important;
+  border-radius: 6px !important;
+  color: var(--fg) !important;
+  font-family: var(--body) !important;
+  font-size: 16px !important;
+  line-height: 1.4 !important;
+  height: auto !important;
+  min-height: 52px !important;
+  padding: 14px 16px !important;
+  box-shadow: none !important;
+  transition: border-color 0.15s !important;
+}
+/* The password field wraps the input in a group; match its height + edge. */
+.stencil .auth-clerk .cl-formFieldInputGroup {
+  border: 1px solid var(--hairline) !important;
+  border-radius: 6px !important;
+  background: var(--bg) !important;
+  min-height: 52px !important;
+  box-shadow: none !important;
+  transition: border-color 0.15s !important;
+}
+.stencil .auth-clerk .cl-formFieldInputGroup .cl-formFieldInput {
+  border: 0 !important;
+  min-height: 50px !important;
+  background: transparent !important;
+}
+/* Nudge the password show/hide (eye) button slightly in from the right edge. */
+.stencil .auth-clerk .cl-formFieldInputShowPasswordButton {
+  margin-right: 8px !important;
+  color: var(--fg-muted) !important;
+}
+/* OTP code boxes — square cells, keep them compact but legible. */
+.stencil .auth-clerk .cl-otpCodeFieldInput {
+  background: var(--bg) !important;
+  border: 1px solid var(--hairline) !important;
+  border-radius: 6px !important;
+  color: var(--fg) !important;
+  font-family: var(--mono) !important;
+  font-size: 18px !important;
+  box-shadow: none !important;
+  transition: border-color 0.15s !important;
+}
+.stencil .auth-clerk .cl-formFieldInput:focus,
+.stencil .auth-clerk .cl-input:focus,
+.stencil .auth-clerk .cl-otpCodeFieldInput:focus,
+.stencil .auth-clerk .cl-formFieldInputGroup:focus-within {
+  border-color: var(--accent) !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* Primary submit — accent pill, mono uppercase, like .btn-primary. */
 .stencil .auth-clerk .cl-formButtonPrimary {
-  font-family: var(--mono);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  background: var(--accent) !important;
+  color: #fff !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  padding: 15px 22px !important;
+  font-family: var(--mono) !important;
+  font-size: 0.78rem !important;
+  letter-spacing: 0.14em !important;
+  text-transform: uppercase !important;
+  box-shadow: none !important;
+  transition: transform 0.15s, filter 0.2s !important;
+}
+.stencil .auth-clerk .cl-formButtonPrimary:hover {
+  transform: translateY(-1px) !important;
+  filter: brightness(1.05) !important;
+}
+
+/* Secondary / inline links and actions — accent, mono. */
+.stencil .auth-clerk .cl-formFieldAction,
+.stencil .auth-clerk .cl-footerActionLink,
+.stencil .auth-clerk .cl-identityPreviewEditButton,
+.stencil .auth-clerk .cl-footerPagesLink,
+.stencil .auth-clerk .cl-backLink {
+  color: var(--accent) !important;
+  font-family: var(--mono) !important;
+  letter-spacing: 0.04em !important;
+}
+.stencil .auth-clerk .cl-footerActionText,
+.stencil .auth-clerk .cl-footerPages {
+  font-family: var(--mono) !important;
+  font-size: 0.7rem !important;
+  letter-spacing: 0.06em !important;
+  color: var(--fg-muted) !important;
+}
+
+/* Identity preview chip (e.g. on the password step). */
+.stencil .auth-clerk .cl-identityPreview {
+  background: transparent !important;
+  border: 1px solid var(--hairline) !important;
+  border-radius: 2px !important;
+}
+.stencil .auth-clerk .cl-identityPreviewText {
+  font-family: var(--body) !important;
+  color: var(--fg-dim) !important;
+}
+
+/* Footer — keep Clerk's own branding row quiet. */
+.stencil .auth-clerk .cl-footer {
+  background: transparent !important;
 }
 
 @media (max-width: 980px) {
