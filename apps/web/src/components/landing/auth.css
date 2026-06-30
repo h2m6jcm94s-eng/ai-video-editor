@@ -1,0 +1,183 @@
+/*
+ * Stencil auth pages — split-panel layout (branding side + Clerk form side).
+ * Ported from the design handoff (signin.html), scoped under `.stencil`.
+ * The right side hosts the real Clerk <SignIn/> / <SignUp/> widget, themed via
+ * appearance variables plus the .cl-* overrides below to match the design.
+ */
+
+.stencil .auth-layout {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+/* ===== Branding side ===== */
+.stencil .auth-side {
+  position: relative;
+  overflow: hidden;
+  border-right: 1px solid var(--hairline);
+  background: #0a0908;
+}
+.stencil .auth-frame {
+  position: absolute;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  animation: stencil-authDrift 18s ease-in-out infinite alternate;
+}
+.stencil .auth-frame .timecode {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  font-family: var(--mono);
+  font-size: 8px;
+  letter-spacing: 0.16em;
+  color: rgba(255, 255, 255, 0.78);
+  text-transform: uppercase;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.stencil .auth-frame .timecode::before {
+  content: "";
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+}
+.stencil .auth-frame .stripe {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.18);
+  transform: translateY(-50%);
+}
+@keyframes stencil-authDrift {
+  0% {
+    transform: translate(0, 0) rotate(var(--rot, 0deg));
+  }
+  100% {
+    transform: translate(var(--dx, 0%), var(--dy, 0%)) rotate(var(--rot, 0deg));
+  }
+}
+
+.stencil .auth-side-content {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  padding: 56px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background: linear-gradient(135deg, rgba(10, 9, 8, 0.6) 0%, rgba(10, 9, 8, 0.85) 100%);
+}
+.stencil .auth-side h2 {
+  font-family: var(--serif);
+  font-size: clamp(48px, 6vw, 88px);
+  line-height: 0.92;
+  letter-spacing: -0.025em;
+  font-weight: 400;
+  max-width: 14ch;
+}
+.stencil .auth-side h2 em {
+  font-style: italic;
+  color: var(--accent);
+}
+.stencil .auth-side .quote {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 24px;
+  color: var(--fg-dim);
+  max-width: 36ch;
+  line-height: 1.4;
+  padding-top: 24px;
+  border-top: 1px solid var(--hairline);
+}
+.stencil .auth-side .who {
+  margin-top: 16px;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+/* Logo, top-left */
+.stencil .auth-logo {
+  position: absolute;
+  top: 32px;
+  left: 32px;
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  z-index: 20;
+}
+.stencil .auth-logo .logo-mark {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 24px;
+}
+.stencil .auth-logo .logo-mark em {
+  color: var(--accent);
+}
+
+/* ===== Form side (Clerk widget) ===== */
+.stencil .auth-form-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 56px;
+}
+.stencil .auth-clerk {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  justify-content: center;
+}
+
+/* Blend the Clerk card into the panel — keep colors/spacing from appearance. */
+.stencil .auth-clerk .cl-cardBox,
+.stencil .auth-clerk .cl-card {
+  background: transparent;
+  box-shadow: none;
+  border: 0;
+  width: 100%;
+}
+.stencil .auth-clerk .cl-headerTitle {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 40px;
+  line-height: 0.95;
+  font-weight: 400;
+}
+.stencil .auth-clerk .cl-headerSubtitle {
+  font-family: var(--body);
+}
+.stencil .auth-clerk .cl-formFieldLabel,
+.stencil .auth-clerk .cl-dividerText,
+.stencil .auth-clerk .cl-socialButtonsBlockButtonText,
+.stencil .auth-clerk .cl-footerActionText {
+  font-family: var(--mono);
+  letter-spacing: 0.06em;
+}
+.stencil .auth-clerk .cl-formButtonPrimary {
+  font-family: var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 980px) {
+  .stencil .auth-layout {
+    grid-template-columns: 1fr;
+  }
+  .stencil .auth-side {
+    display: none;
+  }
+  .stencil .auth-form-side {
+    padding: 32px 24px;
+  }
+}

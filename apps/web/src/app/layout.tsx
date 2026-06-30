@@ -5,8 +5,8 @@ export const dynamic = "force-dynamic";
 import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { AppChrome } from "@/components/AppChrome";
 import { AmbientBackground } from "@/components/dashboard/AmbientBackground";
-import { NotificationBell } from "@/components/NotificationBell";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
@@ -31,11 +31,7 @@ export default function RootLayout({
             <AmbientBackground />
             <div className="relative">
               {children}
-              <div className="fixed top-4 right-4 z-50">
-                <div className="glass rounded-full p-1.5">
-                  <NotificationBell />
-                </div>
-              </div>
+              <AppChrome />
             </div>
             <Toaster />
           </ThemeProvider>
