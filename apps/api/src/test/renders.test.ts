@@ -27,6 +27,7 @@ describe("Render Routes", () => {
   const mockRender = {
     id: RENDER_ID,
     projectId: PROJ_ID,
+    userId: "test-user-id",
     status: "queued",
     stage: "queued",
     progress: 0,
@@ -322,6 +323,81 @@ describe("Render Routes", () => {
 
     const app = await buildApp();
     const res = await app.inject({ method: "GET", url: `/api/renders/project/${PROJ_ID}` });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("PATCH /api/renders/:jobId/outcomes records explicit feedback", async () => {
+    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(mockRender as any);
+    vi.mocked(db.insert).mockReturnValueOnce({
+      values: vi.fn().mockReturnValueOnce({
+        onConflictDoUpdate: vi.fn().mockResolvedValueOnce(undefined),
+      }),
+    } as any);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/renders/${RENDER_ID}/outcomes`,
+      payload: { thumbsUp: true, explicitRating: 5, thumbComment: "Great!" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).ok).toBe(true);
+  });
+
+  it("GET /api/renders/:jobId/outcomes returns outcome row", async () => {
+    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(mockRender as any);
+    vi.mocked(db.query.renderOutcomes.findFirst).mockResolvedValueOnce({
+      renderId: RENDER_ID,
+      thumbsUp: true,
+      explicitRating: 5,
+    } as any);
+
+    const app = await buildApp();
+    const res = await app.inject({ method: "GET", url: `/api/renders/${RENDER_ID}/outcomes` });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.outcome.thumbsUp).toBe(true);
+  });
+
+  it("PATCH /api/renders/:jobId/outcomes returns 403 for other user's render", async () => {
+    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce({
+      ...mockRender,
+      userId: "other-user-id",
+    } as any);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/renders/${RENDER_ID}/outcomes`,
+      payload: { thumbsUp: true },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("GET /api/renders/:jobId/behavior returns behavior + low-confidence flag", async () => {
+    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(mockRender as any);
+    vi.mocked(db.query.renderBehavior.findFirst).mockResolvedValueOnce({
+      renderId: RENDER_ID,
+      predictorConfidence: 0.25,
+      cutDensityPerSec: 0.2,
+    } as any);
+
+    const app = await buildApp();
+    const res = await app.inject({ method: "GET", url: `/api/renders/${RENDER_ID}/behavior` });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.behavior.predictorConfidence).toBe(0.25);
+    expect(body.lowConfidence).toBe(true);
+  });
+
+  it("GET /api/renders/:jobId/behavior returns 403 for other user's render", async () => {
+    vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce({
+      ...mockRender,
+      userId: "other-user-id",
+    } as any);
+
+    const app = await buildApp();
+    const res = await app.inject({ method: "GET", url: `/api/renders/${RENDER_ID}/behavior` });
     expect(res.statusCode).toBe(403);
   });
 });

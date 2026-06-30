@@ -9,7 +9,7 @@
 import { and, count, desc, eq, gte, inArray, lt } from "drizzle-orm";
 import { FastifyInstance } from "fastify";
 import { db } from "../db";
-import { adminAudit, projects, renders, userEvents, users } from "../db/schema";
+import { adminAudit, behaviorCorpusEntries, projects, renders, userEvents, users } from "../db/schema";
 import { sendError } from "../lib/errors";
 import { requireAdmin } from "../middleware/requireAdmin";
 
@@ -148,6 +148,29 @@ export async function adminRoutes(app: FastifyInstance) {
       .groupBy(renders.status);
 
     return { items: renderList, statusCounts };
+  });
+
+  // Quarantine review (paginated)
+  app.get("/corpus-quarantine", async (request) => {
+    const query = request.query as Record<string, string>;
+    const limit = Math.min(parseInt(query.limit || "50", 10), 200);
+    const cursor = query.cursor;
+
+    const conditions = [eq(behaviorCorpusEntries.status, "quarantined")];
+    if (cursor) conditions.push(lt(behaviorCorpusEntries.createdAt, new Date(cursor)));
+
+    const entries = await db.query.behaviorCorpusEntries.findMany({
+      where: and(...conditions),
+      orderBy: [desc(behaviorCorpusEntries.createdAt)],
+      limit: limit + 1,
+    });
+
+    const hasMore = entries.length > limit;
+    const items = hasMore ? entries.slice(0, limit) : entries;
+    const nextCursor =
+      hasMore && items.length > 0 ? items[items.length - 1].createdAt?.toISOString() : undefined;
+
+    return { items, nextCursor, hasMore };
   });
 
   // Audit log (paginated)

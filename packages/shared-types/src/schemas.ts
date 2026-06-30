@@ -34,6 +34,7 @@ export const patchProjectSchema = z
     name: projectNameSchema.optional(),
     styleTier: z.enum(STYLE_TIER).optional(),
     mode: z.enum(EDIT_MODE).optional(),
+    excludeFromLearning: z.boolean().optional(),
   })
   .strict();
 
@@ -183,16 +184,53 @@ export const createRenderSchema = z
   })
   .strict();
 
+export const adaptiveFeaturesSchema = z
+  .object({
+    useAdaptiveSlotDensity: z.boolean().optional(),
+    useAdaptiveAudioPolicy: z.boolean().optional(),
+    useIconicQuoteDetection: z.boolean().optional(),
+    useEmotionLedCuts: z.boolean().optional(),
+    useCorpusKnn: z.boolean().optional(),
+    usePerUserBias: z.boolean().optional(),
+  })
+  .strict()
+  .optional();
+
 export const renderOptionsSchema = z
   .object({
     exportPreset: z.enum(["auto", "youtube_16_9", "reels_9_16", "tiktok_9_16", "square_1_1"]).optional(),
     durationSec: z.number().min(5).max(600).optional(),
+    adaptiveFeatures: adaptiveFeaturesSchema,
+  })
+  .strict();
+
+export const patchRenderOutcomeSchema = z
+  .object({
+    thumbsUp: z.boolean().optional(),
+    explicitRating: z.number().int().min(1).max(5).optional(),
+    thumbComment: z.string().max(2000).optional(),
+    abandoned: z.boolean().optional(),
+  })
+  .strict();
+
+export const saveRenderOutcomeSchema = z
+  .object({
+    exported: z.boolean().optional(),
+    downloaded: z.boolean().optional(),
+    regenerated: z.boolean().optional(),
+    abandoned: z.boolean().optional(),
+    editCount: z.number().int().min(0).optional(),
+    inferredQualityScore: z.number().min(0).max(1).optional(),
+    retention30sPercent: z.number().min(0).max(100).optional(),
+    totalViews: z.number().int().min(0).optional(),
+    isFinalized: z.boolean().optional(),
   })
   .strict();
 
 export const generationOptionsSchema = z
   .object({
     durationSec: z.number().min(1).max(300).optional(),
+    adaptiveFeatures: adaptiveFeaturesSchema,
   })
   .strict()
   .optional();

@@ -6,12 +6,18 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { db } from "../db";
-import { projects, renders } from "../db/schema";
+import { projects, renderBehavior, renderOutcomes, renderSignals, renders } from "../db/schema";
 import { createCompletionToken, verifyCompletionToken } from "../lib/crypto";
 import { sendError } from "../lib/errors";
 import { rendersTotal, syncRendersActiveGauge } from "../lib/metrics";
 import { requireInternalToken } from "../middleware/requireInternalToken";
-import { createRenderSchema, renderOptionsSchema, validateBody } from "../middleware/validate";
+import {
+  createRenderSchema,
+  patchRenderOutcomeSchema,
+  renderOptionsSchema,
+  saveRenderOutcomeSchema,
+  validateBody,
+} from "../middleware/validate";
 import { enqueueJob } from "../services/queue";
 import { startRenderWorkflow } from "../services/temporal";
 
@@ -27,6 +33,17 @@ const completeRenderSchema = z
     message: "outputAssetId is required when status is complete",
     path: ["outputAssetId"],
   });
+
+const saveRenderSignalsSchema = z.object({
+  signals: z.record(z.unknown()),
+});
+
+const saveRenderBehaviorSchema = z.object({
+  behavior: z.record(z.unknown()),
+  predictorVersion: z.string().max(100).optional(),
+  predictorConfidence: z.number().min(0).max(1).optional(),
+  predictorReasoning: z.record(z.unknown()).optional(),
+});
 
 type StartRenderResult =
   | { ok: true; job: typeof renders.$inferSelect; project: typeof projects.$inferSelect }
@@ -91,6 +108,7 @@ async function startRenderAtomic(
 ): Promise<StartRenderResult> {
   const values = {
     projectId,
+    userId,
     status: "queued" as const,
     stage: "queued" as const,
     progress: 0,
@@ -389,6 +407,230 @@ export async function renderRoutes(app: FastifyInstance) {
       await syncRendersActiveGauge();
 
       return { job: updated };
+    },
+  );
+
+  // Internal: persist content signals for a render.
+  app.post(
+    "/:jobId/signals",
+    { preHandler: [requireInternalToken, validateBody(saveRenderSignalsSchema)] },
+    async (request, reply) => {
+      const { jobId } = request.params as { jobId: string };
+      const body = request.validatedBody as z.infer<typeof saveRenderSignalsSchema>;
+
+      const job = await db.query.renders.findFirst({ where: eq(renders.id, jobId) });
+      if (!job) {
+        return sendError(reply, 404, "Job not found", "NOT_FOUND");
+      }
+      const project = await db.query.projects.findFirst({ where: eq(projects.id, job.projectId) });
+      if (!project) {
+        return sendError(reply, 404, "Project not found", "NOT_FOUND");
+      }
+
+      await db
+        .insert(renderSignals)
+        .values({
+          renderId: jobId,
+          userId: project.userId,
+          projectId: job.projectId,
+          ...(body.signals as Record<string, unknown>),
+        })
+        .onConflictDoUpdate({
+          target: renderSignals.renderId,
+          set: body.signals as Record<string, unknown>,
+        });
+
+      return { ok: true };
+    },
+  );
+
+  // Internal: persist behavior vector for a render.
+  app.post(
+    "/:jobId/behavior",
+    { preHandler: [requireInternalToken, validateBody(saveRenderBehaviorSchema)] },
+    async (request, reply) => {
+      const { jobId } = request.params as { jobId: string };
+      const body = request.validatedBody as z.infer<typeof saveRenderBehaviorSchema>;
+
+      const job = await db.query.renders.findFirst({ where: eq(renders.id, jobId) });
+      if (!job) {
+        return sendError(reply, 404, "Job not found", "NOT_FOUND");
+      }
+      const project = await db.query.projects.findFirst({ where: eq(projects.id, job.projectId) });
+      if (!project) {
+        return sendError(reply, 404, "Project not found", "NOT_FOUND");
+      }
+
+      await db
+        .insert(renderBehavior)
+        .values({
+          renderId: jobId,
+          userId: project.userId,
+          projectId: job.projectId,
+          ...(body.behavior as Record<string, unknown>),
+          predictorVersion: body.predictorVersion ?? "heuristic-v1",
+          predictorConfidence: body.predictorConfidence ?? 0.5,
+          predictorReasoning: body.predictorReasoning ?? { source: "heuristic" },
+        })
+        .onConflictDoUpdate({
+          target: renderBehavior.renderId,
+          set: {
+            ...(body.behavior as Record<string, unknown>),
+            predictorVersion: body.predictorVersion ?? "heuristic-v1",
+            predictorConfidence: body.predictorConfidence ?? 0.5,
+            predictorReasoning: body.predictorReasoning ?? { source: "heuristic" },
+          },
+        });
+
+      return { ok: true };
+    },
+  );
+
+  // User-facing: update explicit feedback for a render.
+  app.patch(
+    "/:jobId/outcomes",
+    { preHandler: validateBody(patchRenderOutcomeSchema) },
+    async (request, reply) => {
+      const { jobId } = request.params as { jobId: string };
+      const userId = request.userId;
+      const body = request.validatedBody as z.infer<typeof patchRenderOutcomeSchema>;
+
+      const job = await db.query.renders.findFirst({ where: eq(renders.id, jobId) });
+      if (!job) {
+        return sendError(reply, 404, "Job not found", "NOT_FOUND");
+      }
+      if (job.userId !== userId) {
+        return sendError(reply, 403, "Forbidden", "FORBIDDEN");
+      }
+
+      const now = new Date();
+      const update: Record<string, unknown> = {
+        updatedAt: now,
+      };
+      if (body.thumbsUp !== undefined) update.thumbsUp = body.thumbsUp;
+      if (body.explicitRating !== undefined) update.explicitRating = body.explicitRating;
+      if (body.thumbComment !== undefined) update.thumbComment = body.thumbComment;
+      if (body.abandoned) {
+        update.abandoned = true;
+        update.abandonedAt = now;
+      }
+
+      await db
+        .insert(renderOutcomes)
+        .values({
+          renderId: jobId,
+          userId,
+          projectId: job.projectId,
+          ...update,
+        } as typeof renderOutcomes.$inferInsert)
+        .onConflictDoUpdate({
+          target: renderOutcomes.renderId,
+          set: update,
+        });
+
+      return { ok: true };
+    },
+  );
+
+  // User-facing: read own outcomes for a render.
+  app.get("/:jobId/outcomes", async (request, reply) => {
+    const { jobId } = request.params as { jobId: string };
+    const userId = request.userId;
+
+    const job = await db.query.renders.findFirst({ where: eq(renders.id, jobId) });
+    if (!job) {
+      return sendError(reply, 404, "Job not found", "NOT_FOUND");
+    }
+    if (job.userId !== userId) {
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
+    }
+
+    const outcome = await db.query.renderOutcomes.findFirst({
+      where: eq(renderOutcomes.renderId, jobId),
+    });
+
+    return { outcome: outcome ?? null };
+  });
+
+  // User-facing: read the behavior vector + confidence used for a render.
+  app.get("/:jobId/behavior", async (request, reply) => {
+    const { jobId } = request.params as { jobId: string };
+    const userId = request.userId;
+
+    const job = await db.query.renders.findFirst({ where: eq(renders.id, jobId) });
+    if (!job) {
+      return sendError(reply, 404, "Job not found", "NOT_FOUND");
+    }
+    if (job.userId !== userId) {
+      return sendError(reply, 403, "Forbidden", "FORBIDDEN");
+    }
+
+    const behavior = await db.query.renderBehavior.findFirst({
+      where: eq(renderBehavior.renderId, jobId),
+    });
+
+    return {
+      behavior: behavior ?? null,
+      lowConfidence: (behavior?.predictorConfidence ?? 0.5) < 0.4,
+    };
+  });
+
+  // Internal: worker-facing upsert for implicit outcome events.
+  app.post(
+    "/:jobId/outcomes",
+    { preHandler: [requireInternalToken, validateBody(saveRenderOutcomeSchema)] },
+    async (request, reply) => {
+      const { jobId } = request.params as { jobId: string };
+      const body = request.validatedBody as z.infer<typeof saveRenderOutcomeSchema>;
+
+      const job = await db.query.renders.findFirst({ where: eq(renders.id, jobId) });
+      if (!job) {
+        return sendError(reply, 404, "Job not found", "NOT_FOUND");
+      }
+
+      const now = new Date();
+      const update: Record<string, unknown> = {
+        updatedAt: now,
+      };
+      if (body.exported) {
+        update.exported = true;
+        update.exportedAt = now;
+      }
+      if (body.downloaded) {
+        update.downloaded = true;
+        update.downloadedAt = now;
+      }
+      if (body.regenerated) {
+        update.regenerated = true;
+        update.regeneratedAt = now;
+      }
+      if (body.abandoned) {
+        update.abandoned = true;
+        update.abandonedAt = now;
+      }
+      if (body.editCount !== undefined) update.editCount = body.editCount;
+      if (body.inferredQualityScore !== undefined) update.inferredQualityScore = body.inferredQualityScore;
+      if (body.retention30sPercent !== undefined) update.retention30sPercent = body.retention30sPercent;
+      if (body.totalViews !== undefined) update.totalViews = body.totalViews;
+      if (body.isFinalized) {
+        update.isFinalized = true;
+        update.finalizedAt = now;
+      }
+
+      await db
+        .insert(renderOutcomes)
+        .values({
+          renderId: jobId,
+          userId: job.userId,
+          projectId: job.projectId,
+          ...update,
+        } as typeof renderOutcomes.$inferInsert)
+        .onConflictDoUpdate({
+          target: renderOutcomes.renderId,
+          set: update,
+        });
+
+      return { ok: true };
     },
   );
 }

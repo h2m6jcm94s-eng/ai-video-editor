@@ -28,11 +28,13 @@ class RankTuning:
     DURATION_WEIGHT: float = 0.05
     WINDOW_WEIGHT: float = 0.25
     DIVERSITY_WEIGHT: float = 0.40
+    EMOTION_WEIGHT: float = 0.45
 
     # Repetition penalties.
     REPEAT_BASE_PENALTY: float = 0.25
     LAST_REPEAT_PENALTY: float = 0.4
     USAGE_CAP_PENALTY: float = 10.0
+    ARC_REPEAT_EXTRA_PENALTY: float = 0.6
 
     # Exhaust / usage cap.
     EXHAUST_UNUSED_BONUS: float = -1.5

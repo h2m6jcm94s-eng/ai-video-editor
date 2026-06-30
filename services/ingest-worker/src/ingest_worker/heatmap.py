@@ -5,6 +5,7 @@
 import hashlib
 import json
 import os
+import platform
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -12,7 +13,13 @@ from typing import Callable, Dict, List, Optional
 
 import numpy as np
 
+from shared_py.feature_tracer import FeatureTracer
 from shared_py.logging_config import StructuredLogger
+
+try:
+    import torch
+except ImportError:
+    torch = None  # type: ignore[assignment]
 
 logger = StructuredLogger("ingest_worker.heatmap")
 
@@ -58,6 +65,19 @@ WEIGHTS = {
 _FLOW_TARGET_HEIGHT = 240
 
 
+def _default_max_workers() -> int:
+    """Conservative default that avoids Windows memory-allocation crashes.
+
+    Windows spawn-like overhead for PyTorch/CUDA + OpenCV FFmpeg backends can
+    exhaust the paging file when too many threads allocate GPU/decoder memory
+    concurrently. Limit to half the cores (max 4); Linux/Mac can use all cores.
+    """
+    cpu_count = os.cpu_count() or 1
+    if platform.system() == "Windows":
+        return min(4, cpu_count // 2)
+    return cpu_count
+
+
 def _sample_frames(
     video_path: str, stride_s: float, target_height: int = _FLOW_TARGET_HEIGHT
 ) -> List[tuple[float, np.ndarray]]:
@@ -70,31 +90,40 @@ def _sample_frames(
         logger.warning("cv2 not available, cannot sample frames")
         return []
 
-    cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    duration = total_frames / fps if fps > 0 else 0.0
+    # Use the FFmpeg backend explicitly and release it in a finally block to
+    # avoid leaking handles/decoder memory across threaded workers on Windows.
+    cap = cv2.VideoCapture(video_path, cv2.CAP_FFMPEG)
+    if not cap.isOpened():
+        logger.warning("Failed to open video with FFmpeg backend", video_path=video_path)
+        cap.release()
+        return []
 
-    samples: List[tuple[float, np.ndarray]] = []
-    step = max(1, int(stride_s * fps))
-    for frame_idx in range(0, total_frames, step):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-        ret, frame = cap.read()
-        if not ret:
-            continue
-        timestamp = frame_idx / fps
-        # Skip dark/letterboxed frames.
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        mean_brightness = gray.mean()
-        if 15 < mean_brightness < 240:
-            # Downscale for flow; keep original for sharpness/aesthetic if needed.
-            h, w = frame.shape[:2]
-            if h > target_height:
-                scale = target_height / h
-                frame = cv2.resize(frame, (int(w * scale), target_height))
-            samples.append((timestamp, frame))
+    try:
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = total_frames / fps if fps > 0 else 0.0
 
-    cap.release()
+        samples: List[tuple[float, np.ndarray]] = []
+        step = max(1, int(stride_s * fps))
+        for frame_idx in range(0, total_frames, step):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ret, frame = cap.read()
+            if not ret:
+                continue
+            timestamp = frame_idx / fps
+            # Skip dark/letterboxed frames.
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            mean_brightness = gray.mean()
+            if 15 < mean_brightness < 240:
+                # Downscale for flow; keep original for sharpness/aesthetic if needed.
+                h, w = frame.shape[:2]
+                if h > target_height:
+                    scale = target_height / h
+                    frame = cv2.resize(frame, (int(w * scale), target_height))
+                samples.append((timestamp, frame))
+    finally:
+        cap.release()
+
     return samples
 
 
@@ -183,64 +212,69 @@ def compute_clip_heatmap(
     Returns a list of ClipWindow objects with a fused 0..1 score and the
     per-component breakdown.
     """
-    if cv2 is None:
-        logger.warning("cv2 not available, cannot compute heatmap")
-        return []
+    with FeatureTracer("heatmap", gated_in=True) as ft:
+        if cv2 is None:
+            ft.fallback("cv2_unavailable")
+            logger.warning("cv2 not available, cannot compute heatmap")
+            return []
 
-    samples = _sample_frames(video_path, stride_s, target_height=target_height)
-    if not samples:
-        return []
+        samples = _sample_frames(video_path, stride_s, target_height=target_height)
+        if not samples:
+            ft.fallback("no_sampled_frames")
+            return []
 
-    # Compute optical flow between consecutive samples.
-    flows: List[np.ndarray] = []
-    for i in range(1, len(samples)):
-        prev_gray = cv2.cvtColor(samples[i - 1][1], cv2.COLOR_BGR2GRAY)
-        curr_gray = cv2.cvtColor(samples[i][1], cv2.COLOR_BGR2GRAY)
-        flow = cv2.calcOpticalFlowFarneback(
-            prev_gray,
-            curr_gray,
-            None,
-            pyr_scale=0.5,
-            levels=3,
-            winsize=15,
-            iterations=3,
-            poly_n=5,
-            poly_sigma=1.2,
-            flags=0,
-        )
-        flows.append(flow)
-
-    from shared_py.aesthetic import score_image
-
-    duration = samples[-1][0] + stride_s if samples else 0.0
-    windows: List[ClipWindow] = []
-
-    # Score windows centered on each sample timestamp.
-    for i, (timestamp, frame) in enumerate(samples):
-        start_s = max(0.0, timestamp - window_s / 2)
-        end_s = min(duration, timestamp + window_s / 2)
-
-        window_flows = flows[max(0, i - 1) : i + 1]
-        components = {
-            "motion": _motion_energy(window_flows),
-            "aesthetic": score_image(frame),
-            "sharpness": _sharpness_score(frame),
-            "audio": _audio_onset_score(audio_path, start_s, end_s) if audio_path else 0.5,
-            "stability": _stability_score(flows[max(0, i - 2) : i + 2]),
-        }
-
-        score = sum(components[k] * WEIGHTS[k] for k in WEIGHTS)
-        windows.append(
-            ClipWindow(
-                start_s=round(start_s, 3),
-                end_s=round(end_s, 3),
-                score=round(score, 4),
-                components={k: round(v, 4) for k, v in components.items()},
-                dominant_motion=_dominant_motion(window_flows),
+        # Compute optical flow between consecutive samples.
+        flows: List[np.ndarray] = []
+        for i in range(1, len(samples)):
+            prev_gray = cv2.cvtColor(samples[i - 1][1], cv2.COLOR_BGR2GRAY)
+            curr_gray = cv2.cvtColor(samples[i][1], cv2.COLOR_BGR2GRAY)
+            flow = cv2.calcOpticalFlowFarneback(
+                prev_gray,
+                curr_gray,
+                None,
+                pyr_scale=0.5,
+                levels=3,
+                winsize=15,
+                iterations=3,
+                poly_n=5,
+                poly_sigma=1.2,
+                flags=0,
             )
-        )
+            flows.append(flow)
 
-    return windows
+        from shared_py.aesthetic import score_image
+
+        duration = samples[-1][0] + stride_s if samples else 0.0
+        windows: List[ClipWindow] = []
+
+        # Score windows centered on each sample timestamp.
+        for i, (timestamp, frame) in enumerate(samples):
+            start_s = max(0.0, timestamp - window_s / 2)
+            end_s = min(duration, timestamp + window_s / 2)
+
+            window_flows = flows[max(0, i - 1) : i + 1]
+            components = {
+                "motion": _motion_energy(window_flows),
+                "aesthetic": score_image(frame),
+                "sharpness": _sharpness_score(frame),
+                "audio": _audio_onset_score(audio_path, start_s, end_s) if audio_path else 0.5,
+                "stability": _stability_score(flows[max(0, i - 2) : i + 2]),
+            }
+
+            score = sum(components[k] * WEIGHTS[k] for k in WEIGHTS)
+            windows.append(
+                ClipWindow(
+                    start_s=round(start_s, 3),
+                    end_s=round(end_s, 3),
+                    score=round(score, 4),
+                    components={k: round(v, 4) for k, v in components.items()},
+                    dominant_motion=_dominant_motion(window_flows),
+                )
+            )
+
+        ft.signature(f"windows={len(windows)},duration={round(duration, 3)}")
+        ft.real()
+        return windows
 
 
 def compute_clip_heatmap_cached(
@@ -251,7 +285,26 @@ def compute_clip_heatmap_cached(
     target_height: int = _FLOW_TARGET_HEIGHT,
     cache_dir: Optional[Path] = None,
 ) -> List[ClipWindow]:
-    """Compute heatmap with disk caching."""
+    """Compute heatmap with disk caching.
+
+    This function is executed inside a thread-pool worker. We keep it
+    thread-safe by isolating per-worker state: each worker can set the CUDA
+    memory fraction (harmless for threads, meaningful when the same code is
+    ever run in a process pool) and, on Windows, switch the C allocator to
+    ``malloc`` via ``PYTHONMALLOC`` to work around allocator fragmentation that
+    can trigger memory-allocation errors during parallel FFmpeg decoding.
+    """
+    if platform.system() == "Windows" and os.environ.get("PYTHONMALLOC") is None:
+        # Workaround for Windows parallel heatmap memory errors (GPU-1, O.4).
+        # The default Python allocator can fragment when many threads decode
+        # video concurrently; malloc is more stable for this workload.
+        os.environ["PYTHONMALLOC"] = "malloc"
+
+    if torch is not None and torch.cuda.is_available():
+        # Only meaningful for processes, harmless for threads. Keeps the same
+        # worker safe if it is ever reused inside a process pool.
+        torch.cuda.set_per_process_memory_fraction(0.4)
+
     cache_dir = cache_dir or Path(os.environ.get("AVE_HEATMAP_CACHE_DIR", ".heatmap-cache"))
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_file = _cache_path(video_path, cache_dir, window_s, stride_s, target_height)
@@ -330,7 +383,7 @@ def compute_clip_heatmaps_batch(
         to_compute.append(path)
 
     if to_compute:
-        workers = max_workers or max(1, os.cpu_count() or 1)
+        workers = max_workers if max_workers is not None else _default_max_workers()
         logger.info("Computing heatmaps in parallel", clips=len(to_compute), workers=workers)
         with ThreadPoolExecutor(max_workers=workers) as pool:
             computed = list(

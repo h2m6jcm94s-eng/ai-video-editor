@@ -8,7 +8,7 @@ import random
 from typing import List, Dict, Optional, Tuple
 import numpy as np
 
-from shared_py.models import Slot, ClipScore
+from shared_py.models import Slot, ClipScore, ClipEmotionProfile
 from shared_py.tuning import RANK, FLOW, ANTICIPATION
 from reason_worker.momentum import compute_mean_flow_vector, momentum_coherence
 from reason_worker.anticipation import precompute_clip_motion_curve, compute_anticipation_offset
@@ -107,6 +107,19 @@ def _best_window(
     )
 
 
+def _emotion_label_to_vector(label: str) -> np.ndarray:
+    """Return a one-hot-ish vector for an emotion label over the 9 narrative emotions + VAD."""
+    order = ["joy", "calm", "intrigue", "tension", "grief", "triumph", "fear", "anger", "awe"]
+    vec = np.zeros(12, dtype=np.float32)
+    if label in order:
+        vec[order.index(label)] = 1.0
+    # VAD defaults: neutral arousal/dominance.
+    vec[9] = 0.0
+    vec[10] = 0.5
+    vec[11] = 0.5
+    return vec
+
+
 def _score_clip(
     slot: Slot,
     clip_id: str,
@@ -119,6 +132,7 @@ def _score_clip(
     used_windows: Optional[Dict[str, List[float]]] = None,
     last_chosen_clip_id: Optional[str] = None,
     at_usage_cap: bool = False,
+    emotion_profile: Optional[ClipEmotionProfile] = None,
 ) -> ClipScore:
     """Compute a single ClipScore for a slot/clip pair.
 
@@ -155,6 +169,18 @@ def _score_clip(
     if at_usage_cap:
         repetition_penalty += RANK.USAGE_CAP_PENALTY
 
+    # Phase 2: emotion/arc matching when the slot is annotated with a story beat.
+    emotion_match_score = 0.0
+    if slot.story_beat and emotion_profile is not None and slot.arc_beat_emotion_target is not None:
+        clip_vec = np.array(emotion_profile.to_vector(), dtype=np.float32)
+        beat_vec = _emotion_label_to_vector(slot.arc_beat_emotion_target)
+        emotion_match_score = _cosine_similarity(clip_vec, beat_vec)
+        # Rescale from [-1, 1] to [0, 1].
+        emotion_match_score = 0.5 + 0.5 * emotion_match_score
+        # Stronger repetition penalty in arc mode: narrative edits need more
+        # clip variety to avoid slideshow-like reuse.
+        repetition_penalty += RANK.ARC_REPEAT_EXTRA_PENALTY * repeat_count
+
     total = (
         RANK.SEMANTIC_WEIGHT * semantic
         + RANK.SHOT_TYPE_WEIGHT * shot_type_score
@@ -162,6 +188,7 @@ def _score_clip(
         + RANK.MOTION_WEIGHT * motion_score
         + RANK.DURATION_WEIGHT * duration_score
         + RANK.WINDOW_WEIGHT * window_score
+        + (RANK.EMOTION_WEIGHT * emotion_match_score if emotion_match_score > 0 else 0.0)
         - RANK.DIVERSITY_WEIGHT * diversity
         - repetition_penalty
         - exhaust_bonus
@@ -180,6 +207,9 @@ def _score_clip(
         diversity_penalty=diversity,
         repetition_penalty=repetition_penalty,
         total_score=total,
+        emotion_match_score=emotion_match_score,
+        arc_beat_name=slot.story_beat,
+        emotion_profile=emotion_profile,
     )
 
 
@@ -306,6 +336,8 @@ def rank_clips_for_slots(
     use_anticipation: bool = True,
     clip_order_fallback: str = "smart",
     clip_order_smart_threshold: float = 0.15,
+    clip_emotion_profiles: Optional[Dict[str, ClipEmotionProfile]] = None,
+    interleave_glimpses: bool = False,
 ) -> Dict[int, List[ClipScore]]:
     """Rank clips for each slot using weighted scoring.
 
@@ -337,7 +369,13 @@ def rank_clips_for_slots(
             (deterministic per-slot shuffle).
         clip_order_smart_threshold: If the gap between the top two scores is
             smaller than this, ``clip_order_fallback`` is applied.
+        clip_emotion_profiles: Optional mapping of clip_id to
+            ``ClipEmotionProfile``. When a slot has a ``story_beat``, the arc
+            emotion target is used to boost clips with matching emotion profiles.
+        interleave_glimpses: When True and ``clip_emotion_profiles`` is provided,
+            RISING_ACTION/CONFLICT slots are split into primary + glimpse micro-slots.
     """
+    clip_emotion_profiles = clip_emotion_profiles or {}
     embeddings = embeddings or {}
     rankings: Dict[int, List[ClipScore]] = {}
     chosen_embeddings: List[np.ndarray] = []
@@ -403,6 +441,7 @@ def rank_clips_for_slots(
                     used_windows=used_windows,
                     last_chosen_clip_id=last_chosen_clip_id,
                     at_usage_cap=at_cap,
+                    emotion_profile=clip_emotion_profiles.get(clip_id),
                 )
             )
 
@@ -465,8 +504,15 @@ def rank_clips_for_slots(
                 slot_embeddings,
                 chosen_embeddings,
                 repeat_count=chosen_clip_counts.get(fallback_id, 0),
+                emotion_profile=clip_emotion_profiles.get(fallback_id),
             )
             rankings[slot.index] = [fallback_score]
+
+    # Phase 2: split RISING_ACTION/CONFLICT slots into primary + glimpse micro-slots.
+    if interleave_glimpses and clip_emotion_profiles:
+        rankings = _interleave_glimpse_slots(
+            slots, rankings, clip_metadata, clip_emotion_profiles
+        )
 
     # Conservation of momentum: prefer continuous motion across slots.
     chosen_clip_ids: Dict[int, str] = {}
@@ -491,6 +537,187 @@ def rank_clips_for_slots(
         apply_anticipation_offsets(slots, chosen_clip_ids, clip_motion_curves, fps=24.0)
 
     return rankings
+
+
+INTERLEAVE_BEATS = {"RISING_ACTION", "CONFLICT", "FUN_AND_GAMES"}
+GLIMPSE_MAX_DURATION_S = 0.6
+GLIMPSE_MIN_DURATION_S = 0.3
+
+
+def _interleave_glimpse_slots(
+    slots: List[Slot],
+    rankings: Dict[int, List[ClipScore]],
+    clip_metadata: Dict[str, dict],
+    clip_emotion_profiles: Dict[str, ClipEmotionProfile],
+    recent_window: int = 6,
+) -> Dict[int, List[ClipScore]]:
+    """Split selected arc beats into primary + glimpse micro-slots.
+
+    For each RISING_ACTION/CONFLICT/FUN_AND_GAMES slot that has enough ranked
+    candidates, replace it with 2-3 micro-slots:
+        [primary][glimpse_past][primary_extended]
+    A glimpse_past clip has opposite valence to the primary; a glimpse_future
+    clip has matching valence.  Glimpse clips are chosen from the ranked list
+    but skip clips already used in the recent window to avoid slideshow-like
+    reuse.  A post-pass also swaps primary clips that collide with a recent
+    glimpse or primary.  Each glimpse is capped at 0.6s.  New slots are
+    re-indexed and the rankings dictionary is rebuilt to match.
+    """
+    new_slot_entries: List[Tuple[Slot, List[ClipScore]]] = []
+    recent_clip_ids: List[str] = []
+
+    def _profile_for(score: ClipScore) -> Optional[ClipEmotionProfile]:
+        return clip_emotion_profiles.get(score.clip_id) or (
+            score.emotion_profile if score.emotion_profile else None
+        )
+
+    def _clip_duration(clip_id: str) -> float:
+        return clip_metadata.get(clip_id, {}).get("duration_sec", 5.0)
+
+    def _is_recent(clip_id: str) -> bool:
+        return clip_id in recent_clip_ids[-recent_window:]
+
+    def _push_recent(clip_id: str) -> None:
+        recent_clip_ids.append(clip_id)
+
+    # First pass: build sub-slots, keeping the full candidate list on primary
+    # sub-slots so we can deduplicate in a second pass.
+    for slot in slots:
+        if slot.story_beat not in INTERLEAVE_BEATS:
+            new_slot_entries.append((slot, rankings.get(slot.index, [])))
+            if rankings.get(slot.index):
+                _push_recent(rankings[slot.index][0].clip_id)
+            continue
+
+        scores = rankings.get(slot.index, [])
+        if len(scores) < 3:
+            new_slot_entries.append((slot, scores))
+            if scores:
+                _push_recent(scores[0].clip_id)
+            continue
+
+        primary_score = scores[0]
+        primary_profile = _profile_for(primary_score)
+        if primary_profile is None:
+            new_slot_entries.append((slot, scores))
+            _push_recent(primary_score.clip_id)
+            continue
+
+        primary_valence = primary_profile.valence
+        candidates = scores[1:]
+
+        # Glimpse past: opposite valence sign, usable duration, not recently used.
+        past_score = None
+        for score in candidates:
+            if _is_recent(score.clip_id):
+                continue
+            profile = _profile_for(score)
+            if profile is None:
+                continue
+            if (primary_valence >= 0 and profile.valence < 0) or (primary_valence < 0 and profile.valence >= 0):
+                if _clip_duration(score.clip_id) >= GLIMPSE_MIN_DURATION_S:
+                    past_score = score
+                    break
+
+        # Glimpse future: matching valence sign, usable duration, not recent, not past.
+        future_score = None
+        for score in candidates:
+            if _is_recent(score.clip_id):
+                continue
+            if past_score and score.clip_id == past_score.clip_id:
+                continue
+            profile = _profile_for(score)
+            if profile is None:
+                continue
+            if (primary_valence >= 0 and profile.valence >= 0) or (primary_valence < 0 and profile.valence < 0):
+                if _clip_duration(score.clip_id) >= GLIMPSE_MIN_DURATION_S:
+                    future_score = score
+                    break
+
+        if past_score is None and future_score is None:
+            new_slot_entries.append((slot, scores))
+            _push_recent(primary_score.clip_id)
+            continue
+
+        # Build micro-slots. Keep total duration equal to the original slot.
+        remaining = slot.duration_s
+        cursor = slot.start_s
+
+        glimpse_count = sum(1 for g in (past_score, future_score) if g is not None)
+        glimpse_budget = min(GLIMPSE_MAX_DURATION_S * glimpse_count, remaining * 0.4)
+        primary_duration = max(GLIMPSE_MIN_DURATION_S, remaining - glimpse_budget)
+
+        primary_slot = slot.model_copy(deep=True)
+        primary_slot.start_s = round(cursor, 3)
+        primary_slot.duration_s = round(primary_duration, 3)
+        primary_slot.is_glimpse = False
+        # Keep full candidate list for dedup pass.
+        new_slot_entries.append((primary_slot, [primary_score] + candidates))
+        _push_recent(primary_score.clip_id)
+        cursor += primary_duration
+        remaining -= primary_duration
+
+        if past_score is not None and remaining > GLIMPSE_MIN_DURATION_S:
+            past_duration = min(GLIMPSE_MAX_DURATION_S, max(GLIMPSE_MIN_DURATION_S, remaining * 0.45))
+            past_slot = slot.model_copy(deep=True)
+            past_slot.start_s = round(cursor, 3)
+            past_slot.duration_s = round(past_duration, 3)
+            past_slot.is_glimpse = True
+            past_slot.story_beat = f"{slot.story_beat}_PAST"
+            new_slot_entries.append((past_slot, [past_score]))
+            _push_recent(past_score.clip_id)
+            cursor += past_duration
+            remaining -= past_duration
+
+        if future_score is not None and remaining > GLIMPSE_MIN_DURATION_S:
+            future_duration = min(GLIMPSE_MAX_DURATION_S, max(GLIMPSE_MIN_DURATION_S, remaining))
+            future_slot = slot.model_copy(deep=True)
+            future_slot.start_s = round(cursor, 3)
+            future_slot.duration_s = round(future_duration, 3)
+            future_slot.is_glimpse = True
+            future_slot.story_beat = f"{slot.story_beat}_FUTURE"
+            new_slot_entries.append((future_slot, [future_score]))
+            _push_recent(future_score.clip_id)
+            cursor += future_duration
+            remaining -= future_duration
+
+        # Absorb any leftover time into the last sub-slot to avoid gaps.
+        if remaining > 0.01 and new_slot_entries:
+            last_sub, last_scores = new_slot_entries[-1]
+            last_sub.duration_s = round(last_sub.duration_s + remaining, 3)
+
+    # Second pass: deduplicate primary sub-slots.  If a primary clip collides
+    # with any clip in the surrounding window, swap it for the next candidate
+    # that is not in the window.
+    def _clip_id_at(idx: int) -> Optional[str]:
+        scores = new_slot_entries[idx][1]
+        return scores[0].clip_id if scores else None
+
+    for idx, (slot, scores) in enumerate(new_slot_entries):
+        if slot.is_glimpse or not scores:
+            continue
+        primary_id = scores[0].clip_id
+        window_ids = {
+            _clip_id_at(j)
+            for j in range(max(0, idx - recent_window), min(len(new_slot_entries), idx + recent_window + 1))
+            if j != idx
+        }
+        window_ids.discard(None)
+        if primary_id in window_ids:
+            for alt in scores[1:]:
+                if alt.clip_id not in window_ids:
+                    new_slot_entries[idx] = (slot, [alt])
+                    break
+
+    # Re-index slots and rebuild rankings with new indices.
+    final_rankings: Dict[int, List[ClipScore]] = {}
+    slots[:] = []
+    for new_idx, (s, scores) in enumerate(new_slot_entries):
+        s.index = new_idx
+        slots.append(s)
+        final_rankings[new_idx] = scores[:1]  # trim primary to top choice
+
+    return final_rankings
 
 
 def select_top_k_per_slot(

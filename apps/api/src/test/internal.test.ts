@@ -346,4 +346,296 @@ describe("Internal Routes", () => {
       expect(res.statusCode).toBe(422);
     });
   });
+
+  describe("Render outcome routes", () => {
+    const RENDER_ID = "fc6b55b4-01cd-431b-808a-35b4f28613e1";
+    const PROJ_ID = "8562dc1a-1493-42ee-ab6e-1075b83c88d6";
+
+    const mockRender = {
+      id: RENDER_ID,
+      projectId: PROJ_ID,
+      userId: "test-user-id",
+      status: "complete",
+    };
+
+    it("POST /api/renders/:jobId/outcomes records an implicit worker event", async () => {
+      vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(mockRender as any);
+      vi.mocked(db.insert).mockReturnValueOnce({
+        values: vi.fn().mockReturnValueOnce({
+          onConflictDoUpdate: vi.fn().mockResolvedValueOnce(undefined),
+        }),
+      } as any);
+
+      const app = await buildApp();
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/renders/${RENDER_ID}/outcomes`,
+        payload: { exported: true, inferredQualityScore: 0.85 },
+        headers: { "x-internal-token": TOKEN },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body).ok).toBe(true);
+    });
+
+    it("POST /api/renders/:jobId/outcomes rejects without internal token", async () => {
+      const app = await buildApp();
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/renders/${RENDER_ID}/outcomes`,
+        payload: { exported: true },
+      });
+
+      expect(res.statusCode).toBe(401);
+    });
+  });
+
+  describe("Behavior corpus routes", () => {
+    it("GET /api/internal/behavior-corpus lists public + user entries", async () => {
+      vi.mocked(db.query.behaviorCorpusEntries.findMany).mockResolvedValueOnce([
+        { id: "entry-1", qualityWeight: 0.9 },
+      ] as any);
+
+      const app = await buildApp();
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/internal/behavior-corpus?userId=550e8400-e29b-41d4-a716-446655440000",
+        headers: { "x-internal-token": TOKEN },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body).entries).toHaveLength(1);
+    });
+
+    it("POST /api/internal/behavior-corpus creates an entry", async () => {
+      vi.mocked(db.query.behaviorCorpusEntries.findMany).mockResolvedValueOnce([]);
+      vi.mocked(db.insert).mockReturnValueOnce({
+        values: vi.fn().mockReturnValueOnce({
+          returning: vi.fn().mockResolvedValueOnce([{ id: "entry-1", status: "active" }]),
+        }),
+      } as any);
+
+      const app = await buildApp();
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/internal/behavior-corpus",
+        payload: {
+          signals: { clip_count: 3 },
+          behavior: { cut_density_per_sec: 0.2 },
+          qualityWeight: 0.8,
+          userId: "550e8400-e29b-41d4-a716-446655440000",
+        },
+        headers: { "x-internal-token": TOKEN },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.entry.id).toBe("entry-1");
+      expect(body.entry.status).toBe("active");
+    });
+
+    it("POST /api/internal/behavior-corpus rejects entries over weekly cap", async () => {
+      vi.mocked(db.select).mockReturnValueOnce({
+        from: vi.fn().mockReturnValueOnce({
+          where: vi.fn().mockResolvedValueOnce([{ value: 10 }]),
+        }),
+      } as any);
+
+      const app = await buildApp();
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/internal/behavior-corpus",
+        payload: {
+          signals: { clip_count: 3 },
+          behavior: { cut_density_per_sec: 0.2 },
+          qualityWeight: 0.8,
+          userId: "550e8400-e29b-41d4-a716-446655440000",
+        },
+        headers: { "x-internal-token": TOKEN },
+      });
+
+      expect(res.statusCode).toBe(429);
+      expect(JSON.parse(res.body).code).toBe("CORPUS_CAP_EXCEEDED");
+    });
+
+    it("POST /api/internal/behavior-corpus quarantines anomalous entries", async () => {
+      vi.mocked(db.query.behaviorCorpusEntries.findMany).mockResolvedValueOnce(
+        Array.from({ length: 20 }, (_, i) => ({
+          signals: { clip_count: 5 + i * 0.1 },
+        })) as any,
+      );
+      vi.mocked(db.insert).mockReturnValueOnce({
+        values: vi.fn().mockReturnValueOnce({
+          returning: vi.fn().mockResolvedValueOnce([{ id: "entry-q", status: "quarantined" }]),
+        }),
+      } as any);
+
+      const app = await buildApp();
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/internal/behavior-corpus",
+        payload: {
+          signals: { clip_count: 500 },
+          behavior: { cut_density_per_sec: 0.2 },
+          qualityWeight: 0.8,
+          userId: "550e8400-e29b-41d4-a716-446655440000",
+        },
+        headers: { "x-internal-token": TOKEN },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.entry.id).toBe("entry-q");
+      expect(body.entry.status).toBe("quarantined");
+    });
+  });
+
+  describe("Corpus ingestion route", () => {
+    const RENDER_ID = "fc6b55b4-01cd-431b-808a-35b4f28613e1";
+    const PROJ_ID = "8562dc1a-1493-42ee-ab6e-1075b83c88d6";
+    const USER_ID = "550e8400-e29b-41d4-a716-446655440000";
+    const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+    const mockRender = (completedAt: Date) => ({
+      id: RENDER_ID,
+      projectId: PROJ_ID,
+      userId: USER_ID,
+      status: "complete",
+      completedAt,
+    });
+
+    const mockSignals = { id: "signals-1", renderId: RENDER_ID, signals: { clip_count: 3 } };
+    const mockBehavior = { id: "behavior-1", renderId: RENDER_ID, cut_density_per_sec: 0.2 };
+    const mockProfile = { id: "profile-1", userId: USER_ID, contributeToGlobalCorpus: true };
+
+    it("POST /api/internal/renders/:renderId/ingest-to-corpus finalizes and ingests after 7 days", async () => {
+      vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(
+        mockRender(new Date(Date.now() - 8 * MS_PER_DAY)) as any,
+      );
+      vi.mocked(db.query.renderSignals.findFirst).mockResolvedValueOnce(mockSignals as any);
+      vi.mocked(db.query.renderBehavior.findFirst).mockResolvedValueOnce(mockBehavior as any);
+      vi.mocked(db.query.renderOutcomes.findFirst).mockResolvedValueOnce(undefined);
+      vi.mocked(db.query.userTasteProfiles.findFirst).mockResolvedValueOnce(mockProfile as any);
+      vi.mocked(db.query.behaviorCorpusEntries.findMany).mockResolvedValueOnce([]);
+
+      // First insert finalizes the outcome; second insert creates the corpus entry.
+      vi.mocked(db.insert)
+        .mockReturnValueOnce({
+          values: vi.fn().mockReturnValueOnce({
+            onConflictDoUpdate: vi.fn().mockResolvedValueOnce(undefined),
+          }),
+        } as any)
+        .mockReturnValueOnce({
+          values: vi.fn().mockReturnValueOnce({
+            returning: vi.fn().mockResolvedValueOnce([{ id: "entry-1", status: "active" }]),
+          }),
+        } as any);
+
+      const app = await buildApp();
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/internal/renders/${RENDER_ID}/ingest-to-corpus`,
+        payload: { qualityWeight: 0.8 },
+        headers: { "x-internal-token": TOKEN },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body).entry.id).toBe("entry-1");
+    });
+
+    it("POST /api/internal/renders/:renderId/ingest-to-corpus rejects before the 7-day window closes", async () => {
+      vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(
+        mockRender(new Date(Date.now() - MS_PER_DAY)) as any,
+      );
+      vi.mocked(db.query.renderSignals.findFirst).mockResolvedValueOnce(mockSignals as any);
+      vi.mocked(db.query.renderBehavior.findFirst).mockResolvedValueOnce(mockBehavior as any);
+      vi.mocked(db.query.renderOutcomes.findFirst).mockResolvedValueOnce({ isFinalized: false } as any);
+
+      const app = await buildApp();
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/internal/renders/${RENDER_ID}/ingest-to-corpus`,
+        payload: { qualityWeight: 0.8 },
+        headers: { "x-internal-token": TOKEN },
+      });
+
+      expect(res.statusCode).toBe(425);
+      expect(JSON.parse(res.body).code).toBe("OUTCOME_WINDOW_OPEN");
+    });
+
+    it("POST /api/internal/renders/:renderId/ingest-to-corpus skips excluded projects", async () => {
+      vi.mocked(db.query.renders.findFirst).mockResolvedValueOnce(
+        mockRender(new Date(Date.now() - 8 * MS_PER_DAY)) as any,
+      );
+      vi.mocked(db.query.renderSignals.findFirst).mockResolvedValueOnce(mockSignals as any);
+      vi.mocked(db.query.renderBehavior.findFirst).mockResolvedValueOnce(mockBehavior as any);
+      vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce({ excludeFromLearning: true } as any);
+
+      const app = await buildApp();
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/internal/renders/${RENDER_ID}/ingest-to-corpus`,
+        payload: { qualityWeight: 0.8 },
+        headers: { "x-internal-token": TOKEN },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.excluded).toBe(true);
+      expect(body.ok).toBe(true);
+    });
+  });
+
+  describe("User taste profile routes", () => {
+    const USER_ID = "550e8400-e29b-41d4-a716-446655440000";
+
+    it("GET /api/internal/user-taste-profiles/:userId creates a default profile if missing", async () => {
+      vi.mocked(db.query.userTasteProfiles.findFirst).mockResolvedValueOnce(undefined);
+      vi.mocked(db.insert).mockReturnValueOnce({
+        values: vi.fn().mockReturnValueOnce({
+          returning: vi.fn().mockResolvedValueOnce([{ id: "profile-1", userId: USER_ID }]),
+        }),
+      } as any);
+
+      const app = await buildApp();
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/internal/user-taste-profiles/${USER_ID}`,
+        headers: { "x-internal-token": TOKEN },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.body).profile.userId).toBe(USER_ID);
+    });
+
+    it("PUT /api/internal/user-taste-profiles/:userId/bias merges bias deltas", async () => {
+      vi.mocked(db.query.userTasteProfiles.findFirst).mockResolvedValueOnce({
+        id: "profile-1",
+        userId: USER_ID,
+        clusterBiasVectors: { general: { cut_density_per_sec: 0.1 } },
+        profileConfidence: 0.1,
+      } as any);
+      vi.mocked(db.update).mockReturnValueOnce({
+        set: vi.fn().mockReturnValueOnce({
+          where: vi.fn().mockReturnValueOnce({
+            returning: vi.fn().mockResolvedValueOnce([{ id: "profile-1" }]),
+          }),
+        }),
+      } as any);
+
+      const app = await buildApp();
+      const res = await app.inject({
+        method: "PUT",
+        url: `/api/internal/user-taste-profiles/${USER_ID}/bias`,
+        payload: {
+          cluster: "general",
+          biasVector: { cut_density_per_sec: 0.05 },
+          profileConfidenceDelta: 0.1,
+        },
+        headers: { "x-internal-token": TOKEN },
+      });
+
+      expect(res.statusCode).toBe(200);
+    });
+  });
 });

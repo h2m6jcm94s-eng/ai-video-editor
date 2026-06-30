@@ -6,9 +6,23 @@ from typing import List, Optional, Literal, Any, Dict
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 
+from shared_py.feature_tracer import FeaturePathReport
+
 
 TextZLayer = Literal["on_top", "behind_subject"]
 TextDensity = Literal["low", "medium", "high"]
+
+EmotionLabel = Literal[
+    "joy",
+    "calm",
+    "intrigue",
+    "tension",
+    "grief",
+    "triumph",
+    "fear",
+    "anger",
+    "awe",
+]
 
 
 class BaseModelCamel(BaseModel):
@@ -17,6 +31,44 @@ class BaseModelCamel(BaseModel):
         populate_by_name=True,
         from_attributes=True,
     )
+
+
+class EmotionSample(BaseModelCamel):
+    """A single emotion measurement at a point in time."""
+
+    t_s: float
+    primary_emotion: EmotionLabel = "calm"
+    valence: float = Field(default=0.0, ge=-1.0, le=1.0)
+    arousal: float = Field(default=0.0, ge=0.0, le=1.0)
+    dominance: float = Field(default=0.0, ge=0.0, le=1.0)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class ClipEmotionProfile(BaseModelCamel):
+    """Fused emotion profile for a user clip.
+
+    Used by the narrative arc ranker to match clips to arc beats.
+    """
+
+    primary_emotion: EmotionLabel = "calm"
+    valence: float = Field(default=0.0, ge=-1.0, le=1.0)
+    arousal: float = Field(default=0.0, ge=0.0, le=1.0)
+    dominance: float = Field(default=0.0, ge=0.0, le=1.0)
+    face_emotion_distribution: Dict[str, float] = Field(default_factory=dict)
+    audio_prosody_emotion: EmotionLabel = "calm"
+    audio_prosody_arousal: float = Field(default=0.0, ge=0.0, le=1.0)
+    color_warmth: float = Field(default=0.0, ge=-1.0, le=1.0)
+    motion_vibe: float = Field(default=0.0, ge=0.0, le=1.0)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    timeline: List[EmotionSample] = Field(default_factory=list)
+
+    def to_vector(self) -> List[float]:
+        """Return a fixed-length vector usable for cosine-similarity scoring."""
+        order = ["joy", "calm", "intrigue", "tension", "grief", "triumph", "fear", "anger", "awe"]
+        return (
+            [self.face_emotion_distribution.get(k, 0.0) for k in order]
+            + [self.valence, self.arousal, self.dominance]
+        )
 
 
 class ClipIdentityInfo(BaseModelCamel):
@@ -180,10 +232,17 @@ class Slot(BaseModelCamel):
     text_z_layer: TextZLayer = "on_top"
     text_density: TextDensity = "medium"
     kinetic_text: Optional[str] = None
+    kinetic_text_style: Optional[str] = None
+    kinetic_text_color: Optional[str] = None
     effects: List[Effect] = Field(default_factory=list)
     source_window_start_s: Optional[float] = None
     anticipation_offset_s: float = 0.0
     heatmap_score: Optional[float] = None
+    story_beat: Optional[str] = None
+    arc_beat_emotion_target: Optional[EmotionLabel] = None
+    arc_beat_preferred_shots: List[str] = Field(default_factory=list)
+    is_glimpse: bool = False
+    emotion_match_score: float = 0.0
 
 
 class Overlay(BaseModelCamel):
@@ -234,6 +293,9 @@ class CutList(BaseModelCamel):
     overlays: List[Overlay] = Field(default_factory=list)
     subtitles: List[Subtitle] = Field(default_factory=list)
     audio_tracks: List[AudioTrack] = Field(default_factory=list)
+    feature_runtime_report: List[FeaturePathReport] = Field(default_factory=list)
+    real_path_ratio: float = 0.0
+    demo_grade: bool = False
 
 
 class ShotBoundary(BaseModelCamel):
@@ -369,6 +431,105 @@ class StyleGenome(BaseModelCamel):
     extracted_at: str = Field(default_factory=_utc_now_iso)
 
 
+class BehaviorVector(BaseModelCamel):
+    """Continuous output parameters that drive cutlist generation and audio policy.
+
+    This model is intentionally minimal for Phase 1 and will grow as adaptive
+    features are added. All values are normalized and unit-agnostic where
+    possible so the same interface can be served by heuristics, KNN, or an MLP.
+    """
+
+    # Cut rhythm
+    cut_density_per_sec: float = Field(default=0.16, ge=0.01, le=2.0)
+    slot_duration_mean_s: float = Field(default=2.5, ge=0.25, le=30.0)
+    slot_duration_std_s: float = Field(default=0.8, ge=0.0, le=10.0)
+
+    # Audio policy (placeholders; wired in PR-2)
+    clip_audio_inclusion_strategy: str = "speech_only"
+    clip_audio_min_importance: float = Field(default=0.3, ge=0.0, le=1.0)
+    sfx_mute_aggressiveness: float = Field(default=0.3, ge=0.0, le=1.0)
+    song_background_mode: str = "ambient"
+
+    # Transition / effects (placeholders; expanded later)
+    hard_cut_ratio: float = Field(default=0.7, ge=0.0, le=1.0)
+    duck_aggressiveness: float = Field(default=0.5, ge=0.0, le=1.0)
+    text_density_per_sec: float = Field(default=0.0, ge=0.0, le=5.0)
+    effect_intensity: float = Field(default=0.5, ge=0.0, le=1.0)
+
+    @classmethod
+    def default_for_music_video(cls) -> "BehaviorVector":
+        return cls(
+            cut_density_per_sec=0.16,
+            slot_duration_mean_s=2.5,
+            slot_duration_std_s=0.8,
+            clip_audio_inclusion_strategy="iconic_only",
+            clip_audio_min_importance=0.85,
+            sfx_mute_aggressiveness=0.9,
+            song_background_mode="dominant",
+            hard_cut_ratio=0.7,
+            duck_aggressiveness=0.5,
+            text_density_per_sec=0.0,
+            effect_intensity=0.6,
+        )
+
+    @classmethod
+    def default_for_speech_forward(cls) -> "BehaviorVector":
+        return cls(
+            cut_density_per_sec=0.08,
+            slot_duration_mean_s=4.0,
+            slot_duration_std_s=1.2,
+            clip_audio_inclusion_strategy="speech_only",
+            clip_audio_min_importance=0.3,
+            sfx_mute_aggressiveness=0.95,
+            song_background_mode="ambient",
+            hard_cut_ratio=0.8,
+            duck_aggressiveness=0.9,
+            text_density_per_sec=0.0,
+            effect_intensity=0.3,
+        )
+
+
+class AdaptiveFeatures(BaseModelCamel):
+    """Independent toggles for adaptive features. Each is safe to disable."""
+
+    use_adaptive_slot_density: bool = True
+    use_adaptive_audio_policy: bool = False
+    use_iconic_quote_detection: bool = False
+    use_emotion_led_cuts: bool = False
+    use_corpus_knn: bool = False
+    use_per_user_bias: bool = False
+
+
+class ContentSignals(BaseModelCamel):
+    """Continuous measurements extracted from project content.
+
+    Expanded in PR-A1 to include the signal dimensions required by the universal
+    feature-gating helper. Missing fields default to zero/false so telemetry
+    records written before this PR still validate.
+    """
+
+    speech_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    avg_speech_segment_duration_s: float = Field(default=0.0, ge=0.0)
+    multi_speaker_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    song_present: bool = False
+    song_has_vocals: bool = False
+    song_energy_mean: float = Field(default=0.5, ge=0.0, le=1.0)
+    song_tempo_bpm: float = Field(default=120.0, ge=20.0, le=300.0)
+    song_section_count: int = Field(default=0, ge=0)
+    clip_count: int = Field(default=0, ge=0)
+    clip_avg_duration_s: float = Field(default=0.0, ge=0.0)
+    motion_density: float = Field(default=0.5, ge=0.0, le=1.0)
+    motion_variance: float = Field(default=0.0, ge=0.0, le=1.0)
+    aesthetic_score_mean: float = Field(default=0.0, ge=0.0, le=1.0)
+    face_screentime_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    multi_face_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    shot_diversity: float = Field(default=0.0, ge=0.0, le=1.0)
+    screen_capture: bool = False
+    reference_present: bool = False
+    reference_color_variance: float = Field(default=0.0, ge=0.0, le=1.0)
+    reference_genome_hash: Optional[str] = None
+
+
 class ClipScore(BaseModelCamel):
     clip_id: str
     semantic_score: float = 0.0
@@ -382,6 +543,9 @@ class ClipScore(BaseModelCamel):
     diversity_penalty: float = 0.0
     repetition_penalty: float = 0.0
     total_score: float = 0.0
+    emotion_match_score: float = 0.0
+    arc_beat_name: Optional[str] = None
+    emotion_profile: Optional[ClipEmotionProfile] = None
 
 
 class RenderConfig(BaseModelCamel):

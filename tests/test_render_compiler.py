@@ -902,7 +902,9 @@ class TestAudioFilterV2:
     def test_no_dialogue_returns_music_only(self, tmp_path):
         slot, mix = self._make_slot(0, 0.0, 5.0, has_dialogue=False)
         filt = _build_audio_filter_v2([slot], 1, [], [mix], str(tmp_path))
-        assert "[music]anull[a_out]" in filt
+        assert "acompressor" in filt
+        assert "alimiter" in filt
+        assert "[a_out]" in filt
         assert "sidechaincompress" not in filt
 
     def test_single_dialogue_has_sidechain(self, tmp_path):

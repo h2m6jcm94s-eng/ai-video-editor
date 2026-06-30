@@ -21,7 +21,9 @@ test.describe("Smoke — Upload Clip", () => {
     await page.locator("input#upload-clip").setInputFiles(fixturePath);
 
     const assetRow = page.locator('[data-testid^="asset-"]').first();
-    await assetRow.waitFor({ state: "visible", timeout: 30000 });
+    // On mobile the media panel can be collapsed, so only require the row to
+    // exist in the DOM (not necessarily be visible) before checking its state.
+    await assetRow.waitFor({ state: "attached", timeout: 30000 });
     await expect(assetRow).toHaveAttribute("data-state", "ingested", { timeout: 60000 });
 
     const projectRes = await request.get(`http://localhost:4000/api/projects/${projectId}`);

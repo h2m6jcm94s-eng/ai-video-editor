@@ -10,6 +10,7 @@ from shared_py.worker_runner import run_worker
 
 from style_worker.activities import (
     analyze_motion,
+    analyze_reference_activity,
     classify_shot_transitions,
     cleanup_style_assets,
     detect_text_overlays,
@@ -27,6 +28,7 @@ async def main() -> None:
         workflows=[AnalyzeStyleWorkflow, AnalyzeGenomeWorkflow],
         activities=[
             download_reference_video,
+            analyze_reference_activity,
             extract_lut,
             detect_text_overlays,
             analyze_motion,

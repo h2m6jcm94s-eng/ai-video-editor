@@ -306,6 +306,34 @@ async def complete_render(render_id: str, output_asset_id: str, completion_token
 
 
 @activity.defn
+async def record_render_outcome_activity(render_id: str, outcome_patch: dict) -> dict:
+    """Record an implicit outcome event (exported, downloaded, abandoned, etc.)."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{settings.api_base}/renders/{render_id}/outcomes",
+            json=outcome_patch,
+            headers=_internal_headers(),
+            timeout=30,
+        )
+    resp.raise_for_status()
+    return {"ok": True}
+
+
+@activity.defn
+async def ingest_render_to_corpus(render_id: str, quality_weight: float = 0.5) -> dict:
+    """Trigger corpus ingestion for a completed render."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{settings.api_base}/internal/renders/{render_id}/ingest-to-corpus",
+            json={"qualityWeight": quality_weight},
+            headers=_internal_headers(),
+            timeout=30,
+        )
+    resp.raise_for_status()
+    return resp.json()
+
+
+@activity.defn
 async def cleanup_render_assets(local_paths: Dict[str, str], output_path: Optional[str] = None) -> None:
     """Remove downloaded source assets and the rendered output from the local filesystem."""
     for path in list(local_paths.values()):

@@ -9,10 +9,12 @@ from typing import Dict, List, Optional
 import httpx
 from shared_py.config import settings
 from shared_py.logging_config import StructuredLogger
-from shared_py.models import BeatGrid, CutList, ShotBoundary
+from shared_py.models import BeatGrid, CutList, ShotBoundary, AdaptiveFeatures, BehaviorVector, ClipEmotionProfile
 from shared_py.storage import download_asset
 from temporalio import activity
 
+from reason_worker.behavior_corpus import ingest_render_to_corpus
+from reason_worker.behavior_engine import BehaviorEngine
 from reason_worker.clip_rank import compute_confidence, rank_clips_for_slots
 from reason_worker.cutlist_gen import generate_cutlist
 from reason_worker.transition_select import select_xfade
@@ -132,6 +134,7 @@ async def generate_cutlist_activity(
     style_tier: str = "full_remix",
     song_asset_id: Optional[str] = None,
     clip_asset_ids: Optional[List[str]] = None,
+    options: Optional[dict] = None,
 ) -> dict:
     """Generate a cutlist from beats, shots, and style analysis."""
     beat_grid = BeatGrid(**beat_grid_raw)
@@ -149,6 +152,11 @@ async def generate_cutlist_activity(
     ]
     style_analysis = style_analysis or {}
 
+    options = options or {}
+    features = AdaptiveFeatures(**{k: v for k, v in (options.get("adaptiveFeatures") or {}).items()})
+    behavior_raw = options.get("behaviorVector")
+    behavior = BehaviorVector(**behavior_raw) if behavior_raw else None
+
     cutlist = generate_cutlist(
         beat_grid,
         shot_boundaries,
@@ -159,8 +167,13 @@ async def generate_cutlist_activity(
         style_tier=style_tier,
         song_asset_id=song_asset_id,
         user_clip_count=len(clip_asset_ids) if clip_asset_ids else None,
+        behavior=behavior,
+        features=features,
     )
-    return cutlist.model_dump(by_alias=True)
+    return {
+        "cutlist": cutlist.model_dump(by_alias=True),
+        "behavior": behavior.model_dump(by_alias=True) if behavior else BehaviorVector().model_dump(by_alias=True),
+    }
 
 
 @activity.defn
@@ -185,6 +198,7 @@ async def rank_clips_activity(
 
     # Ensure every clip has a metadata entry with sensible defaults.
     populated_metadata: Dict[str, dict] = {}
+    clip_emotion_profiles: Dict[str, ClipEmotionProfile] = {}
     for clip_id in clip_asset_ids:
         meta = clip_metadata.get(clip_id) or {}
         populated_metadata[clip_id] = {
@@ -194,13 +208,22 @@ async def rank_clips_activity(
             "duration_sec": meta.get("durationSec") or meta.get("duration_sec") or 5.0,
             "heatmap": meta.get("heatmap") or [],
         }
+        emotion_raw = meta.get("emotionProfile") or meta.get("emotion_profile")
+        if emotion_raw:
+            try:
+                clip_emotion_profiles[clip_id] = ClipEmotionProfile.model_validate(emotion_raw)
+            except Exception:
+                logger.warning("Invalid emotion_profile for clip %s", clip_id)
 
+    has_arc_slots = any(s.story_beat for s in cutlist.slots)
     rankings = rank_clips_for_slots(
         cutlist.slots,
         populated_metadata,
         fallback_policy=fallback_policy,
         clip_order_fallback=clip_order_fallback,
         clip_order_smart_threshold=clip_order_smart_threshold,
+        clip_emotion_profiles=clip_emotion_profiles or None,
+        interleave_glimpses=has_arc_slots and bool(clip_emotion_profiles),
     )
 
     confidences = compute_confidence(rankings)
@@ -230,6 +253,7 @@ async def rank_clips_activity(
                 slot.source_window_start_s = top.window_start_s
             if top.window_score is not None:
                 slot.heatmap_score = top.window_score
+            slot.emotion_match_score = top.emotion_match_score
             selected_motions[slot.index] = top.dominant_motion
 
     # Second pass: direction-aware transition selection using outgoing motion from
@@ -263,6 +287,72 @@ async def save_generated_cutlist(
         )
     resp.raise_for_status()
     return resp.json()
+
+
+@activity.defn
+async def save_render_signals_activity(
+    render_id: str,
+    signals: dict,
+) -> dict:
+    """Persist content signals for a render."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{settings.api_base}/renders/{render_id}/signals",
+            json={"signals": signals},
+            headers=_internal_headers(),
+        )
+        resp.raise_for_status()
+    return {"ok": True}
+
+
+@activity.defn
+async def save_render_behavior_activity(
+    render_id: str,
+    behavior: dict,
+    predictor_version: str = "heuristic-v1",
+    predictor_confidence: float = 0.5,
+    predictor_reasoning: Optional[dict] = None,
+) -> dict:
+    """Persist the behavior vector applied to a render."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{settings.api_base}/renders/{render_id}/behavior",
+            json={
+                "behavior": behavior,
+                "predictorVersion": predictor_version,
+                "predictorConfidence": predictor_confidence,
+                "predictorReasoning": predictor_reasoning or {"source": "heuristic"},
+            },
+            headers=_internal_headers(),
+        )
+        resp.raise_for_status()
+    return {"ok": True}
+
+
+@activity.defn
+async def predict_behavior_activity(
+    signals: dict,
+    user_id: str,
+    features_raw: Optional[dict] = None,
+    reference_genome: Optional[dict] = None,
+) -> dict:
+    """Predict a BehaviorVector + confidence + reasoning from signals/corpus."""
+    features = AdaptiveFeatures(**(features_raw or {}))
+    engine = BehaviorEngine()
+    behavior, confidence, reasoning = await engine.predict(
+        signals, user_id, features, reference_genome
+    )
+    return {
+        "behavior": behavior.model_dump(by_alias=True),
+        "predictorConfidence": confidence,
+        "predictorReasoning": reasoning,
+    }
+
+
+@activity.defn
+async def ingest_render_to_corpus_activity(render_id: str, quality_weight: float = 0.5) -> dict:
+    """Ingest a render's signals + behavior into the behavior corpus."""
+    return await ingest_render_to_corpus(render_id, quality_weight)
 
 
 @activity.defn

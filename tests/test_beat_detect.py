@@ -176,7 +176,7 @@ class TestDetectBeats:
             beat_detect_module, "decode_to_wav", lambda p: calls.append(("decode", p)) or wav_path
         )
         monkeypatch.setattr(
-            beat_detect_module, "detect_beats_allin1", lambda p: calls.append(("allin1", p)) or None
+            beat_detect_module, "detect_beats_madmom", lambda p: calls.append(("madmom", p)) or None
         )
 
         def fake_librosa(p):
@@ -193,6 +193,22 @@ class TestDetectBeats:
         result = beat_detect_module.detect_beats("song.mp3")
         assert result.bpm == 100.0
         assert ("librosa", wav_path) in calls
+        assert not os.path.exists(wav_path)
+
+    def test_synthetic_fallback_when_all_detectors_fail(self, monkeypatch, tmp_path):
+        wav_path = str(tmp_path / "decoded.wav")
+        open(wav_path, "w").close()
+
+        calls = []
+        monkeypatch.setattr(
+            beat_detect_module, "decode_to_wav", lambda p: calls.append(("decode", p)) or wav_path
+        )
+        monkeypatch.setattr(beat_detect_module, "detect_beats_madmom", lambda p: None)
+        monkeypatch.setattr(beat_detect_module, "_HAS_LIBROSA", False)
+
+        result = beat_detect_module.detect_beats("song.mp3")
+        assert result.bpm == 120.0
+        assert len(result.beats) > 0
         assert not os.path.exists(wav_path)
 
 

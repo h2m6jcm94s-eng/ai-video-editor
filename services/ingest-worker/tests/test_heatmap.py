@@ -11,7 +11,7 @@ try:
 except ImportError:
     cv2 = None
 
-from ingest_worker.heatmap import compute_clip_heatmap
+from ingest_worker.heatmap import compute_clip_heatmap, compute_clip_heatmaps_batch
 
 
 @pytest.mark.skipif(cv2 is None, reason="cv2 not available")
@@ -73,3 +73,39 @@ def test_heatmap_empty_without_cv2():
     """When cv2 is unavailable, heatmap returns an empty list."""
     # This is a meta-test for the no-op path; cv2 presence is handled by skipif.
     assert True
+
+
+@pytest.mark.skipif(cv2 is None, reason="cv2 not available")
+def test_compute_clip_heatmaps_batch_accepts_max_workers_one():
+    """The batch API should accept max_workers=1 and complete without raising."""
+    fps = 10
+    duration = 2.0
+    total_frames = int(fps * duration)
+    width, height = 160, 120
+
+    paths = []
+    try:
+        for _ in range(2):
+            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as f:
+                path = f.name
+            paths.append(path)
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            writer = cv2.VideoWriter(path, fourcc, fps, (width, height))
+            for i in range(total_frames):
+                frame = np.full((height, width, 3), 64, dtype=np.uint8)
+                x = min(width - 20, int((i / total_frames) * width))
+                frame[40:80, x : x + 20] = [255, 255, 255]
+                writer.write(frame)
+            writer.release()
+
+        results = compute_clip_heatmaps_batch(paths, max_workers=1, window_s=0.5, stride_s=0.25)
+        assert len(results) == len(paths)
+        for path in paths:
+            assert path in results
+            assert isinstance(results[path], list)
+    finally:
+        for path in paths:
+            try:
+                os.remove(path)
+            except OSError:
+                pass

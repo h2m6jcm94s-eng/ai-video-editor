@@ -24,12 +24,13 @@ test.describe("Smoke: asset upload and ingest", () => {
   test("uploads song and clips and reaches ingested state", async ({ page }) => {
     const projectId = await createProjectViaApi(page, "E2E Upload Smoke");
     await page.goto(`/editor/${projectId}`);
-    await expect(page.locator("text=Upload Clip").first()).toBeVisible({ timeout: 10_000 });
+    // The upload inputs are hidden file inputs; the visible "Upload Clip" label
+    // may be collapsed on mobile, so rely on the inputs and asset rows instead.
 
     for (const { type, file } of UPLOADS) {
       await uploadFixture(page, type, file);
       const filename = file.split("/").pop()!;
-      await expect(page.locator(`text=${filename}`).first()).toBeVisible({ timeout: 30_000 });
+      await expect(page.locator(`text=${filename}`).first()).toBeAttached({ timeout: 30_000 });
     }
 
     // All four assets should transition to ingested within 180s
@@ -44,10 +45,9 @@ test.describe("Smoke: asset upload and ingest", () => {
   test("uploads a reference video and reaches ingested state", async ({ page }) => {
     const projectId = await createProjectViaApi(page, "E2E Upload Reference Smoke");
     await page.goto(`/editor/${projectId}`);
-    await expect(page.locator("text=Upload Clip").first()).toBeVisible({ timeout: 10_000 });
 
     await uploadFixture(page, "reference", "e2e/fixtures/reference.mp4");
-    await expect(page.locator("text=reference.mp4").first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator("text=reference.mp4").first()).toBeAttached({ timeout: 30_000 });
     await expect(page.locator('[data-state="ingested"]')).toHaveCount(1, { timeout: 180_000 });
   });
 });

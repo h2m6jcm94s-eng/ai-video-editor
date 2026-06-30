@@ -31,7 +31,7 @@ export default function RootLayout({
             <AmbientBackground />
             <div className="relative">
               {children}
-              <div className="fixed top-4 right-4 z-50">
+              <div className="fixed top-4 right-4 z-50 pointer-events-none">
                 <div className="glass rounded-full p-1.5">
                   <NotificationBell />
                 </div>

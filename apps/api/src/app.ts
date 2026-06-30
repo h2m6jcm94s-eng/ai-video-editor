@@ -7,6 +7,8 @@ import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";
 import Fastify from "fastify";
+import fs from "fs";
+import path from "path";
 import { sendError } from "./lib/errors";
 import { buildRequestContext, generateRequestId, getLoggerConfig } from "./lib/logger";
 import {
@@ -30,6 +32,7 @@ import { projectRoutes } from "./routes/projects";
 import { renderRoutes } from "./routes/renders";
 import { segmentRoutes } from "./routes/segments";
 import { settingsRoutes } from "./routes/settings";
+import { tasteRoutes } from "./routes/taste";
 import { templateRoutes } from "./routes/templates";
 import { uploadRoutes } from "./routes/uploads";
 import { recordMetric } from "./services/anomaly";
@@ -135,6 +138,23 @@ export async function buildApp() {
   await app.register(internalRoutes);
   await app.register(logRoutes);
 
+  // Serve files from the configured local storage root. This makes local-disk
+  // assets accessible to the web frontend without needing presigned R2 URLs.
+  app.get("/storage/*", async (request, reply) => {
+    const key = (request.params as Record<string, string>)["*"];
+    const storageRoot = process.env.STORAGE_ROOT || "E:\\ai-video-editor-storage";
+    const resolvedRoot = path.resolve(storageRoot);
+    const filePath = path.resolve(path.join(resolvedRoot, key));
+
+    if (filePath !== resolvedRoot && !filePath.startsWith(resolvedRoot + path.sep)) {
+      return reply.status(403).send({ error: "Forbidden" });
+    }
+    if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+      return reply.status(404).send({ error: "Not found" });
+    }
+    return reply.send(fs.createReadStream(filePath));
+  });
+
   app.addHook("onRequest", async (request, reply) => {
     if (request.url === "/api/health" || request.url.startsWith("/api/health/")) {
       return;
@@ -160,6 +180,7 @@ export async function buildApp() {
   await app.register(templateRoutes, { prefix: "/api/templates" });
   await app.register(presenceRoutes, { prefix: "/api/presence" });
   await app.register(settingsRoutes, { prefix: "/api/settings" });
+  await app.register(tasteRoutes, { prefix: "/api/user-taste-profile" });
   await app.register(notificationRoutes, { prefix: "/api/notifications" });
   await app.register(adminRoutes, { prefix: "/api/admin" });
   await app.register(anomalyRoutes, { prefix: "/api/anomalies" });

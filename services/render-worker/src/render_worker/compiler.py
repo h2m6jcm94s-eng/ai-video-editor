@@ -7,11 +7,15 @@ import os
 import shutil
 import tempfile
 import subprocess
+import threading
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional, Dict, NamedTuple
 from shared_py.models import CutList, Slot, RenderConfig, AudioTrack, Overlay
 from shared_py.tuning import COMPILER
+from shared_py.logging_config import StructuredLogger
+
+logger = StructuredLogger("render_worker.compiler")
 
 
 # Ordered from least to most capability. Used for tier-gating warnings only in M1.
@@ -22,6 +26,66 @@ STYLE_TIERS = ("cuts_only", "color_grade", "with_text", "with_effects", "full_re
 PRESET_DIMENSIONS = COMPILER.PRESET_DIMENSIONS
 QUALITY_PROFILES = COMPILER.QUALITY_PROFILES
 ASPECT_RATIO_DIMENSIONS = COMPILER.ASPECT_RATIO_DIMENSIONS
+
+# Telemetry counter for slots that fall back to deterministic rotation because the
+# ranker did not provide a source_window_start_s.
+_slot_window_fallback_count = 0
+_slot_window_fallback_lock = threading.Lock()
+
+# Bundled cinematic font directory. Fonts are downloaded by the setup script or
+# manually by the operator. The compiler prefers these over system fonts so text
+# renders consistently across machines.
+_BUNDLED_FONT_DIR = os.environ.get(
+    "AVE_FONT_DIR", "E:/ai-video-editor-storage/fonts/display"
+)
+
+# Canonical display font filenames (all SIL Open Font License or freely usable).
+_FONT_FILES = {
+    "Anton": "Anton-Regular.ttf",
+    "Bebas Neue": "BebasNeue-Regular.ttf",
+    "Cinzel": "Cinzel-Black.ttf",
+    "Oswald": "Oswald-Bold.ttf",
+    "Rajdhani": "Rajdhani-Bold.ttf",
+    "Russo One": "RussoOne-Regular.ttf",
+    "Teko": "Teko-Bold.ttf",
+    "Montserrat": "Montserrat-Black.ttf",
+    "Playfair Display": "PlayfairDisplay-Black.ttf",
+    "League Spartan": "LeagueSpartan-Black.ttf",
+}
+
+# Map kinetic-text style presets to preferred font families.
+_STYLE_PRESET_FONTS = {
+    "anime_impact": ["Anton", "Bebas Neue", "Russo One"],
+    "trailer_block": ["Bebas Neue", "Anton", "Oswald"],
+    "stamp_white": ["Anton", "Bebas Neue"],
+    "cinematic_serif": ["Cinzel", "Playfair Display"],
+    "lowercase_intimate": ["Playfair Display", "Cinzel"],
+    "neon_glitch": ["Rajdhani", "Teko", "League Spartan"],
+    "handwritten_pen": ["League Spartan", "Rajdhani"],
+}
+
+# Map common Overlay.font names to bundled families.
+_FONT_NAME_ALIASES = {
+    "Inter": "Montserrat",
+    "Arial": "Anton",
+    "Helvetica": "Oswald",
+    "serif": "Cinzel",
+    "sans-serif": "Montserrat",
+    "display": "Anton",
+}
+
+
+def get_slot_window_fallback_count() -> int:
+    """Return the number of slot window fallbacks since the last reset."""
+    with _slot_window_fallback_lock:
+        return _slot_window_fallback_count
+
+
+def reset_slot_window_fallback_count() -> None:
+    """Reset the slot window fallback counter."""
+    global _slot_window_fallback_count
+    with _slot_window_fallback_lock:
+        _slot_window_fallback_count = 0
 
 
 def resolve_render_dimensions(export_preset: Optional[str], aspect_ratio: Optional[str]) -> tuple[int, int]:
@@ -233,9 +297,95 @@ def _warn_if_below(style_tier: str, required_tier: str, feature: str) -> None:
         )
 
 
-def _find_font() -> str:
-    """Find a suitable system font for drawtext, cross-platform."""
-    candidates = [
+def _copy_font_to_temp(temp_dir: str, family_or_preset: str) -> str:
+    """Copy a resolved font into the render temp dir and return its basename."""
+    path = _find_font(family_or_preset)
+    if not path:
+        return ""
+    base = os.path.basename(path)
+    local = os.path.join(temp_dir, base)
+    if not os.path.exists(local):
+        try:
+            shutil.copy2(path, local)
+        except Exception as exc:
+            logger.warning("failed_to_copy_font", path=path, error=str(exc))
+            return ""
+    return base
+
+
+def _build_font_map(temp_dir: str, cutlist: CutList) -> Dict[str, str]:
+    """Copy all fonts referenced by the cutlist into temp_dir and map keys.
+
+    Keys are Overlay.font values, kinetic-text style presets, and the empty
+    string for the default font. Values are relative font filenames safe for
+    FFmpeg on Windows (no colons, no backslashes).
+    """
+    font_map: Dict[str, str] = {}
+
+    # Default font.
+    default = _copy_font_to_temp(temp_dir, "")
+    if default:
+        font_map[""] = default
+
+    # Kinetic text styles and in-slot text effects.
+    for slot in cutlist.slots:
+        style = getattr(slot, "kinetic_text_style", None) or ""
+        if style and style not in font_map:
+            copied = _copy_font_to_temp(temp_dir, style)
+            if copied:
+                font_map[style] = copied
+        for effect in slot.effects or []:
+            if effect.type in ("text_kinetic", "lower_third", "callout_arrow"):
+                font = _get_param(effect.params or {}, "font", "")
+                if font and font not in font_map:
+                    copied = _copy_font_to_temp(temp_dir, font)
+                    if copied:
+                        font_map[font] = copied
+
+    # Existing overlays.
+    for overlay in (cutlist.overlays or []):
+        font = overlay.font or ""
+        if font and font not in font_map:
+            copied = _copy_font_to_temp(temp_dir, font)
+            if copied:
+                font_map[font] = copied
+
+    return font_map
+
+
+def _find_font(family_or_preset: str = "") -> str:
+    """Find a font file for the given family or style preset.
+
+    Prefer bundled cinematic fonts, then fall back to system fonts. Returns an
+    empty string if nothing usable is found.
+    """
+    family_or_preset = (family_or_preset or "").strip()
+
+    # Resolve aliases like "Inter" -> bundled family.
+    aliased = _FONT_NAME_ALIASES.get(family_or_preset)
+    if aliased:
+        family_or_preset = aliased
+
+    candidates: List[str] = []
+    if family_or_preset in _STYLE_PRESET_FONTS:
+        candidates = _STYLE_PRESET_FONTS[family_or_preset]
+    elif family_or_preset in _FONT_FILES:
+        candidates = [family_or_preset]
+
+    # Try bundled fonts first.
+    if os.path.isdir(_BUNDLED_FONT_DIR):
+        for name in candidates:
+            path = os.path.join(_BUNDLED_FONT_DIR, _FONT_FILES[name])
+            if os.path.exists(path):
+                return path
+        # If no specific mapping matched, return any available bundled font.
+        for name in ("Anton", "Bebas Neue", "Montserrat", "Oswald"):
+            path = os.path.join(_BUNDLED_FONT_DIR, _FONT_FILES[name])
+            if os.path.exists(path):
+                return path
+
+    # System fallback.
+    system_candidates = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
         "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
@@ -246,7 +396,7 @@ def _find_font() -> str:
         "C:\\Windows\\Fonts\\calibri.ttf",
         "C:\\Windows\\Fonts\\verdana.ttf",
     ]
-    for f in candidates:
+    for f in system_candidates:
         if os.path.exists(f):
             return f
     return ""
@@ -444,8 +594,15 @@ def _drawtext_filter(
     color: str,
     stroke: str,
     fontfile: str,
+    animation: str = "none",
+    fps: float = 30.0,
 ) -> str:
-    """Build a drawtext filter string for an in-slot text effect."""
+    """Build a drawtext filter string with cinematic font + animation support.
+
+    Returns the drawtext clause (without input/output labels) so it can be
+    inserted into filter_complex chains for in-slot effects, overlays, or the
+    layered text background.
+    """
     x_expr = "(w-text_w)/2"
     y_expr = "(h-text_h)/2"
     if position == "top":
@@ -467,24 +624,75 @@ def _drawtext_filter(
 
     font_clause = f"fontfile={fontfile}:" if fontfile else ""
     enable = _enable_expr(start_s, end_s)
+
+    # Cinematic outline + soft drop shadow.
+    style_clause = (
+        f"borderw=8:bordercolor={stroke}:"
+        f"shadowcolor=black@0.5:shadowx=4:shadowy=4"
+    )
+
+    animation = (animation or "none").lower()
+    fontsize_expr = str(font_size_px)
+    alpha_expr = ""
+    x_anim_expr = x_expr
+
+    if animation in ("pop", "scale"):
+        # FFmpeg's drawtext fontsize expression crashes when spawned from Python
+        # on this Windows build, so we approximate scale with a fast alpha fade-in.
+        frames = 3 if animation == "pop" else 6
+        dur = max(0.001, frames / fps)
+        alpha_expr = f"if(lt(t\\,{start_s})\\,0\\,if(lt(t\\,{start_s}+{dur})\\,(t-{start_s})/{dur}\\,1))"
+    elif animation == "fade":
+        dur = max(0.001, 10 / fps)
+        alpha_expr = f"if(lt(t\\,{start_s})\\,0\\,if(lt(t\\,{start_s}+{dur})\\,(t-{start_s})/{dur}\\,1))"
+    elif animation == "typewriter":
+        # Progressive reveal approximated as an alpha sweep over 12 frames.
+        dur = max(0.001, 12 / fps)
+        alpha_expr = f"if(lt(t\\,{start_s})\\,0\\,if(lt(t\\,{start_s}+{dur})\\,(t-{start_s})/{dur}\\,1))"
+    elif animation == "smash":
+        # Fade out over the last 2 frames (size expression avoided due to crash).
+        fade_dur = max(0.001, 2 / fps)
+        alpha_expr = f"if(lt(t\\,{end_s}-{fade_dur})\\,1\\,({end_s}-t)/{fade_dur})"
+    elif animation == "glitch":
+        # Random x offset bursts every 200ms.
+        x_anim_expr = f"{x_expr}+if(between(mod(t*1000\\,200)\\,0\\,100)\\,random(1)*20-10\\,0)"
+    elif animation == "bold_bounce":
+        # Fontsize expression is unstable from Python subprocess; use alpha pulse.
+        alpha_expr = f"0.75+0.25*sin(t*8)"
+
+    alpha_clause = f"alpha='{alpha_expr}':" if alpha_expr else ""
+
     return (
         f"drawtext=text='{_esc_text(text)}':"
-        f"x={x_expr}:y={y_expr}:"
-        f"fontsize={font_size_px}:"
+        f"x={x_anim_expr}:y={y_expr}:"
+        f"fontsize={fontsize_expr}:"
         f"fontcolor={color}:"
+        f"{alpha_clause}"
         f"{font_clause}"
-        f"borderw=2:bordercolor={stroke}:"
+        f"{style_clause}:"
         f"enable='{enable}'"
     )
+
+
+def _speed_ramp_factor(slot: Slot) -> float:
+    """Return average playback speed factor from a speed_ramp effect, or 1.0."""
+    for effect in slot.effects or []:
+        if effect.type == "speed_ramp":
+            params = effect.params or {}
+            start = float(_get_param(params, "start_speed", 1.0))
+            end = float(_get_param(params, "end_speed", 1.0))
+            return max(0.25, min(4.0, (start + end) / 2.0))
+    return 1.0
 
 
 def _apply_video_effects(
     slot: Slot,
     base_vf: str,
     temp_dir: str,
-    relative_font: str,
+    font_map: Dict[str, str],
     config: RenderConfig,
     style_tier: str = "full_remix",
+    speed_factor: float = 1.0,
 ) -> str:
     """Apply video effects to a slot's filter chain.
 
@@ -493,6 +701,11 @@ def _apply_video_effects(
     a relative window for timeline-enabled filters.
     """
     filters = [base_vf] if base_vf else []
+
+    # Apply uniform speed scaling immediately after scaling/padding so that all
+    # subsequent effect timings are relative to the final (scaled) slot timeline.
+    if speed_factor != 1.0:
+        filters.append(f"setpts=PTS/{speed_factor}")
 
     if _tier_index(style_tier) < _tier_index("with_effects"):
         if slot.effects:
@@ -589,12 +802,20 @@ def _apply_video_effects(
 
         elif etype in ("text_kinetic", "lower_third", "callout_arrow"):
             text = _get_param(params, "text", "")
-            if not text or not relative_font:
+            if not text:
                 continue
             position = "bottom" if etype == "lower_third" else _get_param(params, "position", "center")
             font_size_px = _get_param(params, "font_size_px", 42)
             color = _get_param(params, "color", "#FFFFFF")
             stroke = _get_param(params, "stroke", "#000000")
+            animation = _get_param(params, "animation", "pop")
+            font_key = _get_param(params, "font", "")
+            fontfile = font_map.get(font_key, font_map.get("", ""))
+            if not fontfile:
+                # Last-resort fallback to any available bundled/system font.
+                fallback = _find_font(font_key or "")
+                if fallback:
+                    fontfile = _copy_font_to_temp(temp_dir, font_key or "")
             # Render text via drawtext directly into the segment filter chain.
             # This keeps text locked to the slot; full-cutlist overlays are still
             # rendered in Stage 2 for global text elements.
@@ -607,7 +828,9 @@ def _apply_video_effects(
                     font_size_px=font_size_px,
                     color=color,
                     stroke=stroke,
-                    fontfile=relative_font,
+                    fontfile=fontfile,
+                    animation=animation,
+                    fps=config.fps or 30.0,
                 )
             )
 
@@ -619,11 +842,8 @@ def _apply_video_effects(
             )
 
         elif etype == "speed_ramp":
-            warnings.warn(
-                f"speed_ramp effect on slot {slot.index} is not yet rendered; "
-                "it requires non-linear time-remapping to preserve timeline duration.",
-                stacklevel=3,
-            )
+            # Time-remapping was already applied to the base stream above.
+            pass
 
         elif etype in ("whoosh_sfx", "ding_sfx", "record_scratch_sfx"):
             warnings.warn(
@@ -777,10 +997,15 @@ def _build_audio_filter(
         parts.append(
             f"{''.join(final_inputs)}"
             f"amix=inputs={len(final_inputs)}:duration=longest:normalize=0,"
-            f"acompressor=threshold=-12dB:ratio=4:attack=5:release=50[amixed]"
+            f"acompressor=threshold=-14dB:ratio=3:attack=5:release=50,"
+            f"alimiter=level_in=1:level_out=1:limit=0.95[amixed]"
         )
     elif final_inputs:
-        parts.append(f"{final_inputs[0]}anull[amixed]")
+        parts.append(
+            f"{final_inputs[0]}"
+            f"acompressor=threshold=-14dB:ratio=3:attack=5:release=50,"
+            f"alimiter=level_in=1:level_out=1:limit=0.95[amixed]"
+        )
     return ";".join(parts), next_idx, extra_inputs
 
 
@@ -918,6 +1143,7 @@ def _build_audio_filter_v2(
         parts.append(
             "[music_ducked][dlg_mix]"
             "amix=inputs=2:duration=longest:weights='1.0 1.3':normalize=0"
+            ",acompressor=threshold=-14dB:ratio=3:attack=5:release=50"
             ",alimiter=level_in=1:level_out=1:limit=0.95"
             "[a_out]"
         )
@@ -945,7 +1171,12 @@ def _build_audio_filter_v2(
         mix_labels.append(mix_label)
 
     if not mix_labels:
-        parts.append("[music]anull[a_out]")
+        parts.append(
+            "[music]"
+            "acompressor=threshold=-14dB:ratio=3:attack=5:release=50,"
+            "alimiter=level_in=1:level_out=1:limit=0.95"
+            "[a_out]"
+        )
         return ";".join(parts)
 
     # 3. Sum gated dialogue streams for the sidechain key (no normalization).
@@ -980,10 +1211,12 @@ def _build_audio_filter_v2(
         "[music_ducked]"
     )
 
-    # 6. Final mix with dialogue slightly boosted over the ducked bed.
+    # 6. Final mix with dialogue slightly boosted over the ducked bed,
+    #    followed by a master compressor + brick-wall limiter.
     parts.append(
         "[music_ducked][dlg_mix]"
         "amix=inputs=2:duration=longest:weights='1.0 1.3':normalize=0"
+        ",acompressor=threshold=-14dB:ratio=3:attack=5:release=50"
         ",alimiter=level_in=1:level_out=1:limit=0.95"
         "[a_out]"
     )
@@ -1002,7 +1235,7 @@ def _has_nvenc() -> bool:
 
 def _extract_segment(args) -> Optional[dict]:
     """Extract and optionally mask/layer a single slot segment."""
-    slot, clip_path, scaled_duration, config, temp_dir, relative_font, style_tier, kinetic_overlays = args
+    slot, clip_path, scaled_duration, config, temp_dir, font_map, style_tier, kinetic_overlays = args
     segment_path = os.path.join(temp_dir, f"slot_{slot.index:03d}.mp4")
 
     # If the ranker did not pick a source window, deterministically rotate the
@@ -1011,6 +1244,15 @@ def _extract_segment(args) -> Optional[dict]:
     if slot.source_window_start_s is not None:
         base_start = float(slot.source_window_start_s)
     else:
+        global _slot_window_fallback_count
+        with _slot_window_fallback_lock:
+            _slot_window_fallback_count += 1
+        logger.warning(
+            "slot_window_fallback",
+            slot_index=slot.index,
+            clip_id=getattr(slot, "selected_clip_id", None),
+            reason="source_window_start_s is None; rotating seek point",
+        )
         clip_duration = _probe_duration(clip_path)
         safe_max_start = max(0.0, clip_duration - scaled_duration - 0.5)
         if safe_max_start > 0:
@@ -1021,10 +1263,31 @@ def _extract_segment(args) -> Optional[dict]:
     anticipation = float(getattr(slot, "anticipation_offset_s", 0.0) or 0.0)
     start = max(0.0, base_start + anticipation)
     clip_duration = _probe_duration(clip_path)
-    duration = min(scaled_duration, max(0.0, clip_duration - start))
+
+    # Speed ramps consume more source time when speeding up and less when slowing
+    # down, but the rendered slot duration stays fixed to the beat grid. Clamp the
+    # speed factor to the amount of source footage actually available so we never
+    # produce a freeze-frame tail.
+    speed_factor = _speed_ramp_factor(slot)
+    if scaled_duration > 0:
+        max_available_speed = max(0.25, (clip_duration - start) / scaled_duration)
+        if speed_factor > max_available_speed:
+            logger.warning(
+                "speed_ramp_clamped",
+                slot_index=slot.index,
+                requested_speed=speed_factor,
+                available_speed=max_available_speed,
+                clip_duration=clip_duration,
+                start=start,
+                scaled_duration=scaled_duration,
+            )
+            speed_factor = max(1.0, max_available_speed * 0.95)
+    source_duration = scaled_duration * speed_factor
+
+    duration = min(source_duration, max(0.0, clip_duration - start))
     if duration < 0.1:
-        start = max(0.0, clip_duration - scaled_duration)
-        duration = min(scaled_duration, max(0.0, clip_duration - start))
+        start = max(0.0, clip_duration - source_duration)
+        duration = min(source_duration, max(0.0, clip_duration - start))
     if duration < 0.1:
         return None
 
@@ -1033,7 +1296,10 @@ def _extract_segment(args) -> Optional[dict]:
         f"scale={config.width}:{config.height}:force_original_aspect_ratio=decrease,"
         f"pad={config.width}:{config.height}:(ow-iw)/2:(oh-ih)/2"
     )
-    vf = _apply_video_effects(slot, base_vf, temp_dir, relative_font, config, style_tier=style_tier)
+    vf = _apply_video_effects(
+        slot, base_vf, temp_dir, font_map, config,
+        style_tier=style_tier, speed_factor=speed_factor,
+    )
 
     encode_args = _segment_video_args(config)
     input_prefix = ["-hwaccel", "cuda"] if config.use_hwaccel else []
@@ -1049,7 +1315,8 @@ def _extract_segment(args) -> Optional[dict]:
     ]
     try:
         _run_ffmpeg(cmd, f"segment extraction for slot {slot.index}", cwd=temp_dir)
-    except RuntimeError:
+    except RuntimeError as exc:
+        err_text = str(exc)
         if config.use_hwaccel:
             warnings.warn(
                 f"Hardware decode failed for slot {slot.index}; retrying with software decode.",
@@ -1065,6 +1332,29 @@ def _extract_segment(args) -> Optional[dict]:
                 segment_path,
             ]
             _run_ffmpeg(cmd, f"segment extraction for slot {slot.index}", cwd=temp_dir)
+        elif config.use_nvenc and ("Cannot allocate memory" in err_text or "4294967284" in err_text):
+            warnings.warn(
+                f"NVENC segment extraction failed for slot {slot.index} with memory error; "
+                "retrying with software encoder.",
+                stacklevel=2,
+            )
+            software_encode_args = [
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-crf", str(config.video_crf),
+                "-pix_fmt", config.pix_fmt,
+                "-an",
+            ]
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(start),
+                "-t", str(duration),
+                "-i", clip_path,
+                "-vf", vf,
+                *software_encode_args,
+                segment_path,
+            ]
+            _run_ffmpeg(cmd, f"segment extraction for slot {slot.index} (software fallback)", cwd=temp_dir)
         else:
             raise
 
@@ -1093,21 +1383,32 @@ def _extract_segment(args) -> Optional[dict]:
                 slot,
                 config,
                 temp_dir,
-                relative_font,
+                font_map,
                 animation="bold_bounce",
             )
             segment_path = layered_path
         elif kinetic_overlays is not None:
+            color = getattr(slot, "kinetic_text_color", None) or "#FFFFFF"
+            style = getattr(slot, "kinetic_text_style", None) or "anime_impact"
+            animation = "pop"
+            if style in ("anime_impact", "stamp_white"):
+                animation = "scale"
+            elif style in ("neon_glitch",):
+                animation = "glitch"
+            elif style in ("cinematic_serif", "lowercase_intimate"):
+                animation = "fade"
+            elif style in ("trailer_block", "handwritten_pen"):
+                animation = "typewriter"
             kinetic_overlays.append(Overlay(
                 text=slot.kinetic_text,
                 start_s=slot.start_s,
                 end_s=slot.start_s + slot.duration_s,
                 position="center",
-                font="Inter",
+                font=style,
                 font_size_px=64,
-                color="#FFFFFF",
+                color=color,
                 stroke="#000000",
-                animation="pop",
+                animation=animation,
             ))
 
     return {
@@ -1161,7 +1462,7 @@ def _render_layered_text(
     slot: Slot,
     config: RenderConfig,
     temp_dir: str,
-    relative_font: str,
+    font_map: Dict[str, str],
     animation: str = "bold_bounce",
 ) -> None:
     """Composite kinetic text behind a masked subject.
@@ -1175,14 +1476,21 @@ def _render_layered_text(
     fps = config.fps or 30.0
     duration = _probe_duration(segment_path) or slot.duration_s or 1.0
 
-    if animation == "bold_bounce":
-        fontsize_expr = "48 + 24 * sin(t * 8)"
-    else:
-        fontsize_expr = "64"
-
-    font_clause = f"fontfile={relative_font}:" if relative_font else ""
-    enable = _enable_expr(0.0, duration)
-    text = _esc_text(slot.kinetic_text or "")
+    style = getattr(slot, "kinetic_text_style", None) or "anime_impact"
+    fontfile = font_map.get(style, font_map.get("", ""))
+    color = getattr(slot, "kinetic_text_color", None) or "#FFFFFF"
+    text_filter = _drawtext_filter(
+        text=slot.kinetic_text or "",
+        start_s=0.0,
+        end_s=duration,
+        position="center",
+        font_size_px=64,
+        color=color,
+        stroke="#000000",
+        fontfile=fontfile,
+        animation=animation,
+        fps=fps,
+    )
 
     filter_complex = (
         f"[1:v]format=gray,"
@@ -1190,13 +1498,7 @@ def _render_layered_text(
         f"setsar=1[mask];"
         f"[0:v][mask]alphamerge[fg];"
         f"color=c=black:s={width}x{height}:r={fps}[bg];"
-        f"[bg]drawtext=text='{text}':"
-        f"x=(w-text_w)/2:y=(h-text_h)/2:"
-        f"fontsize={fontsize_expr}:"
-        f"fontcolor=white:"
-        f"{font_clause}"
-        f"borderw=2:bordercolor=black:"
-        f"enable='{enable}'[textbg];"
+        f"[bg]{text_filter}[textbg];"
         f"[textbg][fg]overlay=0:0:shortest=1:format=auto[out]"
     )
 
@@ -1211,6 +1513,164 @@ def _render_layered_text(
         output_path,
     ]
     _run_ffmpeg(cmd, f"layered kinetic text for slot {slot.index}", cwd=temp_dir)
+
+
+class _MergeNode(NamedTuple):
+    """A node in the binary video-merge tree.
+
+    ``timeline_duration`` is the node's length in the final output (sum of slot
+    durations minus transition overlaps). ``media_duration`` is the actual video
+    file length; for leaf nodes this is the extracted segment duration, which is
+    intentionally longer than the slot to provide overlap frames for xfade.
+    """
+
+    path: str
+    timeline_duration: float
+    media_duration: float
+    first_slot: Slot
+    last_slot: Slot
+
+
+def _transition_name_for_pair(left_slot: Slot, right_slot: Slot, enable_effects: bool) -> str:
+    """Return the xfade transition name, or 'hard_cut' for no transition."""
+    if not enable_effects:
+        return "hard_cut"
+    if getattr(left_slot, "transition_out", None) == "hard_cut":
+        return "hard_cut"
+    return XFADE_MAP.get(getattr(left_slot, "transition_out", None), "fade")
+
+
+def _merge_two_video_nodes(
+    left: _MergeNode,
+    right: _MergeNode,
+    actual_durations: Dict[int, float],
+    temp_dir: str,
+    config: RenderConfig,
+    merge_index: int,
+    enable_effects: bool,
+) -> _MergeNode:
+    """Concatenate or xfade two intermediate videos using only two inputs.
+
+    Keeping each merge to two inputs prevents FFmpeg from opening dozens of
+    decoder contexts at once, which exhausts memory on Windows when 100+ slots
+    are chained in a single filter graph.
+    """
+    transition = _transition_name_for_pair(left.last_slot, right.first_slot, enable_effects)
+    out_path = os.path.join(temp_dir, f"merge_{merge_index:04d}.mp4")
+    out_path_rel = os.path.basename(out_path)
+
+    if transition == "hard_cut":
+        xfade_duration = 0.0
+        filter_complex = (
+            "[0:v]setpts=PTS-STARTPTS[a];"
+            "[1:v]setpts=PTS-STARTPTS[b];"
+            "[a][b]concat=n=2:v=1:a=0[outv]"
+        )
+    else:
+        # xfade duration is limited by the actual media lengths of the two
+        # bordering slots, but the transition is anchored to the *timeline*
+        # boundary so slots do not drift.
+        left_dur = actual_durations[left.last_slot.index]
+        right_dur = actual_durations[right.first_slot.index]
+        xfade_duration = min(0.3, left_dur * 0.5, right_dur * 0.5)
+        offset = max(0.0, left.timeline_duration - xfade_duration)
+        filter_complex = (
+            "[0:v]setpts=PTS-STARTPTS[a];"
+            "[1:v]setpts=PTS-STARTPTS[b];"
+            f"[a][b]xfade=transition={transition}:duration={xfade_duration:.3f}:offset={offset:.3f}[outv]"
+        )
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", left.path,
+        "-i", right.path,
+        "-filter_complex", filter_complex,
+        "-map", "[outv]",
+        "-an",
+        *_video_encode_args(config),
+        "-movflags", "+faststart",
+        out_path_rel,
+    ]
+    _run_ffmpeg(cmd, f"video merge {merge_index}", cwd=temp_dir)
+
+    merged_timeline_duration = left.timeline_duration + right.timeline_duration - xfade_duration
+    merged_media_duration = _probe_duration(out_path) or merged_timeline_duration
+    return _MergeNode(
+        path=out_path_rel,
+        timeline_duration=merged_timeline_duration,
+        media_duration=merged_media_duration,
+        first_slot=left.first_slot,
+        last_slot=right.last_slot,
+    )
+
+
+def _build_overlay_filter_parts(
+    current_label: str,
+    current_duration: float,
+    cutlist: CutList,
+    font_map: Dict[str, str],
+    relative_lut: str,
+    enable_text: bool,
+    enable_color_grade: bool,
+    fps: float = 30.0,
+) -> List[str]:
+    """Build drawtext/LUT filter strings on a single input label."""
+    filter_parts: List[str] = []
+
+    if relative_lut and enable_color_grade:
+        lut_label = f"{current_label}_lut"
+        filter_parts.append(
+            f"[{current_label}]format=rgb24,lut3d=file={relative_lut}:interp=tetrahedral[{lut_label}]"
+        )
+        current_label = lut_label
+
+    for overlay in (cutlist.overlays if enable_text else []):
+        start_s = round(max(0.0, overlay.start_s), 3)
+        end_s = round(min(overlay.end_s, current_duration - 0.05), 3)
+        if start_s >= current_duration or end_s <= start_s:
+            continue
+
+        text_label = f"text_{start_s}"
+        relative_font = font_map.get(overlay.font or "")
+        drawtext = _drawtext_filter(
+            text=overlay.text,
+            start_s=start_s,
+            end_s=end_s,
+            position=overlay.position or "center",
+            font_size_px=overlay.font_size_px or 48,
+            color=overlay.color or "#FFFFFF",
+            stroke=overlay.stroke or "#000000",
+            fontfile=relative_font or "",
+            animation=overlay.animation or "none",
+            fps=fps,
+        )
+        filter_parts.append(f"[{current_label}]{drawtext}[{text_label}]")
+        current_label = text_label
+
+    for subtitle in (cutlist.subtitles if enable_text else []):
+        start_s = round(max(0.0, subtitle.start_s), 3)
+        end_s = round(min(subtitle.end_s, current_duration - 0.05), 3)
+        if start_s >= current_duration or end_s <= start_s or not subtitle.text.strip():
+            continue
+
+        sub_label = f"sub_{subtitle.id}_{start_s:.0f}"
+        relative_font = font_map.get("")
+        drawtext = _drawtext_filter(
+            text=subtitle.text,
+            start_s=start_s,
+            end_s=end_s,
+            position="bottom",
+            font_size_px=48,
+            color="#FFFFFF",
+            stroke="#000000",
+            fontfile=relative_font or "",
+            animation="none",
+            fps=fps,
+        )
+        filter_parts.append(f"[{current_label}]{drawtext}[{sub_label}]")
+        current_label = sub_label
+
+    return filter_parts, current_label
 
 
 def compile_timeline(
@@ -1265,15 +1725,10 @@ def compile_timeline(
     }
 
     try:
-        # Copy the system font and LUT into the render temp dir up-front so both
+        # Copy all referenced fonts into the render temp dir up-front so both
         # per-slot text effects (Stage 1) and global overlays/LUT (Stage 2) can
         # reference them with relative, colon-free paths on Windows.
-        fontfile = _find_font()
-        relative_font = ""
-        if fontfile and os.path.exists(fontfile):
-            local_font = os.path.join(temp_dir, "font.ttf")
-            shutil.copy2(fontfile, local_font)
-            relative_font = "font.ttf"
+        font_map = _build_font_map(temp_dir, cutlist)
 
         relative_lut = ""
         if config.lut_path:
@@ -1297,11 +1752,15 @@ def compile_timeline(
                 raise ValueError(f"Slot {slot.index} has negative start_s: {slot.start_s}")
             clip_path = sanitized_clip_paths[clip_id]
             scaled_duration = scaled_durations.get(slot.index, slot.duration_s)
-            extract_args.append((slot, clip_path, scaled_duration, config, temp_dir, relative_font, style_tier, kinetic_overlays))
+            extract_args.append((slot, clip_path, scaled_duration, config, temp_dir, font_map, style_tier, kinetic_overlays))
 
         workers = max(1, (os.cpu_count() or 1))
-        # Do not oversubscribe the GPU if NVENC is used downstream; cap workers.
-        workers = min(workers, 8)
+        # Keep peak decoder/encoder memory low. With NVENC we open multiple
+        # hardware contexts; on memory-constrained Windows boxes this can fail
+        # with "Cannot allocate memory" during segment extraction.
+        # On this Windows workstation RAM is tight (Ollama + other services
+        # often consume >20 GB). Sequential extraction avoids malloc failures.
+        workers = min(workers, 1 if config.use_nvenc else 2)
         with ThreadPoolExecutor(max_workers=workers) as pool:
             for seg in pool.map(_extract_segment, extract_args):
                 if seg is not None:
@@ -1314,125 +1773,105 @@ def compile_timeline(
         if kinetic_overlays:
             cutlist.overlays = list(cutlist.overlays) + kinetic_overlays
 
-        # Stage 2: Build filter_complex for concatenation + transitions
-        filter_parts = []
+        # Stage 2: merge extracted slot segments into one continuous video.
+        # A single FFmpeg filter graph with 100+ open inputs exhausts memory on
+        # Windows, so we build a binary merge tree: each invocation concatenates
+        # (or xfades) exactly two inputs. This caps peak decoder count at 2 and
+        # limits re-encode generations to ~log2(N).
+        actual_durations = {seg["slot"].index: seg["actual_duration"] for seg in slot_segments}
 
-        for i, _ in enumerate(slot_segments):
-            filter_parts.append(f"[{i}:v]setpts=PTS-STARTPTS[v{i}]")
-
-        current_label = "v0"
-        current_duration = slot_segments[0]["actual_duration"]
-        for i in range(len(slot_segments) - 1):
-            slot = slot_segments[i]["slot"]
-            next_slot = slot_segments[i + 1]["slot"]
-            transition = XFADE_MAP.get(slot.transition_out if enable_effects else "hard_cut", "fade")
-            slot_dur = slot_segments[i]["actual_duration"]
-            next_dur = slot_segments[i + 1]["actual_duration"]
-            xfade_duration = min(0.3, slot_dur * 0.5, next_dur * 0.5)
-            offset = max(0.0, current_duration - xfade_duration)
-
-            out_label = f"vx{i}"
-            filter_parts.append(
-                f"[{current_label}][v{i+1}]xfade=transition={transition}:duration={xfade_duration}:offset={offset}[{out_label}]"
+        nodes: List[_MergeNode] = [
+            _MergeNode(
+                path=os.path.basename(seg["path"]),
+                timeline_duration=seg["slot"].duration_s,
+                media_duration=seg["actual_duration"],
+                first_slot=seg["slot"],
+                last_slot=seg["slot"],
             )
-            current_label = out_label
-            current_duration = current_duration + next_dur - xfade_duration
-
-        # LUT application if available and tier allows it.
-        if relative_lut and enable_color_grade:
-            lut_label = f"{current_label}_lut"
-            filter_parts.append(
-                f"[{current_label}]format=rgb24,lut3d=file={relative_lut}:interp=tetrahedral[{lut_label}]"
-            )
-            current_label = lut_label
-
-        # Text overlays (only when tier allows).
-        for overlay in (cutlist.overlays if enable_text else []):
-            start_s = round(max(0.0, overlay.start_s), 3)
-            end_s = round(min(overlay.end_s, current_duration - 0.05), 3)
-            if start_s >= current_duration or end_s <= start_s:
-                continue
-
-            text_label = f"text_{start_s}"
-            x_expr = "(w-text_w)/2"
-            y_expr = "(h-text_h)/2"
-            if overlay.position == "top":
-                y_expr = "h*0.1"
-            elif overlay.position == "bottom":
-                y_expr = "h*0.9"
-
-            enable_expr = _enable_expr(start_s, end_s)
-
-            filter_parts.append(
-                f"[{current_label}]drawtext=text='{_esc_text(overlay.text)}':"
-                f"x={x_expr}:y={y_expr}:"
-                f"fontsize={overlay.font_size_px}:"
-                f"fontcolor={overlay.color}:"
-                f"{'fontfile=' + relative_font + ':' if relative_font else ''}"
-                f"borderw=2:bordercolor={overlay.stroke or 'black'}:"
-                f"enable='{enable_expr}'[{text_label}]"
-            )
-            current_label = text_label
-
-        # Subtitles (only when tier allows).
-        for subtitle in (cutlist.subtitles if enable_text else []):
-            start_s = round(max(0.0, subtitle.start_s), 3)
-            end_s = round(min(subtitle.end_s, current_duration - 0.05), 3)
-            if start_s >= current_duration or end_s <= start_s or not subtitle.text.strip():
-                continue
-
-            sub_label = f"sub_{subtitle.id}_{start_s:.0f}"
-            enable_expr = _enable_expr(start_s, end_s)
-
-            filter_parts.append(
-                f"[{current_label}]drawtext=text='{_esc_text(subtitle.text)}':"
-                f"x=(w-text_w)/2:y=h*0.85:"
-                f"fontsize=48:"
-                f"fontcolor=#FFFFFF:"
-                f"{'fontfile=' + relative_font + ':' if relative_font else ''}"
-                f"borderw=2:bordercolor=#000000:"
-                f"enable='{enable_expr}'[{sub_label}]"
-            )
-            current_label = sub_label
-
-        # Final output mapping
-        filter_parts.append(f"[{current_label}]format=yuv420p[outv]")
-        final_label = "outv"
-
-        # Cap output at the cutlist's declared duration.
-        duration_cap = cutlist.globals.total_duration_s
-
-        # Build video-only intermediate. Audio is rendered in a separate pass so
-        # the sidechain ducking graph can reference filter outputs without the
-        # FFmpeg limitation that forbids sidechaincompress from using a filtered
-        # stream when video filters are also present in the graph.
-        video_input_args = []
-        for seg in slot_segments:
-            video_input_args.extend(["-i", seg["path"]])
-
-        video_filter_complex = ";".join(filter_parts)
-        video_only_path = os.path.join(temp_dir, "video_only.mp4")
-        video_cmd = [
-            "ffmpeg", "-y",
-            *video_input_args,
-            "-filter_complex", video_filter_complex,
-            "-map", f"[{final_label}]",
-            "-an",
-            *_video_encode_args(config),
-            "-movflags", "+faststart",
+            for seg in slot_segments
         ]
-        if duration_cap and duration_cap > 0:
-            video_cmd.extend(["-t", str(duration_cap)])
-        video_cmd.append(video_only_path)
 
-        try:
-            debug_fc_path = os.path.join(os.getcwd(), "filter_complex_video_debug.txt")
-            with open(debug_fc_path, "w", encoding="utf-8") as f:
-                f.write(video_filter_complex)
-        except Exception:
-            pass
+        merge_counter = 0
+        while len(nodes) > 1:
+            next_nodes: List[_MergeNode] = []
+            for i in range(0, len(nodes), 2):
+                if i + 1 >= len(nodes):
+                    next_nodes.append(nodes[i])
+                    continue
+                merged = _merge_two_video_nodes(
+                    nodes[i],
+                    nodes[i + 1],
+                    actual_durations,
+                    temp_dir,
+                    config,
+                    merge_counter,
+                    enable_effects,
+                )
+                next_nodes.append(merged)
+                merge_counter += 1
+            nodes = next_nodes
 
-        _run_ffmpeg(video_cmd, "video pass", cwd=temp_dir)
+        merged_video_path_rel = nodes[0].path
+        current_duration = nodes[0].timeline_duration
+
+        # Stage 3: apply global LUT, text overlays, and subtitles on a single input.
+        duration_cap = cutlist.globals.total_duration_s
+        video_only_path = os.path.join(temp_dir, "video_only.mp4")
+        video_only_path_rel = os.path.basename(video_only_path)
+
+        filter_parts, final_label = _build_overlay_filter_parts(
+            "v0",
+            current_duration,
+            cutlist,
+            font_map,
+            relative_lut,
+            enable_text,
+            enable_color_grade,
+            fps=config.fps or 30.0,
+        )
+
+        if filter_parts:
+            filter_parts.append(f"[{final_label}]format=yuv420p[outv]")
+            final_label = "outv"
+            video_filter_complex = ";".join(filter_parts)
+            video_cmd = [
+                "ffmpeg", "-y",
+                "-i", merged_video_path_rel,
+                "-filter_complex", video_filter_complex,
+                "-map", f"[{final_label}]",
+                "-an",
+                *_video_encode_args(config),
+                "-movflags", "+faststart",
+            ]
+            if duration_cap and duration_cap > 0:
+                video_cmd.extend(["-t", str(duration_cap)])
+            video_cmd.append(video_only_path_rel)
+
+            try:
+                debug_fc_path = os.path.join(os.getcwd(), "filter_complex_video_debug.txt")
+                with open(debug_fc_path, "w", encoding="utf-8") as f:
+                    f.write(video_filter_complex)
+            except Exception:
+                pass
+
+            _run_ffmpeg(video_cmd, "video pass", cwd=temp_dir)
+        else:
+            # No overlays or LUT: copy the merged result, capping to the
+            # target duration in case a trailing unmerged node is slightly long.
+            if duration_cap and duration_cap > 0 and nodes[0].media_duration > duration_cap + 0.05:
+                trim_cmd = [
+                    "ffmpeg", "-y",
+                    "-i", merged_video_path_rel,
+                    "-t", str(duration_cap),
+                    "-c", "copy",
+                    video_only_path_rel,
+                ]
+                _run_ffmpeg(trim_cmd, "cap video duration", cwd=temp_dir)
+            else:
+                shutil.copy2(
+                    os.path.join(temp_dir, merged_video_path_rel),
+                    video_only_path,
+                )
 
         # Collect audio tracks.
         audio_tracks: List[AudioTrack] = []

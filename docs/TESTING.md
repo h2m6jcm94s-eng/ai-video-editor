@@ -167,35 +167,58 @@ E2E tests live in `e2e/` and are driven by Playwright. They cover the full user 
 
 ### Scenarios
 
-- **Scenario A**: prompt + song only renders a valid 9:16 MP4.
-- **Scenario B**: reference-driven render produces a measurably different cut-list than Scenario A.
+- **Scenario A**: prompt + reference + song + clips renders a valid 9:16 MP4 via the AI prompt-edit flow.
+- **Scenario B**: reference-driven render produces a measurably different cut-list than Scenario A. **Currently skipped** because `AnalyzeStyleWorkflow` deadlocks in the Temporal worker and never produces a cutlist.
+- **Scenario C**: export preset selection renders a 16:9 MP4. The render worker currently outputs `1920×1080` for the YouTube 16:9 preset.
 
 ### Local Runbook
 
-For the full Clerk-free setup used to replicate the `output-A.mp4` / `output-B.mp4` pipeline, see [`docs/runbooks/e2e-clerk-bypass.md`](./runbooks/e2e-clerk-bypass.md).
+For the full Clerk-free setup, see:
+
+- [`docs/runbooks/e2e-clerk-bypass.md`](./runbooks/e2e-clerk-bypass.md) — initial Clerk-free auth setup.
+- [`docs/runbooks/e2e-pipeline-handoff.md`](./runbooks/e2e-pipeline-handoff.md) — detailed handoff for the current pipeline state.
 
 Quick version:
 
 ```bash
-# 1. Start infrastructure
+# 1. Start Docker Desktop, then start infrastructure
 pnpm infra:up
 
-# 2. Start workers in separate terminals
-uv run python -m ingest_worker
-uv run python -m style_worker
-uv run python -m render_worker
-uv run python -m segment_worker  # optional, for mask / identity features
+# 2. Start the dev stack (web + API + shared-types watch)
+pnpm dev
 
-# 3. Run E2E in headed mode
-pnpm e2e:headed
+# 3. Start workers in a separate terminal with MinIO/R2 backend
+cd services/reason-worker
+STORAGE_BACKEND=r2 \
+R2_ENDPOINT_URL=http://localhost:9000 \
+R2_ACCESS_KEY_ID=minioadmin \
+R2_SECRET_ACCESS_KEY=minioadmin \
+R2_BUCKET_NAME=ai-video-editor \
+pnpm workers
 
-# Or headless
-pnpm e2e
+# 4. Run E2E suites
+pnpm e2e --project=chromium -- e2e/specs/pipeline.spec.ts
+pnpm e2e --project=chromium -- e2e/specs/smoke
+pnpm e2e --project=mobile-safari -- e2e/specs/smoke
 ```
+
+### Current results
+
+| Suite | Project | Result |
+|---|---|---|
+| Pipeline | chromium | 3 passed, 1 skipped |
+| Smoke | chromium | 9 passed |
+| Smoke | mobile-safari | 9 passed |
+
+### Known E2E blockers
+
+1. **Scenario B skipped.** Reference-driven generation depends on `AnalyzeStyleWorkflow`, which deadlocks. Refactor style analysis into Temporal activities to re-enable it.
+2. **Export preset dimensions.** The shared-types enum declares YouTube 16:9 as `1280×720`, but the render worker outputs `1920×1080`. The test currently asserts `1920×1080`.
+3. **Guardrails service** is unreachable; the API fails open. This does not block tests but must be fixed for production.
 
 ### Wedge Verdict
 
-Scenario B compares its cut-list against Scenario A using the wedge helper in `e2e/helpers/wedge.ts`. Possible verdicts:
+When Scenario B runs, it compares its cut-list against Scenario A using the wedge helper in `e2e/helpers/wedge.ts`. Possible verdicts:
 
 | Verdict | Meaning |
 |---|---|
