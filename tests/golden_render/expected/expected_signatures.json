@@ -1,0 +1,23 @@
+{
+  "duration_match": { "max": 0.1, "required": true },
+  "real_path_ratio": { "min": 0.95, "required": true },
+  "slot_window_fallback_count": { "max": 0, "required": true },
+  "max_slot_gap": { "max": 0.1, "required": true },
+  "audio_ducking_real": { "required": true },
+  "kinetic_text_real": { "required": true },
+  "captions_real": { "required": true },
+  "speed_ramps_real": { "required": true },
+  "kinetic_text_llm_ratio": { "min": 0.8, "required": true },
+  "no_clip_repeats": { "max": 0, "required": true },
+  "caption_density": { "max": 0.5, "required": true },
+  "no_triton_warnings": { "required": true },
+  "non_system_font": { "max": 0, "required": true },
+  "no_frozen_frames": { "max": 1.0, "required": true },
+  "ssim_vs_previous": { "required": false },
+  "kinetic_text_relevance": { "min": 0.5, "required": true },
+  "arc_beats_detected": { "min": 3, "required": false },
+  "emotion_match_per_slot": { "min": 0.6, "required": false },
+  "interleaved_glimpse_present_in_rising_action": { "required": false },
+  "emotion_profile_cache": { "min": 0.8, "required": false },
+  "kinetic_text_scene_relevance": { "min": 0.75, "required": false }
+}

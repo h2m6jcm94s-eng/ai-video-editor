@@ -17,10 +17,192 @@ from shared_py.ai_providers.factory import get_ai_provider
 from shared_py.config import settings
 from shared_py.logging_config import StructuredLogger
 from shared_py.models import (
-    CutList, CutListGlobals, Slot, Overlay, Effect, BeatGrid, ShotBoundary, SectionMarker, AudioTrack,
+    CutList, CutListGlobals, Slot, Overlay, Effect, BeatGrid, BeatSegment, ShotBoundary, SectionMarker, AudioTrack,
     ZoomPunchInParams, FocusPullParams, FilmGrainParams, VignetteParams,
+    BehaviorVector, AdaptiveFeatures,
 )
-from reason_worker.lyric_overlays import generate_slot_text_overlay
+from reason_worker.kinetic_compose import assign_kinetic_text_to_slots
+from reason_worker.speed_ramps import assign_speed_ramps_to_slots
+from reason_worker.slot_generator import generate_slots_adaptive
+from reason_worker.narrative_arcs import select_arc
+from reason_worker.arc_anchor import map_arc_to_song, anchor_for_time
+
+# Maximum contiguous slot length.  Trailer-style / AMV edits need longer holds
+# (5-8s) than the old 4.0s beat-slot cap; otherwise adaptive-density cuts leave
+# freeze-frame gaps between slots.
+SLOT_DURATION_MAX_S = 8.0
+
+
+def _section_at_time(time_s: float, segments: List[BeatSegment]) -> str:
+    """Return the section label active at ``time_s``."""
+    for seg in segments:
+        if seg.start <= time_s < seg.end:
+            return seg.label
+    if segments and time_s >= segments[-1].end:
+        return segments[-1].label
+    return "verse"
+
+
+def _energy_at_time(time_s: float, energy_curve: List[float], content_end: float) -> float:
+    """Sample the energy curve at ``time_s``."""
+    if not energy_curve or content_end <= 0:
+        return 0.5
+    progress = time_s / content_end
+    energy_idx = min(int(progress * len(energy_curve)), len(energy_curve) - 1)
+    return energy_curve[energy_idx]
+
+
+def _apply_slot_style(
+    slot: Slot,
+    beat_grid: BeatGrid,
+    segments: List[BeatSegment],
+    downbeats: set,
+    shot_pool: List[str],
+    energy_curve: List[float],
+    style_analysis: Dict[str, Any],
+    enable_effects: bool,
+    enable_text: bool,
+    state: Dict[str, Any],
+) -> None:
+    """Fill transitions, effects, shot type, and motion hints for a slot skeleton.
+
+    Mutates ``slot`` in place and updates ``state`` (shot_rotation, slot_count,
+    section_change_beats, max_energy_slot).
+    """
+    beat_time = slot.start_s
+    duration = slot.duration_s
+    content_end = state["content_end"]
+
+    section = _section_at_time(beat_time, segments)
+    next_section = _section_at_time(beat_time + duration, segments)
+    is_section_boundary = section != next_section
+
+    section_change_beats = state.get("section_change_beats", [])
+    if is_section_boundary and (
+        not section_change_beats or section_change_beats[-1]["label"] != next_section
+    ):
+        section_change_beats.append({"label": next_section.upper(), "start_s": beat_time + duration})
+    state["section_change_beats"] = section_change_beats
+
+    energy = _energy_at_time(beat_time, energy_curve, content_end)
+    is_downbeat = round(beat_time, 2) in downbeats
+
+    shot_rotation = state.get("shot_rotation", 0)
+    if energy < 0.3:
+        target = "wide" if "wide" in shot_pool else shot_pool[0]
+    elif energy < 0.6:
+        target = "medium" if "medium" in shot_pool else shot_pool[shot_rotation % len(shot_pool)]
+        shot_rotation += 1
+    elif energy < 0.8:
+        target = (
+            "medium_close_up"
+            if "medium_close_up" in shot_pool
+            else "close_up" if "close_up" in shot_pool else shot_pool[-1]
+        )
+        shot_rotation += 1
+    else:
+        target = "close_up" if "close_up" in shot_pool else shot_pool[-1]
+        shot_rotation += 1
+    state["shot_rotation"] = shot_rotation
+
+    detected_transitions = (
+        style_analysis.get("detectedTransitions")
+        or style_analysis.get("detected_transitions")
+        or []
+    )
+    camera_motions = (
+        style_analysis.get("cameraMotions")
+        or style_analysis.get("camera_motions")
+        or []
+    )
+
+    slot_count = state.get("slot_count", 0)
+
+    transition_in = "hard_cut"
+    if enable_effects and detected_transitions and energy > 0.4:
+        transition_in = detected_transitions[slot_count % len(detected_transitions)]
+
+    transition_out = "hard_cut"
+    if enable_effects:
+        if is_section_boundary and energy > 0.7:
+            transition_out = "flash"
+        elif is_downbeat and energy > 0.6:
+            transition_out = "dissolve"
+        elif detected_transitions and transition_out == "hard_cut" and energy > 0.5:
+            transition_out = detected_transitions[(slot_count + 1) % len(detected_transitions)]
+
+    slot_contains_section_boundary = any(
+        beat_time <= seg.start < beat_time + duration for seg in segments
+    )
+
+    effects = []
+    if enable_effects:
+        if is_downbeat and energy > 0.7:
+            effects.append(
+                Effect(
+                    type="zoom_punch_in",
+                    start_s=beat_time,
+                    duration_s=min(0.3, duration),
+                    params=ZoomPunchInParams(
+                        target_scale=1.25, duration_ms=250, easing="easeOut"
+                    ).model_dump(by_alias=True),
+                )
+            )
+        if energy < 0.4 and duration > 1.5:
+            effects.append(
+                Effect(
+                    type="focus_pull",
+                    start_s=beat_time + duration * 0.2,
+                    duration_s=min(0.8, duration * 0.6),
+                    params=FocusPullParams(target_blur=4.0, duration_ms=600, easing="easeInOut").model_dump(by_alias=True),
+                )
+            )
+        if slot_contains_section_boundary:
+            effects.append(
+                Effect(
+                    type="film_grain",
+                    start_s=beat_time,
+                    duration_s=duration,
+                    params=FilmGrainParams(intensity=0.15).model_dump(by_alias=True),
+                )
+            )
+
+    if camera_motions:
+        motion_hint = camera_motions[slot_count % len(camera_motions)]
+    else:
+        motion_hint = "static" if energy < 0.3 else "handheld" if energy > 0.8 else "gimbal"
+
+    slot.section = section
+    slot.transition_in = transition_in
+    slot.transition_out = transition_out
+    slot.target_shot_type = target
+    slot.subject_hint = f"{section} section, energy {energy:.1f}"
+    slot.motion_hint = motion_hint
+    slot.energy_level = energy
+    slot.effects = effects[:2]
+
+    # Phase 2: annotate slot with narrative arc beat when emotion-led cuts are on.
+    arc_anchors = state.get("arc_anchors")
+    if arc_anchors:
+        anchor = anchor_for_time(arc_anchors, beat_time)
+        if anchor is not None:
+            slot.story_beat = anchor.name
+            slot.arc_beat_emotion_target = anchor.emotion_target
+            slot.arc_beat_preferred_shots = anchor.preferred_shots
+            slot.energy_level = anchor.energy_target
+            slot.subject_hint = f"{anchor.name}: {anchor.text_archetype}"
+            if anchor.preferred_shots:
+                # Prefer the arc's shot request, but keep it in the available pool.
+                pool = [s for s in shot_pool if s in anchor.preferred_shots]
+                if pool:
+                    slot.target_shot_type = pool[state["shot_rotation"] % len(pool)]
+                    state["shot_rotation"] = state.get("shot_rotation", 0) + 1
+
+    max_energy_slot = state.get("max_energy_slot")
+    if max_energy_slot is None or energy > max_energy_slot.energy_level:
+        state["max_energy_slot"] = slot
+
+    state["slot_count"] = slot_count + 1
 
 logger = StructuredLogger("reason_worker.cutlist_gen")
 
@@ -224,16 +406,40 @@ def _snap_slots_to_shots_and_beats(
 
         # Extend the slot to fill the available contiguous region up to the next
         # slot or content end, but keep it at least one beat long and no longer
-        # than 4.0s. We no longer truncate at reference shot boundaries because
-        # that produces too many tiny slots when beats and shots interleave.
+        # than SLOT_DURATION_MAX_S. We no longer truncate at reference shot
+        # boundaries because that produces too many tiny slots when beats and
+        # shots interleave.
         available = max_end - slot.start_s
+        prev_end = (
+            slots[i - 1].start_s + slots[i - 1].duration_s
+            if i > 0
+            else 0.0
+        )
         if available <= 1e-4:
             # Slot has no room; give it a minimal beat-long window if possible.
             slot.duration_s = round(min(beat_interval, content_end - slot.start_s), 3)
         else:
-            duration = max(beat_interval, min(available, 4.0))
-            duration = min(duration, available)
-            slot.duration_s = round(duration, 3)
+            if available <= SLOT_DURATION_MAX_S:
+                # Contiguous region fits inside the cap; just fill it.
+                duration = available
+            else:
+                # The gap to the next slot is larger than the cap. Try to hold
+                # the last SLOT_DURATION_MAX_S seconds so the slot ends exactly
+                # on the next cut. If that would leave a large empty gap before
+                # this slot, fill the whole gap forward instead — a long clip is
+                # better than a freeze-frame.
+                shifted_start = next_start - SLOT_DURATION_MAX_S
+                if shifted_start >= prev_end + 1e-3:
+                    preceding_gap = shifted_start - prev_end
+                    if preceding_gap <= 0.5:
+                        slot.start_s = round(shifted_start, 3)
+                        duration = SLOT_DURATION_MAX_S
+                    else:
+                        duration = available
+                else:
+                    duration = available
+            duration = max(beat_interval, duration)
+            slot.duration_s = round(min(duration, available), 3)
 
         # Keep effects inside the adjusted slot bounds.
         for effect in slot.effects:
@@ -258,6 +464,56 @@ def _tier_index(tier: str) -> int:
         return len(STYLE_TIERS) - 1
 
 
+def _behavior_from_style_analysis(style_analysis: Dict[str, Any]) -> BehaviorVector:
+    """Derive an initial behavior vector from a reference style genome."""
+    families = style_analysis.get("families") or {}
+    cut_rhythm = families.get("cut_rhythm") or families.get("cutRhythm") or {}
+    density_per_min = cut_rhythm.get("cut_density_per_min") or cut_rhythm.get("cutDensityPerMin")
+
+    reference_present = bool(style_analysis)
+
+    if density_per_min:
+        cut_density_per_sec = max(0.01, min(2.0, density_per_min / 60.0))
+    else:
+        # Fallback for music-video-like content. This is the Phase 1 scaffold;
+        # later phases replace it with KNN / MLP prediction.
+        cut_density_per_sec = 0.16
+
+    # Derive mean slot duration from density, capped to reasonable bounds.
+    slot_duration_mean_s = max(0.5, min(8.0, 1.0 / max(cut_density_per_sec, 0.01)))
+
+    # Phase 1 audio policy heuristic: reference-driven AMV/MV-style edits keep
+    # the song dominant and only surface iconic quotes. Speech-forward edits
+    # (no reference or low cut density) keep most dialogue and push the song back.
+    if reference_present and cut_density_per_sec > 0.12:
+        # Music video / AMV cluster
+        audio_strategy = "iconic_only"
+        # 0.85 was too high for AMV fragments; 0.55 lets lyric/keyword matches
+        # through while still filtering out weak whisper noise.
+        min_importance = 0.55
+        sfx_mute = 0.9
+        song_mode = "dominant"
+        duck = 0.5
+    else:
+        # Informative / podcast / vlog cluster
+        audio_strategy = "speech_only"
+        min_importance = 0.3
+        sfx_mute = 0.95
+        song_mode = "ambient"
+        duck = 0.9
+
+    return BehaviorVector(
+        cut_density_per_sec=cut_density_per_sec,
+        slot_duration_mean_s=slot_duration_mean_s,
+        slot_duration_std_s=min(slot_duration_mean_s * 0.3, 2.0),
+        clip_audio_inclusion_strategy=audio_strategy,
+        clip_audio_min_importance=min_importance,
+        sfx_mute_aggressiveness=sfx_mute,
+        song_background_mode=song_mode,
+        duck_aggressiveness=duck,
+    )
+
+
 def generate_cutlist(
     beat_grid: BeatGrid,
     shot_boundaries: List[ShotBoundary],
@@ -268,6 +524,8 @@ def generate_cutlist(
     style_tier: str = "full_remix",
     song_asset_id: Optional[str] = None,
     user_clip_count: Optional[int] = None,
+    behavior: Optional[BehaviorVector] = None,
+    features: Optional[AdaptiveFeatures] = None,
 ) -> CutList:
     """Generate a cut-list using the configured AI provider chain.
 
@@ -278,11 +536,16 @@ def generate_cutlist(
     provider_chain = os.environ.get("AI_PROVIDER", "programmatic")
     names = [n.strip() for n in provider_chain.split(",") if n.strip()]
 
+    behavior = behavior or _behavior_from_style_analysis(style_analysis or {})
+    features = features or AdaptiveFeatures()
+
     for name in names:
         if name == "programmatic":
             return generate_cutlist_programmatic(
                 beat_grid, shot_boundaries, energy_curve, available_shot_types, total_duration,
                 style_analysis, style_tier, song_asset_id, user_clip_count,
+                behavior=behavior,
+                features=features,
             )
 
         try:
@@ -309,6 +572,8 @@ def generate_cutlist(
     return generate_cutlist_programmatic(
         beat_grid, shot_boundaries, energy_curve, available_shot_types, total_duration,
         style_analysis, style_tier, song_asset_id, user_clip_count,
+        behavior=behavior,
+        features=features,
     )
 
 
@@ -322,6 +587,8 @@ def generate_cutlist_programmatic(
     style_tier: str = "full_remix",
     song_asset_id: Optional[str] = None,
     user_clip_count: Optional[int] = None,
+    behavior: Optional[BehaviorVector] = None,
+    features: Optional[AdaptiveFeatures] = None,
 ) -> CutList:
     """Generate a cut-list programmatically without LLM."""
     enable_text = _tier_index(style_tier) >= _tier_index("with_text")
@@ -343,10 +610,10 @@ def generate_cutlist_programmatic(
         or []
     )
 
-    # Bound the cutlist to the actual available shot content, not an arbitrary
-    # total_duration that may exceed the source clips.
-    max_shot_end = max((s.end_s for s in shot_boundaries), default=total_duration)
-    content_end = min(total_duration, max_shot_end)
+    # The cutlist should span the requested duration (typically the song length).
+    # Do NOT clamp to reference shot boundaries or energy curve end — user clips
+    # provide the actual visual content and the reference only drives timing/style.
+    content_end = float(total_duration)
 
     beats = [b for b in beat_grid.beats if b <= content_end]
     downbeats = set(round(b, 2) for b in beat_grid.downbeats)
@@ -354,152 +621,126 @@ def generate_cutlist_programmatic(
 
     shot_pool = available_shot_types if available_shot_types else ["wide", "medium", "close_up"]
 
+    behavior = behavior or _behavior_from_style_analysis(style_analysis)
+    features = features or AdaptiveFeatures()
+
     slots = []
     overlays = []
-    beat_idx = 0
-    shot_rotation = 0
-    last_cut_was_downbeat = False
-    max_energy_slot = None
-    section_change_beats = []  # track section boundaries for overlays/film_grain
-    previous_slot_end = -1.0
-    beat_interval = 60.0 / beat_grid.bpm if beat_grid.bpm else 0.5
-    # Aim for roughly one cut every 1-2.5 seconds instead of every single beat.
-    min_slot_gap = max(beat_interval * 2, 1.0)
+    state: Dict[str, Any] = {
+        "content_end": content_end,
+        "shot_rotation": 0,
+        "slot_count": 0,
+        "section_change_beats": [],
+        "max_energy_slot": None,
+    }
 
-    while beat_idx < len(beats) - 1 and beats[beat_idx] < content_end:
-        beat_time = beats[beat_idx]
-        next_beat = beats[beat_idx + 1] if beat_idx + 1 < len(beats) else content_end
+    # Phase 2: when emotion-led cuts are enabled, select a narrative arc and map
+    # its beats to concrete song time windows using energy valleys/peaks.
+    if features.use_emotion_led_cuts:
+        arc_template = select_arc(energy_curve, style_analysis, key=None)
+        arc_anchors = map_arc_to_song(arc_template, energy_curve, beat_grid, content_end)
+        state["arc_template"] = arc_template
+        state["arc_anchors"] = arc_anchors
+        logger.info(
+            "Selected arc",
+            arc=arc_template.name,
+            anchors=[{"name": a.name, "start": a.start_s, "end": a.end_s} for a in arc_anchors],
+        )
 
-        section = "intro"
-        for seg in segments:
-            if seg.start <= beat_time < seg.end:
-                section = seg.label
-                break
+    if features.use_adaptive_slot_density:
+        # Density-driven slot generation: choose cut positions from beat candidates
+        # instead of emitting one slot per beat. This prevents the forced clip repeats
+        # that occur when slot_count exceeds clip_count.
+        slot_skeletons = generate_slots_adaptive(
+            beat_grid,
+            total_duration,
+            behavior,
+            energy_curve,
+            content_end,
+        )
+        for slot in slot_skeletons:
+            _apply_slot_style(
+                slot,
+                beat_grid,
+                segments,
+                downbeats,
+                shot_pool,
+                energy_curve,
+                style_analysis,
+                enable_effects,
+                enable_text,
+                state,
+            )
+            slots.append(slot)
+    else:
+        # Legacy beat-counting loop. Preserved for safety and A/B rollback.
+        beat_idx = 0
+        last_cut_was_downbeat = False
+        previous_slot_end = -1.0
+        beat_interval = 60.0 / beat_grid.bpm if beat_grid.bpm else 0.5
+        # Aim for roughly one cut every 1-2.5 seconds instead of every single beat.
+        min_slot_gap = max(beat_interval * 2, 1.0)
 
-        next_section = "intro"
-        for seg in segments:
-            if seg.start <= next_beat < seg.end:
-                next_section = seg.label
-                break
+        while beat_idx < len(beats) - 1 and beats[beat_idx] < content_end:
+            beat_time = beats[beat_idx]
+            next_beat = beats[beat_idx + 1] if beat_idx + 1 < len(beats) else content_end
 
-        is_section_boundary = section != next_section
+            # Skip beats that are too close to the previous cut to avoid tiny slots.
+            if beat_time < previous_slot_end + min_slot_gap - 1e-4 and beat_time > 0:
+                beat_idx += 1
+                continue
 
-        # Track section boundaries for possible future use (e.g. film grain),
-        # but do not burn section-name overlays into the output — they read
-        # as ugly subtitles.
-        if is_section_boundary and (not section_change_beats or section_change_beats[-1]["label"] != next_section):
-            section_change_beats.append({"label": next_section.upper(), "start_s": next_beat})
+            progress = beat_time / content_end if content_end > 0 else 0.0
+            energy_idx = min(int(progress * len(energy_curve)), len(energy_curve) - 1)
+            energy = energy_curve[energy_idx] if energy_curve else 0.5
 
-        # Skip beats that are too close to the previous cut to avoid tiny slots.
-        if beat_time < previous_slot_end + min_slot_gap - 1e-4 and beat_time > 0:
+            is_downbeat = round(beat_time, 2) in downbeats
+            if is_downbeat and not last_cut_was_downbeat:
+                duration = min(next_beat - beat_time + 0.5, 2.5)
+                last_cut_was_downbeat = True
+            else:
+                duration = min(next_beat - beat_time, 1.5)
+                last_cut_was_downbeat = False
+
+            duration = max(duration, 1.0)
+
+            slot = Slot(
+                index=len(slots),
+                start_s=beat_time,
+                duration_s=duration,
+                beat_index=beat_idx,
+                section=_section_at_time(beat_time, segments),
+                transition_in="hard_cut",
+                transition_out="hard_cut",
+                target_shot_type="medium",
+                subject_hint="",
+                motion_hint="static",
+                energy_level=energy,
+                required_tags=[],
+                avoid_tags=[],
+                effects=[],
+            )
+            _apply_slot_style(
+                slot,
+                beat_grid,
+                segments,
+                downbeats,
+                shot_pool,
+                energy_curve,
+                style_analysis,
+                enable_effects,
+                enable_text,
+                state,
+            )
+            slots.append(slot)
+            previous_slot_end = beat_time + duration
+
             beat_idx += 1
-            continue
+            if beat_time + duration >= content_end:
+                break
 
-        progress = beat_time / content_end if content_end > 0 else 0.0
-        energy_idx = min(int(progress * len(energy_curve)), len(energy_curve) - 1)
-        energy = energy_curve[energy_idx] if energy_curve else 0.5
-
-        is_downbeat = round(beat_time, 2) in downbeats
-        if is_downbeat and not last_cut_was_downbeat:
-            duration = min(next_beat - beat_time + 0.5, 2.5)
-            last_cut_was_downbeat = True
-        else:
-            duration = min(next_beat - beat_time, 1.5)
-            last_cut_was_downbeat = False
-
-        duration = max(duration, 1.0)
-
-        if energy < 0.3:
-            target = "wide" if "wide" in shot_pool else shot_pool[0]
-        elif energy < 0.6:
-            target = "medium" if "medium" in shot_pool else shot_pool[shot_rotation % len(shot_pool)]
-        elif energy < 0.8:
-            target = "medium_close_up" if "medium_close_up" in shot_pool else "close_up" if "close_up" in shot_pool else shot_pool[-1]
-        else:
-            target = "close_up" if "close_up" in shot_pool else shot_pool[-1]
-
-        shot_rotation += 1
-
-        transition_in = "hard_cut"
-        if enable_effects and detected_transitions and energy > 0.4:
-            transition_in = detected_transitions[len(slots) % len(detected_transitions)]
-
-        transition_out = "hard_cut"
-
-        if enable_effects:
-            if is_section_boundary and energy > 0.7:
-                transition_out = "flash"
-            elif is_downbeat and energy > 0.6:
-                transition_out = "dissolve"
-            elif detected_transitions and transition_out == "hard_cut" and energy > 0.5:
-                transition_out = detected_transitions[(len(slots) + 1) % len(detected_transitions)]
-
-        # Determine whether this slot contains a section boundary.
-        slot_contains_section_boundary = any(
-            beat_time <= seg.start < beat_time + duration
-            for seg in segments
-        )
-
-        # Build effects for this slot (only when tier allows effects)
-        effects = []
-        if enable_effects:
-            if is_downbeat and energy > 0.7:
-                effects.append(
-                    Effect(
-                        type="zoom_punch_in",
-                        start_s=beat_time,
-                        duration_s=min(0.3, duration),
-                        params=ZoomPunchInParams(
-                            target_scale=1.25, duration_ms=250, easing="easeOut"
-                        ).model_dump(by_alias=True),
-                    )
-                )
-            if energy < 0.4 and duration > 1.5:
-                effects.append(Effect(
-                    type="focus_pull",
-                    start_s=beat_time + duration * 0.2,
-                    duration_s=min(0.8, duration * 0.6),
-                    params=FocusPullParams(target_blur=4.0, duration_ms=600, easing="easeInOut").model_dump(by_alias=True),
-                ))
-            if slot_contains_section_boundary:
-                effects.append(Effect(
-                    type="film_grain",
-                    start_s=beat_time,
-                    duration_s=duration,
-                    params=FilmGrainParams(intensity=0.15).model_dump(by_alias=True),
-                ))
-
-        if camera_motions:
-            motion_hint = camera_motions[len(slots) % len(camera_motions)]
-        else:
-            motion_hint = "static" if energy < 0.3 else "handheld" if energy > 0.8 else "gimbal"
-
-        slot = Slot(
-            index=len(slots),
-            start_s=beat_time,
-            duration_s=duration,
-            beat_index=beat_idx,
-            section=section,
-            transition_in=transition_in,
-            transition_out=transition_out,
-            target_shot_type=target,
-            subject_hint=f"{section} section, energy {energy:.1f}",
-            motion_hint=motion_hint,
-            energy_level=energy,
-            required_tags=[],
-            avoid_tags=[],
-            effects=effects[:2],  # cap at 2 effects per slot
-        )
-        slots.append(slot)
-        previous_slot_end = beat_time + duration
-
-        # Track highest-energy slot for vignette
-        if max_energy_slot is None or energy > max_energy_slot.energy_level:
-            max_energy_slot = slot
-
-        beat_idx += 1
-        if beat_time + duration >= content_end:
-            break
+    section_change_beats = state.get("section_change_beats", [])
+    max_energy_slot = state.get("max_energy_slot")
 
     if slots:
         slots[-1].duration_s = max(
@@ -525,13 +766,28 @@ def generate_cutlist_programmatic(
         if len(slots) > max_slots:
             slots = slots[:max_slots]
 
-    # Assign kinetic text only when real lyrics are available. Section-label
-    # stubs are disabled by default because they are not the song's lyrics.
-    for slot in slots:
-        slot.kinetic_text = generate_slot_text_overlay(slot, beat_grid)
-        if enable_text and slot.kinetic_text and slot.section in ("chorus", "drop"):
-            slot.enable_kinetic_text = True
-            slot.text_z_layer = "behind_subject"
+    # Assign cinematic kinetic text to high-energy / peak narrative slots.
+    # This replaces the old lyric-overlay stub with LLM-composed or word-bank
+    # phrases that actually match the edit's mood.
+    source_ip_hint = style_analysis.get("source_ip_hint") if isinstance(style_analysis, dict) else None
+    if enable_text:
+        # Re-enable LLM composition by default. Override with KINETIC_TEXT_LLM=0
+        # only for explicit debugging of the deterministic fallback path.
+        import os
+        use_llm = os.environ.get("KINETIC_TEXT_LLM", "1").lower() not in ("0", "false", "off")
+        assign_kinetic_text_to_slots(
+            slots,
+            source_ip_hint=source_ip_hint,
+            use_llm=use_llm,
+            max_text_count=max(3, int(0.1 * len(slots))),
+        )
+        for slot in slots:
+            if slot.enable_kinetic_text:
+                slot.text_z_layer = "behind_subject"
+
+    # Assign speed ramps to high-energy / transition slots (Sprint A real path).
+    if enable_effects:
+        assign_speed_ramps_to_slots(slots, min_ramps=2, max_ramps=6)
 
     # Overlays must not extend past the actual rendered content.
     actual_content_end = max(s.start_s + s.duration_s for s in slots) if slots else content_end

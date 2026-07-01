@@ -122,7 +122,13 @@ class VideoRenderWorkflow:
                 retry_policy=RetryPolicy(maximum_attempts=5),
             )
 
-            return upload_result["storage_key"]
+            # Telemetry: a completed render implies the output was exported/produced.
+            await workflow.execute_activity(
+                "record_render_outcome_activity",
+                args=(render_id, {"exported": True, "inferredQualityScore": 0.8}),
+                start_to_close_timeout=timedelta(seconds=30),
+                retry_policy=RetryPolicy(maximum_attempts=3),
+            )
         finally:
             # Always remove locally downloaded assets and the rendered scratch file.
             await workflow.execute_activity(
@@ -131,3 +137,17 @@ class VideoRenderWorkflow:
                 start_to_close_timeout=timedelta(seconds=60),
                 retry_policy=RetryPolicy(maximum_attempts=2),
             )
+
+        # Wait for the 7-day outcome labeling window to close before using this
+        # render as a learning signal. This keeps the behavior corpus from being
+        # polluted by provisional feedback.
+        await workflow.sleep(timedelta(days=7))
+
+        await workflow.execute_activity(
+            "ingest_render_to_corpus",
+            args=(render_id, 0.7),
+            start_to_close_timeout=timedelta(seconds=30),
+            retry_policy=RetryPolicy(maximum_attempts=2),
+        )
+
+        return upload_result["storage_key"]

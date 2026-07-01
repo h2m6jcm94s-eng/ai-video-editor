@@ -38,6 +38,7 @@ const schema = z.object({
   R2_ACCESS_KEY_ID: z.string().min(1, "R2_ACCESS_KEY_ID is missing").default("minioadmin"),
   R2_SECRET_ACCESS_KEY: z.string().min(1, "R2_SECRET_ACCESS_KEY is missing").default("minioadmin"),
   R2_BUCKET_NAME: z.string().min(1, "R2_BUCKET_NAME is missing").default("test"),
+  STORAGE_ROOT: z.string().min(1).default("E:\\ai-video-editor-storage"),
   REDIS_URL: z.string().url("REDIS_URL must be a valid redis:// URL").default("redis://localhost:6379"),
   TEMPORAL_HOST: z
     .string()

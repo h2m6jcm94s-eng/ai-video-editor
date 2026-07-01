@@ -78,6 +78,48 @@
       "when": 1781170361509,
       "tag": "0010_generation_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1781170361510,
+      "tag": "0011_feedback_pipeline",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1781170361511,
+      "tag": "0011_behavior_corpus_quarantine",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1781170361512,
+      "tag": "0012_add_renders_user_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1781170361513,
+      "tag": "0013_cluster_bias_vectors",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1781170361514,
+      "tag": "0014_render_outcome_finalization",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1781170361515,
+      "tag": "0015_project_exclude_from_learning",
+      "breakpoints": true
     }
   ]
 }

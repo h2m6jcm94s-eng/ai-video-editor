@@ -16,16 +16,28 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from shared_py.models import AudioTrack, BeatGrid, BeatSegment, CutList
+from shared_py.models import AudioTrack, BeatGrid, BeatSegment, CutList, BehaviorVector
+from shared_py.feature_tracer import FeatureTracer
 from shared_py.logging_config import StructuredLogger
 
 from reason_worker.audio_scoring import (
     DialogueSegment,
     ScoringConfig,
+    WordTimestamp,
     score_clip_dialogue,
 )
+from reason_worker.captions import generate_caption_overlays_from_segments
+from reason_worker.clip_audio_filter import (
+    AudioSegment as ClipAudioSegment,
+    filter_clip_audio_for_inclusion,
+)
+from reason_worker.iconic_quotes import (
+    TranscriptSegment,
+    detect_iconic_quotes,
+)
+from reason_worker.narrative_mode import determine_narrative_mode
 
 logger = StructuredLogger("reason_worker.audio_mix")
 
@@ -76,6 +88,46 @@ DEFAULT_POLICIES: Dict[str, SectionPolicy] = {
     ),
 }
 
+# Compressor profiles keyed by narrative mode. These values are carried on the
+# AudioTrack so the render compiler can adapt sidechaincompress parameters.
+DUCK_PROFILES: Dict[str, Dict[str, Any]] = {
+    "music_video": {
+        "threshold": 0.10,
+        "ratio": 6,
+        "attack_ms": 30,
+        "release_ms": 250,
+        "duck_gain_db": -10,
+    },
+    "vlog": {
+        "threshold": 0.12,
+        "ratio": 4,
+        "attack_ms": 80,
+        "release_ms": 400,
+        "duck_gain_db": -8,
+    },
+    "podcast": {
+        "threshold": 0.05,
+        "ratio": 8,
+        "attack_ms": 10,
+        "release_ms": 200,
+        "duck_gain_db": -14,
+    },
+    "informative": {
+        "threshold": 0.08,
+        "ratio": 6,
+        "attack_ms": 30,
+        "release_ms": 300,
+        "duck_gain_db": -12,
+    },
+    "default": {
+        "threshold": 0.12,
+        "ratio": 4,
+        "attack_ms": 150,
+        "release_ms": 350,
+        "duck_gain_db": -8,
+    },
+}
+
 
 def _section_at(time_s: float, segments: List[BeatSegment]) -> str:
     """Return the section label active at ``time_s``."""
@@ -91,23 +143,107 @@ def _policy_for(section: str) -> SectionPolicy:
     return DEFAULT_POLICIES.get(section, DEFAULT_POLICIES["verse"])
 
 
+def _duck_profile_for(
+    narrative_mode: str,
+    content_signals: Optional[dict],
+) -> Dict[str, Any]:
+    """Pick a ducking compressor profile from content type, falling back to default."""
+    if narrative_mode in DUCK_PROFILES:
+        return DUCK_PROFILES[narrative_mode]
+    if content_signals:
+        speech_ratio = float(content_signals.get("speech_ratio", 0.0) or 0.0)
+        song_present = bool(content_signals.get("song_present", False))
+        if song_present and speech_ratio >= 0.5:
+            return DUCK_PROFILES["podcast"]
+        if song_present and speech_ratio >= 0.2:
+            return DUCK_PROFILES["informative"]
+        if song_present and speech_ratio > 0.0:
+            return DUCK_PROFILES["vlog"]
+    return DUCK_PROFILES["default"]
+
+
+def should_duck_audio(
+    has_song: bool,
+    has_dialogue: bool,
+    behavior: BehaviorVector,
+) -> tuple[bool, str]:
+    """
+    Deterministic gate. Audio ducking is a safety feature — when in doubt, ENABLE it.
+    Returns (enabled, reason).
+    """
+    if not has_song:
+        return False, "no_song_present"
+    if not has_dialogue:
+        return False, "no_dialogue_detected"
+    if getattr(behavior, "song_dominance", 0.0) >= 0.95:
+        # User explicitly wants music-dominant (e.g. pure MV with no dialogue surfacing)
+        return False, "song_dominance_user_preference"
+    return True, "song_plus_dialogue_detected"
+
+
 def _dialogue_segments_for_slot(
     slot,
     clip_path: str,
     cfg: ScoringConfig,
+    behavior: BehaviorVector,
+    source_ip_hint: Optional[str] = None,
+    content_embedding: Optional[dict] = None,
 ) -> List[DialogueSegment]:
-    """Find dialogue segments inside the selected window of a clip."""
+    """Find dialogue segments inside the selected window of a clip.
+
+    Applies the behavior-vector audio policy so only segments that match the
+    project's inclusion strategy survive into the final mix.
+    """
     # When no source window has been chosen, start from the beginning of the
     # clip so early dialogue is not missed.
     window_start = slot.source_window_start_s if slot.source_window_start_s is not None else 0.0
     window_end = window_start + slot.duration_s
 
     segments = score_clip_dialogue(clip_path, cfg=cfg)
+    if not segments:
+        return []
+
+    # Score iconic-quote potential and convert to the generic audio-segment model.
+    transcript_segments = [
+        TranscriptSegment(start_s=seg.start_s, end_s=seg.end_s, text=seg.text or "")
+        for seg in segments
+    ]
+    iconic_quotes = {
+        (round(q.segment.start_s, 3), round(q.segment.end_s, 3), q.segment.text.strip()): q
+        for q in detect_iconic_quotes(
+            transcript_segments,
+            source_ip_hint=source_ip_hint,
+            clip_path=clip_path,
+            max_llm_candidates=20,
+            content_embedding=content_embedding,
+        )
+    }
+
+    candidates: List[ClipAudioSegment] = []
+    for seg in segments:
+        key = (round(seg.start_s, 3), round(seg.end_s, 3), (seg.text or "").strip())
+        iconic = iconic_quotes.get(key)
+        candidates.append(
+            ClipAudioSegment(
+                start_s=seg.start_s,
+                end_s=seg.end_s,
+                text=seg.text or None,
+                is_speech=True,
+                importance=seg.total_score,
+                # Use the LLM/heuristic iconic score only. The regex-based
+                # phrase_match_score is 0 whenever cfg.iconic_phrases is empty,
+                # which silently disables the iconic dialogue boost (B3).
+                iconic_score=(iconic.importance if iconic else 0.0),
+                source_clip_id=slot.selected_clip_id,
+                words=seg.words,
+            )
+        )
+    survivors = filter_clip_audio_for_inclusion(candidates, behavior)
 
     # Translate clip-relative dialogue times to cutlist (reference) time.
     shifted: List[DialogueSegment] = []
-    for seg in segments:
-        if seg.total_score < cfg.min_dialogue_score:
+    for seg in survivors:
+        if seg.importance < cfg.min_dialogue_score:
             continue
         seg_start = seg.start_s
         seg_end = seg.end_s
@@ -118,14 +254,27 @@ def _dialogue_segments_for_slot(
         end_in_window = min(slot.duration_s, seg_end - window_start)
         if end_in_window <= start_in_window + 0.1:
             continue
+        # Preserve word-level timestamps so caption burning (AC1) can use them.
+        shifted_words = []
+        for word in (seg.words or []):
+            if word.end_s <= window_start or word.start_s >= window_end:
+                continue
+            shifted_words.append(
+                WordTimestamp(
+                    text=word.text,
+                    start_s=max(0.0, word.start_s - window_start),
+                    end_s=min(slot.duration_s, word.end_s - window_start),
+                )
+            )
         shifted.append(
             DialogueSegment(
                 start_s=start_in_window,
                 end_s=end_in_window,
-                text=seg.text,
-                speech_score=seg.speech_score,
-                phrase_match_score=seg.phrase_match_score,
+                text=seg.text or "",
+                speech_score=seg.importance,
+                phrase_match_score=seg.iconic_score,
                 source_clip_id=slot.selected_clip_id,
+                words=shifted_words,
             )
         )
     return shifted
@@ -190,6 +339,9 @@ def build_audio_tracks(
     clip_paths: Optional[Dict[str, str]] = None,
     scoring_cfg: Optional[ScoringConfig] = None,
     max_dialogue_tracks: int = 50,
+    behavior: Optional[BehaviorVector] = None,
+    source_ip_hint: Optional[str] = None,
+    content_embedding: Optional[dict] = None,
 ) -> List[AudioTrack]:
     """Build the final music + dialogue AudioTrack list for ``cutlist``.
 
@@ -201,8 +353,36 @@ def build_audio_tracks(
     The number of dialogue tracks is capped to keep the final FFmpeg command
     line within Windows' length limit; only the highest-scoring segments are kept.
     """
+    with FeatureTracer("dialogue", gated_in=True) as ft:
+        return _build_audio_tracks(
+            cutlist,
+            beat_grid,
+            song_asset_id,
+            clip_paths,
+            scoring_cfg,
+            max_dialogue_tracks,
+            behavior,
+            source_ip_hint,
+            content_embedding,
+            ft,
+        )
+
+
+def _build_audio_tracks(
+    cutlist: CutList,
+    beat_grid: Optional[BeatGrid] = None,
+    song_asset_id: Optional[str] = None,
+    clip_paths: Optional[Dict[str, str]] = None,
+    scoring_cfg: Optional[ScoringConfig] = None,
+    max_dialogue_tracks: int = 50,
+    behavior: Optional[BehaviorVector] = None,
+    source_ip_hint: Optional[str] = None,
+    content_embedding: Optional[dict] = None,
+    ft: Optional[FeatureTracer] = None,
+) -> List[AudioTrack]:
     clip_paths = clip_paths or {}
     scoring_cfg = scoring_cfg or ScoringConfig()
+    behavior = behavior or BehaviorVector()
     total_duration = cutlist.globals.total_duration_s
 
     segments = beat_grid.segments if beat_grid else []
@@ -217,6 +397,7 @@ def build_audio_tracks(
         key=lambda p: (p.duck_gain_db, -p.duck_attack_ms),
     )
 
+    # Build music bed first.
     tracks: List[AudioTrack] = []
     if song_asset_id:
         tracks.extend(
@@ -225,8 +406,10 @@ def build_audio_tracks(
             )
         )
 
-    # Gather dialogue tracks from selected clips.
+    # Gather dialogue tracks from selected clips BEFORE deciding ducking so the
+    # gate is based on actual detected dialogue, not a pre-computed embedding.
     dialogue_tracks: List[AudioTrack] = []
+    slot_dialogue_segments: List[tuple[int, str, float, float, List[DialogueSegment]]] = []
     for slot in cutlist.slots:
         clip_id = slot.selected_clip_id
         if not clip_id or clip_id not in clip_paths:
@@ -236,7 +419,9 @@ def build_audio_tracks(
             if slot.source_window_start_s is not None
             else 0.0
         )
-        segs = _dialogue_segments_for_slot(slot, clip_paths[clip_id], scoring_cfg)
+        segs = _dialogue_segments_for_slot(slot, clip_paths[clip_id], scoring_cfg, behavior, source_ip_hint=source_ip_hint, content_embedding=content_embedding)
+        if segs:
+            slot_dialogue_segments.append((slot.index, clip_id, window_start, slot.start_s, segs))
         if not segs:
             continue
         # Keep only the strongest segment per slot to avoid flooding the mixer
@@ -254,8 +439,9 @@ def build_audio_tracks(
 
             section = _section_at(global_start, segments)
             policy = _policy_for(section)
-            # Iconic lines get a small extra gain boost.
-            gain_db = -2.0 if seg.phrase_match_score > 0.8 else -4.0
+            # Iconic lines get a small extra gain boost. Threshold aligns with
+            # ICONIC_INCLUSION_THRESHOLD so passed quotes actually fire the boost.
+            gain_db = -2.0 if seg.phrase_match_score >= 0.45 else -4.0
 
             # Source offset inside the original clip.
             source_start = window_start + seg.start_s
@@ -301,5 +487,58 @@ def build_audio_tracks(
         else:
             merged.append(track)
 
+    # Deterministic ducking gate: song + detected dialogue + not song-dominant.
+    has_song = bool(song_asset_id)
+    has_dialogue = bool(merged)
+    narrative_mode = determine_narrative_mode(content_embedding, None)
+    duck_profile = _duck_profile_for(narrative_mode, content_embedding)
+
+    with FeatureTracer("audio_ducking", gated_in=True) as duck_ft:
+        ducking_enabled, ducking_reason = should_duck_audio(has_song, has_dialogue, behavior)
+
+        if ducking_enabled:
+            # Apply chosen compressor profile to every music/dialogue track so the
+            # renderer has consistent sidechain parameters.
+            for track in tracks:
+                if track.role == "music" and not track.duck_disabled:
+                    track.duck_gain_db = duck_profile["duck_gain_db"]
+                    track.duck_threshold = duck_profile["threshold"]
+                    track.duck_attack_ms = duck_profile["attack_ms"]
+                    track.duck_release_ms = duck_profile["release_ms"]
+            for track in merged:
+                track.duck_threshold = duck_profile["threshold"]
+                track.duck_attack_ms = duck_profile["attack_ms"]
+                track.duck_release_ms = duck_profile["release_ms"]
+
+            duck_ft.signature(
+                f"applied=true,n_dialogue={len(merged)},"
+                f"profile={narrative_mode},music_gain={music_policy.music_gain_db:.1f}dB,"
+                f"duck_gain={duck_profile['duck_gain_db']:.1f}dB,"
+                f"threshold={duck_profile['threshold']:.3f},ratio={duck_profile['ratio']}"
+            )
+            duck_ft.real()
+        else:
+            for track in tracks:
+                if track.role == "music":
+                    track.duck_disabled = True
+                    track.duck_gain_db = 0.0
+                    track.duck_threshold = 1.0
+            duck_ft.fallback(f"gate:{ducking_reason}")
+
     tracks.extend(merged)
+
+    # AC1 captions: burn word-level dialogue captions into the output.
+    if slot_dialogue_segments:
+        caption_overlays = generate_caption_overlays_from_segments(
+            slot_dialogue_segments,
+            style="tiktok_white_pop",
+            clip_paths=clip_paths,
+        )
+        if caption_overlays:
+            cutlist.overlays = list(cutlist.overlays or []) + caption_overlays
+
+    if ft is not None:
+        dialogue_count = sum(1 for t in tracks if t.role == "dialogue")
+        ft.signature(f"tracks={len(tracks)},dialogue={dialogue_count}")
+        ft.real()
     return tracks

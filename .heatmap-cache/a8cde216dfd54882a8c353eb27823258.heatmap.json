@@ -1,0 +1,132 @@
+[
+  {
+    "start_s": 0.0,
+    "end_s": 0.25,
+    "score": 0.3276,
+    "components": {
+      "motion": 0.097,
+      "aesthetic": 0.1952,
+      "sharpness": 0.6237,
+      "audio": 0.5,
+      "stability": 0.5
+    },
+    "dominant_motion": "still"
+  },
+  {
+    "start_s": 0.0,
+    "end_s": 0.45,
+    "score": 0.3897,
+    "components": {
+      "motion": 0.0909,
+      "aesthetic": 0.1952,
+      "sharpness": 0.9429,
+      "audio": 0.5,
+      "stability": 0.5
+    },
+    "dominant_motion": "still"
+  },
+  {
+    "start_s": 0.15,
+    "end_s": 0.65,
+    "score": 0.3916,
+    "components": {
+      "motion": 0.0848,
+      "aesthetic": 0.2102,
+      "sharpness": 0.9429,
+      "audio": 0.5,
+      "stability": 0.4998
+    },
+    "dominant_motion": "still"
+  },
+  {
+    "start_s": 0.35,
+    "end_s": 0.85,
+    "score": 0.3919,
+    "components": {
+      "motion": 0.0848,
+      "aesthetic": 0.2202,
+      "sharpness": 0.9429,
+      "audio": 0.5,
+      "stability": 0.4784
+    },
+    "dominant_motion": "still"
+  },
+  {
+    "start_s": 0.55,
+    "end_s": 1.05,
+    "score": 0.3941,
+    "components": {
+      "motion": 0.0848,
+      "aesthetic": 0.2202,
+      "sharpness": 0.9429,
+      "audio": 0.5,
+      "stability": 0.5
+    },
+    "dominant_motion": "still"
+  },
+  {
+    "start_s": 0.75,
+    "end_s": 1.25,
+    "score": 0.3941,
+    "components": {
+      "motion": 0.0848,
+      "aesthetic": 0.2202,
+      "sharpness": 0.9429,
+      "audio": 0.5,
+      "stability": 0.5
+    },
+    "dominant_motion": "still"
+  },
+  {
+    "start_s": 0.95,
+    "end_s": 1.45,
+    "score": 0.3941,
+    "components": {
+      "motion": 0.0848,
+      "aesthetic": 0.2202,
+      "sharpness": 0.9429,
+      "audio": 0.5,
+      "stability": 0.5
+    },
+    "dominant_motion": "still"
+  },
+  {
+    "start_s": 1.15,
+    "end_s": 1.65,
+    "score": 0.3887,
+    "components": {
+      "motion": 0.0857,
+      "aesthetic": 0.2052,
+      "sharpness": 0.9429,
+      "audio": 0.5,
+      "stability": 0.4806
+    },
+    "dominant_motion": "still"
+  },
+  {
+    "start_s": 1.35,
+    "end_s": 1.85,
+    "score": 0.3813,
+    "components": {
+      "motion": 0.0629,
+      "aesthetic": 0.1952,
+      "sharpness": 0.9429,
+      "audio": 0.5,
+      "stability": 0.5
+    },
+    "dominant_motion": "still"
+  },
+  {
+    "start_s": 1.55,
+    "end_s": 2.05,
+    "score": 0.3102,
+    "components": {
+      "motion": 0.0392,
+      "aesthetic": 0.1952,
+      "sharpness": 0.6232,
+      "audio": 0.5,
+      "stability": 0.5
+    },
+    "dominant_motion": "still"
+  }
+]

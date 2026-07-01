@@ -163,6 +163,26 @@ describe("Project Routes", () => {
     expect(body.project.name).toBe("Updated");
   });
 
+  it("PATCH /api/projects/:id toggles excludeFromLearning", async () => {
+    vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(mockProject);
+    vi.mocked(db.update).mockReturnValueOnce({
+      set: vi.fn().mockReturnValueOnce({
+        where: vi.fn().mockReturnValueOnce({
+          returning: vi.fn().mockResolvedValueOnce([{ ...mockProject, excludeFromLearning: true }]),
+        }),
+      }),
+    } as any);
+
+    const app = await buildApp();
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/projects/proj-1",
+      payload: { excludeFromLearning: true },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).project.excludeFromLearning).toBe(true);
+  });
+
   it("DELETE /api/projects/:id deletes project", async () => {
     vi.mocked(db.query.projects.findFirst).mockResolvedValueOnce(mockProject);
     vi.mocked(db.delete).mockReturnValueOnce({

@@ -9,10 +9,12 @@ import {
   createTemplateSchema,
   generateFromReferenceSchema,
   patchProjectSchema,
+  patchRenderOutcomeSchema,
   patchTemplateSchema,
   presignedUploadSchema,
   promptEditSchema,
   renderOptionsSchema,
+  saveRenderOutcomeSchema,
   updateCutlistSchema,
 } from "@ai-video-editor/shared-types";
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -27,10 +29,12 @@ export {
   createTemplateSchema,
   generateFromReferenceSchema,
   patchProjectSchema,
+  patchRenderOutcomeSchema,
   patchTemplateSchema,
   presignedUploadSchema,
   promptEditSchema,
   renderOptionsSchema,
+  saveRenderOutcomeSchema,
   updateCutlistSchema,
 };
 

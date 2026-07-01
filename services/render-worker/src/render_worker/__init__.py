@@ -17,7 +17,19 @@ def __getattr__(name):
     if name == "build_identity_masks":
         from render_worker.identity_matte import build_identity_masks
         return build_identity_masks
+    if name == "segment_object_in_clip":
+        from render_worker.sam3_client import segment_object_in_clip
+        return segment_object_in_clip
+    if name == "run_object_edit":
+        from render_worker.object_edit import run_object_edit
+        return run_object_edit
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["compile_timeline", "render_preview", "build_identity_masks"]
+__all__ = [
+    "compile_timeline",
+    "render_preview",
+    "build_identity_masks",
+    "segment_object_in_clip",
+    "run_object_edit",
+]

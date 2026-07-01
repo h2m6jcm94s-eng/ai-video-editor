@@ -14,6 +14,51 @@ with workflow.unsafe.imports_passed_through():
     from reason_worker.aspect_detect import detect_aspect_preset
 
 
+def _extract_content_signals(
+    project: dict,
+    assets: List[dict],
+    beat_grid: dict,
+    energy_curve: List[float],
+    clip_asset_ids: List[str],
+    reference_asset_id: Optional[str],
+) -> dict:
+    """Build a minimal ContentSignals snapshot from available project context."""
+    song_asset_id = project.get("songAssetId") or project.get("song_asset_id")
+    song_metadata = next((a.get("metadata") or {} for a in assets if a.get("id") == song_asset_id), {})
+
+    clip_assets = [a for a in assets if a.get("id") in clip_asset_ids]
+    durations = [a.get("durationSec") or a.get("duration_sec") for a in clip_assets if a.get("durationSec") or a.get("duration_sec")]
+    avg_clip_duration = sum(durations) / len(durations) if durations else 0.0
+
+    motion_scores = []
+    aesthetic_scores = []
+    for meta in [a.get("metadata") or {} for a in clip_assets]:
+        if isinstance(meta, dict):
+            motion_scores.append(meta.get("motion_energy") or meta.get("motionEnergy") or 0.5)
+            aesthetic_scores.append(meta.get("aesthetic_score") or meta.get("aestheticScore") or 0.5)
+
+    return {
+        "speech_ratio": 0.0,
+        "avg_speech_segment_duration_s": 0.0,
+        "multi_speaker_ratio": 0.0,
+        "song_present": bool(song_asset_id),
+        "song_energy_mean": float(sum(energy_curve) / len(energy_curve)) if energy_curve else 0.5,
+        "song_tempo_bpm": beat_grid.get("bpm") or 120.0,
+        "song_section_count": len(beat_grid.get("segments") or []),
+        "clip_count": len(clip_asset_ids),
+        "clip_avg_duration_s": avg_clip_duration,
+        "motion_density": float(sum(motion_scores) / len(motion_scores)) if motion_scores else 0.5,
+        "motion_variance": 0.0,
+        "aesthetic_score_mean": float(sum(aesthetic_scores) / len(aesthetic_scores)) if aesthetic_scores else 0.5,
+        "face_screentime_ratio": 0.0,
+        "multi_face_ratio": 0.0,
+        "shot_diversity": 0.0,
+        "reference_present": bool(reference_asset_id),
+        "reference_genome_hash": None,
+        "content_embedding": None,
+    }
+
+
 @dataclass
 class GenerateFromReferenceInput:
     project_id: str
@@ -27,6 +72,7 @@ class GenerateFromReferenceInput:
     asset_key_map: Dict[str, str] = field(default_factory=dict)
     completion_token: str = ""
     options: Optional[dict] = field(default_factory=dict)
+    render_id: Optional[str] = None  # When provided, persist signals/behavior for this render.
 
 
 @workflow.defn
@@ -127,8 +173,34 @@ class GenerateFromReferenceWorkflow:
 
             clip_asset_ids = input.clip_asset_ids or project.get("clipAssetIds") or []
 
+            signals = _extract_content_signals(
+                project=context.get("project", {}),
+                assets=context.get("assets", []),
+                beat_grid=beat_result["beat_grid"],
+                energy_curve=beat_result["energy_curve"],
+                clip_asset_ids=clip_asset_ids,
+                reference_asset_id=input.reference_asset_id,
+            )
+
+            # Optionally override the behavior vector via KNN + per-user bias.
+            options = input.options or {}
+            features_raw = options.get("adaptiveFeatures") or {}
+            predictor_confidence = 0.0
+            predictor_reasoning = "heuristic fallback"
+            if features_raw.get("useCorpusKnn") or features_raw.get("usePerUserBias"):
+                prediction = await workflow.execute_activity(
+                    "predict_behavior_activity",
+                    args=(signals, input.user_id, features_raw, None),
+                    start_to_close_timeout=timedelta(seconds=60),
+                    retry_policy=RetryPolicy(maximum_attempts=2),
+                )
+                options = {**options, "behaviorVector": prediction["behavior"]}
+                input.options = options
+                predictor_confidence = prediction.get("predictorConfidence", 0.0)
+                predictor_reasoning = prediction.get("predictorReasoning", "")
+
             await self._publish(job_id, "generating_cutlist", 50, "Generating cutlist from analysis")
-            cutlist_raw = await workflow.execute_activity(
+            generation_result = await workflow.execute_activity(
                 "generate_cutlist_activity",
                 args=(
                     beat_result["beat_grid"],
@@ -139,10 +211,36 @@ class GenerateFromReferenceWorkflow:
                     input.style_tier,
                     song_asset_id,
                     clip_asset_ids,
+                    options,
                 ),
                 start_to_close_timeout=timedelta(seconds=300),
                 retry_policy=RetryPolicy(maximum_attempts=2),
             )
+            cutlist_raw = generation_result["cutlist"]
+            behavior_raw = generation_result.get("behavior") or {}
+
+            # Persist signals + behavior when this generation is tied to a render.
+            if input.render_id:
+                await workflow.execute_activity(
+                    "save_render_signals_activity",
+                    args=(input.render_id, signals),
+                    start_to_close_timeout=timedelta(seconds=30),
+                    retry_policy=RetryPolicy(maximum_attempts=3),
+                )
+                await workflow.execute_activity(
+                    "save_render_behavior_activity",
+                    args=(
+                        input.render_id,
+                        behavior_raw,
+                        "knn-v1",
+                        predictor_confidence,
+                        {"reasoning": predictor_reasoning},
+                    ),
+                    start_to_close_timeout=timedelta(seconds=30),
+                    retry_policy=RetryPolicy(maximum_attempts=3),
+                )
+                # Corpus ingestion is intentionally deferred to the render worker
+                # so the 7-day outcome labeling window can close first.
 
             await self._publish(job_id, "ranking_clips", 75, "Ranking clips for each slot")
             clip_metadata = {

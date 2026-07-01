@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from shared_py.models import CutList, CutListGlobals, Slot
+from shared_py.models import CutList, CutListGlobals, Slot, BehaviorVector
 from reason_worker.audio_mix import _dialogue_segments_for_slot
 from reason_worker.audio_scoring import DialogueSegment, ScoringConfig
 
@@ -44,7 +44,7 @@ def test_dialogue_window_defaults_to_clip_start_when_no_source_window():
     original = _dialogue_segments_for_slot.__globals__["score_clip_dialogue"]
     try:
         _dialogue_segments_for_slot.__globals__["score_clip_dialogue"] = fake_score
-        segs = _dialogue_segments_for_slot(slot, "dummy.mp4", cfg)
+        segs = _dialogue_segments_for_slot(slot, "dummy.mp4", cfg, BehaviorVector())
     finally:
         _dialogue_segments_for_slot.__globals__["score_clip_dialogue"] = original
 
@@ -67,7 +67,7 @@ def test_dialogue_window_respects_source_window_start():
     original = _dialogue_segments_for_slot.__globals__["score_clip_dialogue"]
     try:
         _dialogue_segments_for_slot.__globals__["score_clip_dialogue"] = fake_score
-        segs = _dialogue_segments_for_slot(slot, "dummy.mp4", cfg)
+        segs = _dialogue_segments_for_slot(slot, "dummy.mp4", cfg, BehaviorVector())
     finally:
         _dialogue_segments_for_slot.__globals__["score_clip_dialogue"] = original
 

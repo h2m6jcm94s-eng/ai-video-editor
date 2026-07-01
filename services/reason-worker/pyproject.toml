@@ -17,7 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 audio_scoring = [
-    "openai-whisper>=20231117",
+    "faster-whisper>=1.0.0",
 ]
 matting = [
     "torch>=2.0.0",

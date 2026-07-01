@@ -77,11 +77,13 @@ async function main() {
     process.exit(1);
   }
 
-  try {
-    await probeS3Connection();
-  } catch (e) {
-    console.error("R2 bucket unreachable — check R2_* env vars");
-    process.exit(1);
+  if (process.env.STORAGE_BACKEND !== "local") {
+    try {
+      await probeS3Connection();
+    } catch (e) {
+      console.error("R2 bucket unreachable — check R2_* env vars");
+      process.exit(1);
+    }
   }
 
   try {

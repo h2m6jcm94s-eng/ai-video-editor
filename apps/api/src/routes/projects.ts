@@ -1,7 +1,7 @@
 ﻿// Copyright (c) 2025 Devayan Dewri. All rights reserved.
 import type { ApiErrorCode, CutList, EditMode, StyleTier } from "@ai-video-editor/shared-types";
 import { isApiErrorCode } from "@ai-video-editor/shared-types";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 // Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 // Commercial SaaS use is prohibited without written permission.
 import { FastifyInstance } from "fastify";
@@ -9,7 +9,8 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { db } from "../db";
-import { assets, generationJobs, projects, renders } from "../db/schema";
+import { assets, cutlistEdits, generationJobs, projects, renderOutcomes, renders } from "../db/schema";
+import { computeBehaviorDeltas } from "../lib/attribution";
 import { cacheDel, cacheGet, cacheSet } from "../lib/cache";
 import { createCompletionToken } from "../lib/crypto";
 import { buildInitialCutList } from "../lib/cutlist";
@@ -179,6 +180,9 @@ export async function projectRoutes(app: FastifyInstance) {
     }
 
     const body = request.validatedBody as { cutList: CutList };
+    const oldCutList = (project.cutList ?? body.cutList) as CutList;
+    const behaviorDeltas = computeBehaviorDeltas(oldCutList, body.cutList);
+
     const [updated] = await db
       .update(projects)
       .set({
@@ -194,6 +198,25 @@ export async function projectRoutes(app: FastifyInstance) {
     });
     if (activeRender?.workflowId) {
       await sendCutlistApprovedSignal(activeRender.workflowId, body.cutList);
+    }
+
+    await db.insert(cutlistEdits).values({
+      renderId: activeRender?.id ?? null,
+      projectId: id,
+      userId,
+      patch: { before: oldCutList, after: body.cutList },
+      attributedBehaviorDeltas: behaviorDeltas,
+      source: "manual_ui",
+    });
+
+    if (activeRender) {
+      await db
+        .update(renderOutcomes)
+        .set({
+          editCount: sql`${renderOutcomes.editCount} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(eq(renderOutcomes.renderId, activeRender.id));
     }
 
     await cacheDel(`projects:list:${userId}`);

@@ -18,6 +18,7 @@ Usage:
 import argparse
 import json
 import os
+import platform
 import sys
 import time
 from pathlib import Path
@@ -36,14 +37,17 @@ sys.path.insert(0, str(repo_root / "services" / "shared-py" / "src"))
 from ingest_worker.beat_detect import detect_beats, compute_energy_curve
 from ingest_worker.heatmap import compute_clip_heatmaps_batch, heatmap_to_metadata
 from ingest_worker.shot_detect import detect_shot_boundaries
+from ingest_worker.clip_emotion import compute_clip_emotion_profiles
 from reason_worker.clip_rank import rank_clips_for_slots
 from reason_worker.aspect_detect import detect_aspect_preset, ASPECT_PRESETS
-from reason_worker.cutlist_gen import generate_cutlist_programmatic
+from reason_worker.cutlist_gen import generate_cutlist_programmatic, _behavior_from_style_analysis
 from reason_worker.transition_select import select_xfade
 from reason_worker.audio_mix import build_audio_tracks
 from reason_worker.audio_scoring import ScoringConfig
+from reason_worker.save_the_cat import apply_save_the_cat_beats
 
-from shared_py.models import CutList, RenderConfig
+from shared_py.models import RenderConfig, AdaptiveFeatures, ClipEmotionProfile
+from shared_py.feature_tracer import get_and_clear_traces
 from shared_py.logging_config import StructuredLogger
 
 logger = StructuredLogger("batch2_offline_render")
@@ -64,7 +68,13 @@ def main():
     # Import probe here (not at top level) so subprocesses spawned by the
     # heatmap batch worker do not have to import boto3/storage stacks.
     from ingest_worker.probe import probe_video
-    from render_worker.compiler import compile_timeline, _has_nvenc, QUALITY_PROFILES
+    from render_worker.compiler import (
+    compile_timeline,
+    _has_nvenc,
+    QUALITY_PROFILES,
+    get_slot_window_fallback_count,
+    reset_slot_window_fallback_count,
+)
 
     # Keep render temp files on the project drive (E:) so we do not fill the
     # system drive (C:) with intermediate segments.
@@ -79,6 +89,12 @@ def main():
     parser.add_argument("--clips-limit", type=int, default=0, help="Limit number of clips (0 = all)")
     parser.add_argument("--tier", type=str, default="full_remix", help="Style tier")
     parser.add_argument("--skip-heatmap", action="store_true", help="Skip heatmap computation (faster, lower quality)")
+    parser.add_argument(
+        "--heatmap-workers",
+        type=int,
+        default=1 if platform.system() == "Windows" else min(4, os.cpu_count() or 1),
+        help="Number of parallel heatmap workers (default: 1 on Windows, min(4, cpu_count) elsewhere)",
+    )
     parser.add_argument("--preview", action="store_true", help="Render 360p 15s preview")
     parser.add_argument(
         "--nvenc",
@@ -112,6 +128,45 @@ def main():
         type=float,
         default=0.15,
         help="Score gap below which the clip-order tie-break is applied (default: 0.15)",
+    )
+    parser.add_argument(
+        "--feature-adaptive-slot-density",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use density-driven slot generation instead of one slot per beat (default: True)",
+    )
+    parser.add_argument(
+        "--feature-adaptive-audio",
+        action="store_true",
+        help="Use adaptive clip audio inclusion policy (PR-2)",
+    )
+    parser.add_argument(
+        "--feature-iconic-quotes",
+        action="store_true",
+        help="Detect and surface iconic dialogue quotes (PR-3)",
+    )
+    parser.add_argument(
+        "--feature-emotion-led-cuts",
+        action="store_true",
+        help="Weight cut placement by emotional peaks (PR-9)",
+    )
+    parser.add_argument(
+        "--feature-save-the-cat",
+        action="store_true",
+        help="Apply Save-the-Cat 15-beat story structure to slot sections",
+    )
+    parser.add_argument(
+        "--source-ip-hint",
+        type=str,
+        default=None,
+        help="Source IP hint for iconic quote detection (e.g. 'Cyberpunk Edgerunners')",
+    )
+    parser.add_argument(
+        "--clip-audio-strategy",
+        type=str,
+        choices=["iconic_only", "speech_only", "always"],
+        default=None,
+        help="Override the clip audio inclusion strategy derived from the reference",
     )
     args = parser.parse_args()
 
@@ -171,6 +226,7 @@ def main():
             window_s=0.5,
             stride_s=0.25,
             cache_dir=cache_dir,
+            max_workers=args.heatmap_workers,
         )
         missing_heatmaps: list[str] = []
         empty_heatmaps: list[str] = []
@@ -183,20 +239,21 @@ def main():
                 empty_heatmaps.append(cp.name)
 
         total_clips = len(clip_paths)
+        covered = total_clips - len(missing_heatmaps) - len(empty_heatmaps)
+        coverage = covered / total_clips if total_clips > 0 else 1.0
         if missing_heatmaps or empty_heatmaps:
             print(
                 f"⚠️  WARNING: heatmap coverage incomplete "
-                f"({len(missing_heatmaps)} missing, {len(empty_heatmaps)} empty out of {total_clips})"
+                f"({len(missing_heatmaps)} missing, {len(empty_heatmaps)} empty out of {total_clips}; coverage {coverage:.1%})"
             )
             if missing_heatmaps:
                 print(f"   Missing: {', '.join(missing_heatmaps[:5])}{'...' if len(missing_heatmaps) > 5 else ''}")
             if empty_heatmaps:
                 print(f"   Empty: {', '.join(empty_heatmaps[:5])}{'...' if len(empty_heatmaps) > 5 else ''}")
-            if len(missing_heatmaps) > total_clips * 0.2 or len(empty_heatmaps) > total_clips * 0.2:
-                raise RuntimeError(
-                    f"Heatmap coverage too low ({len(missing_heatmaps)} missing + {len(empty_heatmaps)} empty / {total_clips}). "
-                    f"This will cause clip repeats. Delete {cache_dir} or fix inputs and rerun."
-                )
+        assert coverage >= 0.8, (
+            f"Heatmap coverage too low ({coverage:.1%}; {len(missing_heatmaps)} missing + {len(empty_heatmaps)} empty / {total_clips}). "
+            f"This will cause clip repeats. Delete {cache_dir} or fix inputs and rerun."
+        )
 
     for idx, cp in enumerate(clip_paths):
         info = probe_video(str(cp))
@@ -213,6 +270,14 @@ def main():
         clip_metadata[clip_id] = meta
         clip_path_map[clip_id] = str(cp)
 
+    # 5b. Compute per-clip emotion profiles when the narrative feature is on.
+    if args.feature_emotion_led_cuts:
+        log_progress("emotion_profiles", 0.45, "Computing per-clip emotion profiles")
+        emotion_profiles = compute_clip_emotion_profiles(clip_path_map)
+        for clip_id, profile in emotion_profiles.items():
+            clip_metadata[clip_id]["emotion_profile"] = profile.model_dump(by_alias=False, mode="json")
+        print(f"Emotion profiles: {len(emotion_profiles)} computed/cached")
+
     # 6. Generate cutlist
     log_progress("cutlist", 0.60, "Generating programmatic cutlist")
     energy_curve = compute_energy_curve(str(song_path), num_points=64)
@@ -222,6 +287,19 @@ def main():
         target_duration = args.duration
     else:
         target_duration = beat_grid.duration_s if getattr(beat_grid, "duration_s", None) else probe_video(str(song_path)).duration_sec
+    features = AdaptiveFeatures(
+        use_adaptive_slot_density=args.feature_adaptive_slot_density,
+        use_adaptive_audio_policy=args.feature_adaptive_audio,
+        use_iconic_quote_detection=args.feature_iconic_quotes,
+        use_emotion_led_cuts=args.feature_emotion_led_cuts,
+    )
+    behavior = _behavior_from_style_analysis(style_analysis)
+    if args.clip_audio_strategy:
+        behavior.clip_audio_inclusion_strategy = args.clip_audio_strategy
+        if args.clip_audio_strategy == "speech_only":
+            behavior.clip_audio_min_importance = 0.3
+        elif args.clip_audio_strategy == "always":
+            behavior.clip_audio_min_importance = 0.0
     cutlist = generate_cutlist_programmatic(
         beat_grid=beat_grid,
         shot_boundaries=shot_boundaries,
@@ -232,11 +310,30 @@ def main():
         style_tier=args.tier,
         song_asset_id="song_001",
         user_clip_count=len(clip_paths),
+        behavior=behavior,
+        features=features,
     )
-    print(f"Cutlist: {len(cutlist.slots)} slots, {len(cutlist.overlays)} overlays")
+    if args.feature_save_the_cat:
+        cutlist = apply_save_the_cat_beats(cutlist, target_duration)
+        print(f"Cutlist: {len(cutlist.slots)} slots, {len(cutlist.overlays)} overlays (Save-the-Cat applied)")
+    else:
+        print(f"Cutlist: {len(cutlist.slots)} slots, {len(cutlist.overlays)} overlays")
+
+    # Warn when the clip limit is too low to avoid forced repeats.
+    if args.clips_limit > 0 and args.clips_limit < len(cutlist.slots) * 1.2:
+        print(
+            f"⚠️  WARNING: --clips-limit {args.clips_limit} is below the recommended "
+            f"minimum ({int(len(cutlist.slots) * 1.2)}) for {len(cutlist.slots)} slots. "
+            "Clips will be repeated and the edit will look like a slideshow."
+        )
 
     # 7. Rank clips
     log_progress("rank_clips", 0.70, "Ranking clips for slots")
+    clip_emotion_profiles = {
+        clip_id: ClipEmotionProfile(**meta["emotion_profile"])
+        for clip_id, meta in clip_metadata.items()
+        if meta.get("emotion_profile")
+    }
     rankings = rank_clips_for_slots(
         cutlist.slots,
         clip_metadata,
@@ -244,6 +341,8 @@ def main():
         force_exhaust=True,
         clip_order_fallback=args.clip_order,
         clip_order_smart_threshold=args.clip_order_threshold,
+        clip_emotion_profiles=clip_emotion_profiles if args.feature_emotion_led_cuts else None,
+        interleave_glimpses=args.feature_emotion_led_cuts,
     )
 
     # Apply selected clip IDs and window info
@@ -256,6 +355,7 @@ def main():
             if top.window_start_s is not None:
                 slot.source_window_start_s = top.window_start_s
             slot.heatmap_score = top.window_score
+            slot.emotion_match_score = top.emotion_match_score
 
     # 8. Direction-aware transitions
     log_progress("transitions", 0.75, "Selecting direction-aware transitions")
@@ -281,12 +381,37 @@ def main():
         ],
         min_dialogue_score=0.55,
     )
+    source_ip_hint = args.source_ip_hint
+    if not source_ip_hint and "CYBERPUNK" in REFERENCE_NAME.upper():
+        source_ip_hint = "Cyberpunk Edgerunners"
+    # Build a content-signals embedding for feature gating. The reference is an
+    # AMV with a song, so the trailer-style path should win for iconic quotes
+    # and sidechain ducking should stay enabled.
+    energy_curve = compute_energy_curve(str(song_path))
+    song_energy_mean = (
+        sum(energy_curve) / len(energy_curve) if energy_curve else 0.5
+    )
+    motion_density = min(
+        1.0, len(shot_boundaries) / max(1.0, ref_info.duration_sec)
+    )
+    content_embedding = {
+        "song_present": 1.0,
+        "song_energy_mean": song_energy_mean,
+        "motion_density": motion_density,
+        "speech_ratio": 0.0,
+        "avg_speech_segment_duration_s": 0.0,
+        "song_has_vocals": 1.0,
+    }
+
     cutlist.audio_tracks = build_audio_tracks(
         cutlist,
         beat_grid=beat_grid,
         song_asset_id="song_001",
         clip_paths=clip_path_map,
         scoring_cfg=scoring_cfg,
+        behavior=behavior,
+        source_ip_hint=source_ip_hint,
+        content_embedding=content_embedding,
     )
     print(f"Audio tracks: {len(cutlist.audio_tracks)} ({sum(1 for t in cutlist.audio_tracks if t.role == 'dialogue')} dialogue)")
 
@@ -345,17 +470,39 @@ def main():
 
     )
 
+    reset_slot_window_fallback_count()
     start_render = time.time()
     result_path = compile_timeline(cutlist, clip_path_map, str(output_path), config, style_tier=args.tier)
     render_time = time.time() - start_render
+    fallback_count = get_slot_window_fallback_count()
+    print(f"slot_window_fallback_count: {fallback_count}")
 
     log_progress("complete", 1.0, f"Render complete in {render_time:.1f}s")
     print(f"Output: {result_path}")
+
+    # Collect feature runtime traces and compute the demo grade.
+    traces = get_and_clear_traces()
+    real_count = sum(1 for t in traces if t.real_path_ran)
+    total = len(traces)
+    real_path_ratio = real_count / total if total else 0.0
+    demo_grade = real_path_ratio >= 0.8
+
+    cutlist.feature_runtime_report = traces
+    cutlist.real_path_ratio = real_path_ratio
+    cutlist.demo_grade = demo_grade
 
     # Write cutlist for inspection
     cutlist_path = OUTPUT_DIR / "cutlist.json"
     cutlist_path.write_text(cutlist.model_dump_json(by_alias=True, indent=2), encoding="utf-8")
     print(f"Cutlist: {cutlist_path}")
+
+    print("\nFeature runtime summary:")
+    for t in sorted(traces, key=lambda x: x.feature):
+        path = "real" if t.real_path_ran else f"fallback ({t.fallback_reason or 'unknown'})"
+        print(f"  {t.feature}: {path} ({t.elapsed_ms:.1f}ms)")
+    print(f"  real_path_ratio: {real_path_ratio:.2f}  demo_grade: {demo_grade}")
+    if not demo_grade:
+        print("  ⚠️  Demo grade failed — at least one feature ran a fallback path.")
 
 
 if __name__ == "__main__":

@@ -39,6 +39,15 @@ def _cache_key(path: str) -> str:
 
 
 @dataclass
+class WordTimestamp:
+    """A single word with its start/end time inside a clip."""
+
+    text: str
+    start_s: float
+    end_s: float
+
+
+@dataclass
 class DialogueSegment:
     """A detected speech segment inside a clip."""
 
@@ -48,6 +57,7 @@ class DialogueSegment:
     speech_score: float = 0.0  # 0-1, how likely this is usable dialogue
     phrase_match_score: float = 0.0  # 0-1, overlap with iconic/key phrases
     source_clip_id: Optional[str] = None
+    words: List[WordTimestamp] = field(default_factory=list)
 
     @property
     def total_score(self) -> float:
@@ -90,19 +100,24 @@ def _whisper_device() -> str:
 
 
 def _load_whisper_model(model_size: str = "base") -> Optional[object]:
-    """Load the Whisper model once and cache it."""
+    """Load the faster-whisper model once and cache it."""
     global _whisper_model
     if _whisper_model is not None:
         return _whisper_model
     try:
-        import whisper
+        from faster_whisper import WhisperModel
     except ImportError:
-        logger.warning("openai-whisper not installed; using spectral dialogue fallback")
+        logger.warning("faster-whisper not installed; using spectral dialogue fallback")
         return None
     try:
         device = _whisper_device()
-        _whisper_model = whisper.load_model(model_size, device=device)
-        logger.info("whisper model loaded", model=model_size, device=device)
+        compute_type = "float16" if device == "cuda" else "int8"
+        _whisper_model = WhisperModel(
+            model_size,
+            device=device,
+            compute_type=compute_type,
+        )
+        logger.info("whisper model loaded", model=model_size, device=device, compute_type=compute_type)
         return _whisper_model
     except Exception as e:
         logger.warning("failed to load whisper model", error=str(e))
@@ -145,36 +160,47 @@ def _whisper_segments(
         return []
 
     try:
-        device = _whisper_device()
-        fp16 = device == "cuda"
-        result = model.transcribe(
+        segments_iter, info = model.transcribe(
             clip_path,
             language=cfg.language,
-            fp16=fp16,
-            verbose=False,
-            word_timestamps=False,
+            word_timestamps=True,
+            condition_on_previous_text=False,
         )
     except Exception as e:
         logger.warning("whisper transcription failed", path=clip_path, error=str(e))
         return []
 
     segments: List[DialogueSegment] = []
-    for seg in result.get("segments", []):
-        no_speech = seg.get("no_speech_prob", 0.0) or 0.0
+    for seg in segments_iter:
+        no_speech = getattr(seg, "no_speech_prob", 0.0) or 0.0
         if no_speech > cfg.max_no_speech_prob:
             continue
-        avg_logprob = seg.get("avg_logprob", -1.0) or -1.0
+        avg_logprob = getattr(seg, "avg_logprob", -1.0) or -1.0
         # Convert avg_logprob (usually -1..0) to a 0..1 speech-confidence score.
         speech_score = min(1.0, max(0.0, 1.0 + avg_logprob))
-        text = seg.get("text", "")
+        text = getattr(seg, "text", "") or ""
         phrase_score = _phrase_match_score(text, cfg.iconic_phrases)
+        words: List[WordTimestamp] = []
+        for word in (seg.words or []):
+            wtext = getattr(word, "word", "").strip()
+            if not wtext:
+                continue
+            words.append(
+                WordTimestamp(
+                    text=wtext,
+                    start_s=float(getattr(word, "start", seg.start)),
+                    end_s=float(getattr(word, "end", seg.end)),
+                )
+            )
+
         segments.append(
             DialogueSegment(
-                start_s=float(seg.get("start", 0.0)),
-                end_s=float(seg.get("end", 0.0)),
+                start_s=float(seg.start),
+                end_s=float(seg.end),
                 text=text,
                 speech_score=speech_score,
                 phrase_match_score=phrase_score,
+                words=words,
             )
         )
     _transcript_cache[key] = segments

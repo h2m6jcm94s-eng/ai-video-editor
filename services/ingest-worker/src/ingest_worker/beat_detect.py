@@ -16,6 +16,14 @@ except ImportError:
     librosa = None  # type: ignore[assignment]
     _HAS_LIBROSA = False
 
+try:
+    from madmom.features.beats import DBNBeatTrackingProcessor, RNNBeatProcessor
+    _HAS_MADMOM = True
+except ImportError:
+    DBNBeatTrackingProcessor = None  # type: ignore[misc,assignment]
+    RNNBeatProcessor = None  # type: ignore[misc,assignment]
+    _HAS_MADMOM = False
+
 from shared_py.logging_config import StructuredLogger
 from shared_py.models import BeatGrid, BeatSegment
 
@@ -51,26 +59,80 @@ def decode_to_wav(input_path: str) -> str:
     return wav_path
 
 
-def detect_beats_allin1(audio_path: str) -> Optional[BeatGrid]:
-    """Try allin1 for beats + downbeats + sections."""
+def _audio_duration(audio_path: str) -> float:
+    """Return audio duration in seconds, using librosa when possible."""
+    if _HAS_LIBROSA:
+        try:
+            return float(librosa.get_duration(path=audio_path))
+        except Exception:
+            pass
     try:
-        from allin1 import analyze
-        result = analyze(audio_path)
+        out = subprocess.check_output(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", audio_path],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        return max(0.0, float(out.strip()))
+    except Exception:
+        logger.warning("Could not determine audio duration; using default", path=audio_path)
+        return 120.0
+
+
+def _synthetic_beat_grid(audio_path: str, bpm: float = 120.0) -> BeatGrid:
+    """Last-resort beat grid: a steady 120 BPM (or provided BPM) grid."""
+    duration = _audio_duration(audio_path)
+    beat_period = 60.0 / bpm
+    beats = np.arange(0.0, duration, beat_period).tolist()
+    downbeats = beats[::4] if beats else []
+    beat_positions = ([1, 2, 3, 4] * (len(beats) // 4 + 1))[: len(beats)]
+
+    # Simple four-section fallback so downstream cutlist generation still works.
+    segment_len = max(duration / 4, 1.0)
+    segments = [
+        BeatSegment(start=i * segment_len, end=min((i + 1) * segment_len, duration), label=label)
+        for i, label in enumerate(["intro", "verse", "chorus", "outro"])
+    ]
+
+    return BeatGrid(
+        bpm=bpm,
+        beats=beats,
+        downbeats=downbeats,
+        beat_positions=beat_positions,
+        segments=segments,
+    )
+
+
+def detect_beats_madmom(audio_path: str) -> Optional[BeatGrid]:
+    """Try madmom for beats + downbeats, fall back to librosa structure for sections."""
+    if not _HAS_MADMOM or DBNBeatTrackingProcessor is None or RNNBeatProcessor is None:
+        return None
+
+    try:
+        act = RNNBeatProcessor()(audio_path)
+        beat_proc = DBNBeatTrackingProcessor(fps=100)
+        beat_times = np.array(beat_proc(act))
+
+        if len(beat_times) < 2:
+            return None
+
+        intervals = np.diff(beat_times)
+        estimated_bpm = float(60.0 / np.median(intervals)) if len(intervals) else 120.0
+        estimated_bpm = max(30.0, min(300.0, estimated_bpm))
+
+        downbeats = beat_times[::4].tolist()
+        beat_positions = ([1, 2, 3, 4] * (len(beat_times) // 4 + 1))[: len(beat_times)]
+
+        segments = _detect_structure_librosa(audio_path, beat_times)
 
         return BeatGrid(
-            bpm=result.bpm,
-            beats=result.beats.tolist() if hasattr(result.beats, "tolist") else list(result.beats),
-            downbeats=result.downbeats.tolist() if hasattr(result.downbeats, "tolist") else list(result.downbeats),
-            beat_positions=result.beat_positions.tolist() if hasattr(result.beat_positions, "tolist") else list(result.beat_positions),
-            segments=[
-                BeatSegment(start=s.start, end=s.end, label=s.label)
-                for s in result.segments
-            ],
+            bpm=estimated_bpm,
+            beats=beat_times.tolist(),
+            downbeats=downbeats,
+            beat_positions=beat_positions,
+            segments=segments,
         )
-    except ImportError:
-        return None
     except Exception as e:
-        logger.warning("allin1 beat detection failed", error=str(e))
+        logger.warning("madmom beat detection failed", error=str(e))
         return None
 
 
@@ -231,17 +293,23 @@ def detect_beats_librosa(audio_path: str) -> BeatGrid:
 
 
 def detect_beats(audio_path: str) -> BeatGrid:
-    """Detect beat grid. Try allin1 first, fall back to librosa."""
+    """Detect beat grid. Cascade: madmom -> librosa -> synthetic 120 BPM grid.
+
+    The synthetic grid guarantees that cutlist generation never crashes, even
+    when every analyzer is unavailable or the audio is unanalyzable.
+    """
     wav_path = decode_to_wav(audio_path)
 
     try:
-        result = detect_beats_allin1(wav_path)
+        result = detect_beats_madmom(wav_path)
         if result is None:
             if _HAS_LIBROSA:
-                result = detect_beats_librosa(wav_path)
-            else:
-                logger.warning("No beat detector available (allin1/librosa missing)")
-                raise RuntimeError("No beat detector available")
+                try:
+                    result = detect_beats_librosa(wav_path)
+                except Exception as e:
+                    logger.warning("librosa beat detection failed, using synthetic grid", error=str(e))
+            if result is None:
+                result = _synthetic_beat_grid(wav_path)
         return result
     finally:
         if os.path.exists(wav_path) and wav_path != audio_path:

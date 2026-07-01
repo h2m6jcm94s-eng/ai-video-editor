@@ -6,17 +6,31 @@
  */
 
 import { cutListSchema } from "@ai-video-editor/shared-types";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, count, eq, gte, inArray, ne, or, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { db } from "../db";
-import { assets, generationJobs, projects, renders } from "../db/schema";
+import {
+  assets,
+  behaviorCorpusEntries,
+  generationJobs,
+  projects,
+  renderBehavior,
+  renderOutcomes,
+  renderSignals,
+  renders,
+  userTasteProfiles,
+} from "../db/schema";
+import { canUserContribute, isAnomalousCorpusEntry, WEEKLY_CONTRIBUTION_CAP } from "../lib/behaviorCorpus";
 import { verifyCompletionToken } from "../lib/crypto";
 import { sendError } from "../lib/errors";
 import { recordUserEvent } from "../lib/userEvents";
 import { requireInternalToken } from "../middleware/requireInternalToken";
 import { validateBody } from "../middleware/validate";
 import { publishProgress, setJobStatus } from "../services/queue";
+
+const OUTCOME_FINALIZATION_DAYS = 7;
+const OUTCOME_FINALIZATION_MS = OUTCOME_FINALIZATION_DAYS * 24 * 60 * 60 * 1000;
 
 const userEventSchema = z
   .object({
@@ -38,6 +52,7 @@ const createAssetSchema = z
       .max(255)
       .regex(/^[^/\\\\]+$/, "Filename cannot contain path separators"),
     mimeType: z.string().min(1).max(100),
+    storageKey: z.string().min(1).max(1024).optional(),
   })
   .strict();
 
@@ -72,6 +87,35 @@ const metadataPatchSchema = z
       .refine((val) => Object.keys(val).length <= 100, {
         message: "Metadata has too many keys",
       }),
+  })
+  .strict();
+
+const behaviorCorpusEntrySchema = z
+  .object({
+    signals: z.record(z.unknown()),
+    behavior: z.record(z.unknown()),
+    qualityWeight: z.number().min(0).max(1),
+    userId: z.string().uuid(),
+    isPublic: z.boolean().default(true),
+    status: z.enum(["active", "quarantined", "rejected"]).optional(),
+    source: z.string().max(100).default("user_render"),
+    producingPredictorVersion: z.string().max(100).optional(),
+  })
+  .strict();
+
+const biasVectorSchema = z.record(z.number());
+
+const updateBiasSchema = z
+  .object({
+    cluster: z.string().max(50).optional(),
+    biasVector: biasVectorSchema,
+    profileConfidenceDelta: z.number().min(0).max(1).default(0.05),
+  })
+  .strict();
+
+const ingestToCorpusSchema = z
+  .object({
+    qualityWeight: z.number().min(0).max(1).default(0.5),
   })
   .strict();
 
@@ -164,7 +208,7 @@ export async function internalRoutes(app: FastifyInstance) {
       }
 
       const assetId = crypto.randomUUID();
-      const key = `projects/${body.projectId}/${body.type}/${assetId}-${body.filename}`;
+      const key = body.storageKey ?? `projects/${body.projectId}/${body.type}/${assetId}-${body.filename}`;
 
       const [asset] = await db
         .insert(assets)
@@ -414,6 +458,306 @@ export async function internalRoutes(app: FastifyInstance) {
       await setJobStatus(jobId, "failed", 0, body.errorMessage);
 
       return { job: updated };
+    },
+  );
+
+  // ── Behavior corpus ───────────────────────────────────────────────────────
+
+  const corpusQuerySchema = z
+    .object({
+      userId: z.string().uuid(),
+      referenceGenomeHash: z.string().max(255).optional(),
+      since: z.string().datetime().optional(),
+      userOnly: z.enum(["true", "false"]).default("false"),
+      limit: z.coerce.number().int().min(1).max(1000).default(500),
+    })
+    .strict();
+
+  app.get("/api/internal/behavior-corpus", async (request, reply) => {
+    const parsed = corpusQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      return sendError(reply, 422, "Invalid query", "VALIDATION_ERROR", parsed.error.format());
+    }
+    const { userId, since, userOnly, limit } = parsed.data;
+
+    const publicOrUser =
+      userOnly === "true"
+        ? eq(behaviorCorpusEntries.userId, userId)
+        : or(eq(behaviorCorpusEntries.isPublic, true), eq(behaviorCorpusEntries.userId, userId));
+    const dateFilter = since ? gte(behaviorCorpusEntries.createdAt, new Date(since)) : undefined;
+    // Quarantined entries are never exposed to KNN / public reads.
+    const statusFilter = ne(behaviorCorpusEntries.status, "quarantined");
+    const whereClause = and(publicOrUser, statusFilter, dateFilter);
+
+    const entries = await db.query.behaviorCorpusEntries.findMany({
+      where: whereClause,
+      orderBy: (table, { desc }) => [desc(table.qualityWeight)],
+      limit,
+    });
+
+    return { entries };
+  });
+
+  async function countUserEntriesLast7d(userId: string): Promise<number> {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const [{ value }] = await db
+      .select({ value: count() })
+      .from(behaviorCorpusEntries)
+      .where(
+        and(
+          eq(behaviorCorpusEntries.userId, userId),
+          gte(behaviorCorpusEntries.createdAt, sevenDaysAgo),
+          inArray(behaviorCorpusEntries.status, ["active", "quarantined"]),
+        ),
+      );
+    return value ?? 0;
+  }
+
+  async function fetchActivePublicEntries(limit = 500): Promise<Array<{ signals: Record<string, unknown> }>> {
+    return db.query.behaviorCorpusEntries.findMany({
+      where: and(eq(behaviorCorpusEntries.status, "active"), eq(behaviorCorpusEntries.isPublic, true)),
+      orderBy: (table, { desc }) => [desc(table.qualityWeight)],
+      limit,
+    }) as Promise<Array<{ signals: Record<string, unknown> }>>;
+  }
+
+  app.post(
+    "/api/internal/behavior-corpus",
+    { preHandler: validateBody(behaviorCorpusEntrySchema) },
+    async (request, reply) => {
+      const body = request.validatedBody as z.infer<typeof behaviorCorpusEntrySchema>;
+
+      // Weekly contribution cap.
+      const userCount7d = await countUserEntriesLast7d(body.userId);
+      if (!canUserContribute(Array.from({ length: userCount7d }))) {
+        return sendError(
+          reply,
+          429,
+          `Weekly corpus contribution cap (${WEEKLY_CONTRIBUTION_CAP}) exceeded`,
+          "CORPUS_CAP_EXCEEDED",
+        );
+      }
+
+      // Anomaly detection against the active public corpus.
+      const activePublic = await fetchActivePublicEntries();
+      const anomalous = isAnomalousCorpusEntry(body.signals, activePublic);
+      const status = anomalous ? "quarantined" : (body.status ?? "active");
+      const isPublic = anomalous ? false : body.isPublic;
+      const source = anomalous ? "quarantined" : body.source;
+
+      const [entry] = await db
+        .insert(behaviorCorpusEntries)
+        .values({
+          signals: body.signals,
+          behavior: body.behavior,
+          qualityWeight: body.qualityWeight,
+          userId: body.userId,
+          isPublic,
+          status,
+          source,
+          producingPredictorVersion: body.producingPredictorVersion,
+        })
+        .returning();
+
+      return { entry };
+    },
+  );
+
+  // ── User taste profiles ───────────────────────────────────────────────────
+
+  app.get("/api/internal/user-taste-profiles/:userId", async (request, reply) => {
+    const { userId } = request.params as { userId: string };
+
+    let profile = await db.query.userTasteProfiles.findFirst({
+      where: eq(userTasteProfiles.userId, userId),
+    });
+
+    if (!profile) {
+      const [created] = await db.insert(userTasteProfiles).values({ userId }).returning();
+      profile = created;
+    }
+
+    return { profile };
+  });
+
+  app.put(
+    "/api/internal/user-taste-profiles/:userId/bias",
+    { preHandler: validateBody(updateBiasSchema) },
+    async (request, reply) => {
+      const { userId } = request.params as { userId: string };
+      const body = request.validatedBody as z.infer<typeof updateBiasSchema>;
+      const cluster = body.cluster || "general";
+
+      const existing = await db.query.userTasteProfiles.findFirst({
+        where: eq(userTasteProfiles.userId, userId),
+      });
+
+      const typedClusterBiasVectors = (existing?.clusterBiasVectors ?? { general: {} }) as Record<
+        string,
+        Record<string, number>
+      >;
+      const existingCluster = typedClusterBiasVectors[cluster] ?? {};
+      const merged: Record<string, number> = { ...existingCluster };
+      for (const [key, value] of Object.entries(body.biasVector)) {
+        merged[key] = (merged[key] || 0) + value;
+      }
+      const clusterBiasVectors = { ...typedClusterBiasVectors, [cluster]: merged };
+
+      if (!existing) {
+        const [created] = await db
+          .insert(userTasteProfiles)
+          .values({
+            userId,
+            clusterBiasVectors,
+            profileConfidence: body.profileConfidenceDelta,
+          })
+          .returning();
+        return { profile: created };
+      }
+
+      const [updated] = await db
+        .update(userTasteProfiles)
+        .set({
+          clusterBiasVectors,
+          profileConfidence: Math.min(1, (existing.profileConfidence || 0) + body.profileConfidenceDelta),
+          lastUpdatedAt: new Date(),
+        })
+        .where(eq(userTasteProfiles.id, existing.id))
+        .returning();
+
+      return { profile: updated };
+    },
+  );
+
+  // ── Render feedback bundle / corpus ingestion ─────────────────────────────
+
+  app.get("/api/internal/renders/:renderId/feedback", async (request, reply) => {
+    const { renderId } = request.params as { renderId: string };
+
+    const job = await db.query.renders.findFirst({ where: eq(renders.id, renderId) });
+    if (!job) {
+      return sendError(reply, 404, "Render not found", "NOT_FOUND");
+    }
+
+    const signals = await db.query.renderSignals.findFirst({
+      where: eq(renderSignals.renderId, renderId),
+    });
+    const behavior = await db.query.renderBehavior.findFirst({
+      where: eq(renderBehavior.renderId, renderId),
+    });
+
+    return { signals, behavior, userId: job.userId, projectId: job.projectId };
+  });
+
+  app.post(
+    "/api/internal/renders/:renderId/ingest-to-corpus",
+    { preHandler: validateBody(ingestToCorpusSchema) },
+    async (request, reply) => {
+      const { renderId } = request.params as { renderId: string };
+      const body = request.validatedBody as z.infer<typeof ingestToCorpusSchema>;
+
+      const job = await db.query.renders.findFirst({ where: eq(renders.id, renderId) });
+      if (!job) {
+        return sendError(reply, 404, "Render not found", "NOT_FOUND");
+      }
+
+      const signals = await db.query.renderSignals.findFirst({
+        where: eq(renderSignals.renderId, renderId),
+      });
+      const behavior = await db.query.renderBehavior.findFirst({
+        where: eq(renderBehavior.renderId, renderId),
+      });
+      if (!signals || !behavior) {
+        return sendError(reply, 422, "Missing signals or behavior for render", "VALIDATION_ERROR");
+      }
+
+      const project = await db.query.projects.findFirst({ where: eq(projects.id, job.projectId) });
+      if (project?.excludeFromLearning) {
+        return { ok: true, excluded: true, reason: "project excluded from learning" };
+      }
+
+      // Outcomes are provisional until the 7-day labeling window closes.
+      let outcome = await db.query.renderOutcomes.findFirst({
+        where: eq(renderOutcomes.renderId, renderId),
+      });
+      const completedAt = job.completedAt ? new Date(job.completedAt).getTime() : Date.now();
+      const windowClosed = Date.now() - completedAt >= OUTCOME_FINALIZATION_MS;
+
+      if (!outcome?.isFinalized) {
+        if (!windowClosed) {
+          return sendError(
+            reply,
+            425,
+            `Outcome labeling window still open; finalize after ${OUTCOME_FINALIZATION_DAYS} days`,
+            "OUTCOME_WINDOW_OPEN",
+          );
+        }
+
+        const now = new Date();
+        await db
+          .insert(renderOutcomes)
+          .values({
+            renderId,
+            userId: job.userId,
+            projectId: job.projectId,
+            isFinalized: true,
+            finalizedAt: now,
+            updatedAt: now,
+          })
+          .onConflictDoUpdate({
+            target: renderOutcomes.renderId,
+            set: { isFinalized: true, finalizedAt: now, updatedAt: now },
+          });
+        outcome = {
+          ...(outcome ?? {}),
+          isFinalized: true,
+          finalizedAt: now,
+        } as typeof renderOutcomes.$inferSelect;
+      }
+
+      // Weekly contribution cap.
+      const userCount7d = await countUserEntriesLast7d(job.userId);
+      if (!canUserContribute(Array.from({ length: userCount7d }))) {
+        return sendError(
+          reply,
+          429,
+          `Weekly corpus contribution cap (${WEEKLY_CONTRIBUTION_CAP}) exceeded`,
+          "CORPUS_CAP_EXCEEDED",
+        );
+      }
+
+      let profile = await db.query.userTasteProfiles.findFirst({
+        where: eq(userTasteProfiles.userId, job.userId),
+      });
+      if (!profile) {
+        const [created] = await db.insert(userTasteProfiles).values({ userId: job.userId }).returning();
+        profile = created;
+      }
+
+      // Anomaly detection against the active public corpus.
+      const activePublic = await fetchActivePublicEntries();
+      const anomalous = isAnomalousCorpusEntry(signals as Record<string, unknown>, activePublic);
+
+      const contribute = profile.contributeToGlobalCorpus ?? true;
+      const status = anomalous ? "quarantined" : "active";
+      const isPublic = anomalous ? false : contribute;
+      const source = anomalous ? "quarantined" : "user_render";
+
+      const [entry] = await db
+        .insert(behaviorCorpusEntries)
+        .values({
+          signals: signals as Record<string, unknown>,
+          behavior: behavior as Record<string, unknown>,
+          qualityWeight: body.qualityWeight,
+          userId: job.userId,
+          isPublic,
+          status,
+          source,
+          producingPredictorVersion: behavior.predictorVersion ?? undefined,
+        })
+        .returning();
+
+      return { ok: true, entry };
     },
   );
 }

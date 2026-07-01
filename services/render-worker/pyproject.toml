@@ -3,6 +3,7 @@ name = "render-worker"
 version = "0.1.0"
 dependencies = [
     "shared-py",
+    "reason-worker",
     "ffmpeg-python>=0.2.0",
     "av>=12.0.0",
     "numpy>=1.26.0",
@@ -15,3 +16,4 @@ dependencies = [
 
 [tool.uv.sources]
 shared-py = { workspace = true }
+reason-worker = { workspace = true }

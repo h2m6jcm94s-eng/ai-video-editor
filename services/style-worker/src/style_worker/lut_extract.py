@@ -26,6 +26,7 @@ except ImportError:
 
 from shared_py.logging_config import StructuredLogger
 from shared_py.models import StyleAnalysis
+from shared_py.storage import get_storage
 
 logger = StructuredLogger("style_worker.lut_extract")
 
@@ -107,6 +108,7 @@ def _extract_lut_color_matcher(
     output_dir: str,
     strength: float = 0.5,
     lut_size: int = LUT_SIZE,
+    asset_id: Optional[str] = None,
 ) -> Tuple[Optional[str], StyleAnalysis]:
     """Extract LUT using HM-MVGD-HM color matching.
 
@@ -131,6 +133,13 @@ def _extract_lut_color_matcher(
     _write_cube_file(cube_path, blended, lut_size)
 
     analysis = _build_style_analysis(frames, median_frame, cube_path)
+    if asset_id:
+        storage_key = f"luts/{asset_id}/global.cube"
+        try:
+            get_storage().put(cube_path, storage_key, content_type="application/vnd.adobe.cube")
+            analysis.lut_storage_key = storage_key
+        except Exception as e:
+            logger.warning("Failed to persist LUT to storage", asset_id=asset_id, error=str(e))
     return cube_path, analysis
 
 
@@ -139,6 +148,7 @@ def _extract_lut_reinhard(
     output_dir: str,
     strength: float = 0.5,
     lut_size: int = LUT_SIZE,
+    asset_id: Optional[str] = None,
 ) -> Tuple[Optional[str], StyleAnalysis]:
     """Fallback LUT extraction using a simple Reinhard-style mean/std transfer."""
     median_frame = np.median(np.stack(frames), axis=0).astype(np.uint8)
@@ -174,6 +184,13 @@ def _extract_lut_reinhard(
     _write_cube_file(cube_path, lut_data, lut_size)
 
     analysis = _build_style_analysis(frames, median_frame, cube_path)
+    if asset_id:
+        storage_key = f"luts/{asset_id}/global.cube"
+        try:
+            get_storage().put(cube_path, storage_key, content_type="application/vnd.adobe.cube")
+            analysis.lut_storage_key = storage_key
+        except Exception as e:
+            logger.warning("Failed to persist LUT to storage", asset_id=asset_id, error=str(e))
     return cube_path, analysis
 
 
@@ -221,6 +238,7 @@ def extract_lut_from_reference(
     video_path: str,
     output_dir: str,
     strength: float = 0.5,
+    asset_id: Optional[str] = None,
 ) -> Tuple[Optional[str], StyleAnalysis]:
     """Extract a .cube LUT from reference video and return style analysis.
 
@@ -238,11 +256,11 @@ def extract_lut_from_reference(
 
     if _HAS_COLOR_MATCHER and cv2 is not None:
         try:
-            return _extract_lut_color_matcher(frames, output_dir, strength)
+            return _extract_lut_color_matcher(frames, output_dir, strength, asset_id=asset_id)
         except Exception as e:
             logger.warning("color-matcher LUT extraction failed, falling back", error=str(e))
 
     if colour is None:
         return None, StyleAnalysis(lut_extracted=False)
 
-    return _extract_lut_reinhard(frames, output_dir, strength)
+    return _extract_lut_reinhard(frames, output_dir, strength, asset_id=asset_id)

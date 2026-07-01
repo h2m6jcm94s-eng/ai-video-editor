@@ -23,4 +23,7 @@ def __getattr__(name):
     if name == "extract_genome":
         from style_worker.genome.extract import extract_genome
         return extract_genome
+    if name == "analyze_reference":
+        from style_worker.reference_analysis import analyze_reference
+        return analyze_reference
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

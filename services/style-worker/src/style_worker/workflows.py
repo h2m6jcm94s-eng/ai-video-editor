@@ -56,33 +56,46 @@ class AnalyzeStyleWorkflow:
         retry = RetryPolicy(maximum_attempts=3)
         timeout = timedelta(seconds=300)
 
-        # Download the reference video from R2/S3 to a local temp path.
-        reference_video_path = await workflow.execute_activity(
-            "download_reference_video",
-            args=(input.asset_id, input.storage_key),
+        # Analyze the reference once and cache the result. This is the single
+        # source of truth for LUT, genome, shot boundaries, quality warnings.
+        ref_wrapper = await workflow.execute_activity(
+            "analyze_reference_activity",
+            args=(
+                input.asset_id,
+                input.storage_key,
+                input.project_id,
+                input.lut_strength,
+                None,
+                None,
+                None,
+            ),
             start_to_close_timeout=timeout,
             retry_policy=retry,
         )
+        reference_video_path = ref_wrapper["videoPath"]
+        ref_analysis = ref_wrapper["referenceAnalysis"]
+        shot_boundaries = ref_analysis.get("shotBoundaries", [])
 
         try:
-            # LUT extraction is independent of motion/transitions/text — run in parallel
+            # LUT extraction is independent of motion/transitions/text — run in parallel.
+            # Pass the cached reference analysis so the activity short-circuits.
             lut_future = workflow.execute_activity(
                 "extract_lut",
-                args=(reference_video_path, "", input.lut_strength, input.project_id),
+                args=(reference_video_path, "", input.lut_strength, input.project_id, ref_analysis),
                 start_to_close_timeout=timeout,
                 retry_policy=retry,
             )
 
             motion_future = workflow.execute_activity(
                 "analyze_motion",
-                args=(reference_video_path, input.shot_boundaries),
+                args=(reference_video_path, shot_boundaries),
                 start_to_close_timeout=timeout,
                 retry_policy=retry,
             )
 
             transitions_future = workflow.execute_activity(
                 "classify_shot_transitions",
-                args=(reference_video_path, input.shot_boundaries),
+                args=(reference_video_path, shot_boundaries),
                 start_to_close_timeout=timeout,
                 retry_policy=retry,
             )
@@ -152,22 +165,33 @@ class AnalyzeGenomeWorkflow:
         retry = RetryPolicy(maximum_attempts=3)
         timeout = timedelta(seconds=300)
 
-        reference_video_path = await workflow.execute_activity(
-            "download_reference_video",
-            args=(input.asset_id, input.storage_key),
+        ref_wrapper = await workflow.execute_activity(
+            "analyze_reference_activity",
+            args=(
+                input.asset_id,
+                input.storage_key,
+                input.project_id,
+                0.5,
+                input.beat_grid,
+                input.project_clips,
+                None,
+            ),
             start_to_close_timeout=timeout,
             retry_policy=retry,
         )
+        reference_video_path = ref_wrapper["videoPath"]
+        ref_analysis = ref_wrapper["referenceAnalysis"]
 
         try:
             genome = await workflow.execute_activity(
                 "extract_genome_activity",
                 args=(
                     reference_video_path,
-                    input.beat_grid,
-                    input.shot_boundaries,
-                    input.style_analysis,
+                    None,
+                    None,
+                    None,
                     input.project_clips,
+                    ref_analysis,
                 ),
                 start_to_close_timeout=timeout,
                 retry_policy=retry,

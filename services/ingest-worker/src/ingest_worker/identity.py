@@ -16,6 +16,8 @@ import logging
 import os
 from typing import Dict, List, Optional
 
+from shared_py.feature_tracer import FeatureTracer
+
 try:
     import cv2
 
@@ -169,56 +171,63 @@ def extract_faces_from_clips(
     submitted individually, but all clips share one model session and cache
     writes are batched per clip.
     """
-    results: Dict[str, List[FaceDetection]] = {clip_id: [] for clip_id in clip_paths}
-    if not _CV2:
-        logger.warning("cv2 not available; cannot extract faces")
-        return results
-    if np is None:
-        logger.warning("numpy not available; cannot extract faces")
-        return results
+    with FeatureTracer("identity_matte", gated_in=True) as ft:
+        results: Dict[str, List[FaceDetection]] = {clip_id: [] for clip_id in clip_paths}
+        if not _CV2:
+            ft.fallback("cv2_unavailable")
+            logger.warning("cv2 not available; cannot extract faces")
+            return results
+        if np is None:
+            ft.fallback("numpy_unavailable")
+            logger.warning("numpy not available; cannot extract faces")
+            return results
 
-    app = _get_face_app()
-    if app is None:
-        return results
+        app = _get_face_app()
+        if app is None:
+            ft.fallback("insightface_unavailable")
+            return results
 
-    for clip_id, clip_path in clip_paths.items():
-        opened = _open_clip(clip_path)
-        if opened is None:
-            continue
-        cap, video_fps, total_frames, width, height = opened
-        frame_area = max(1.0, float(width * height))
-        sample_interval = max(1, int(round(video_fps / sample_fps)))
+        for clip_id, clip_path in clip_paths.items():
+            opened = _open_clip(clip_path)
+            if opened is None:
+                continue
+            cap, video_fps, total_frames, width, height = opened
+            frame_area = max(1.0, float(width * height))
+            sample_interval = max(1, int(round(video_fps / sample_fps)))
 
-        frames_buffer: List[tuple[int, object, float]] = []
-        frame_idx = 0
-        try:
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                if frame_idx % sample_interval == 0:
-                    t_s = frame_idx / video_fps
-                    frames_buffer.append((frame_idx, frame, t_s))
-                    if len(frames_buffer) >= max_batch_frames:
-                        results[clip_id].extend(
-                            _process_frame_batch(
-                                app, frames_buffer, clip_id, width, height, frame_area
+            frames_buffer: List[tuple[int, object, float]] = []
+            frame_idx = 0
+            try:
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    if frame_idx % sample_interval == 0:
+                        t_s = frame_idx / video_fps
+                        frames_buffer.append((frame_idx, frame, t_s))
+                        if len(frames_buffer) >= max_batch_frames:
+                            results[clip_id].extend(
+                                _process_frame_batch(
+                                    app, frames_buffer, clip_id, width, height, frame_area
+                                )
                             )
+                            frames_buffer = []
+                    frame_idx += 1
+                    if frame_idx > total_frames + 10:
+                        break
+                if frames_buffer:
+                    results[clip_id].extend(
+                        _process_frame_batch(
+                            app, frames_buffer, clip_id, width, height, frame_area
                         )
-                        frames_buffer = []
-                frame_idx += 1
-                if frame_idx > total_frames + 10:
-                    break
-            if frames_buffer:
-                results[clip_id].extend(
-                    _process_frame_batch(
-                        app, frames_buffer, clip_id, width, height, frame_area
                     )
-                )
-        finally:
-            cap.release()
+            finally:
+                cap.release()
 
-    return results
+        total_detections = sum(len(v) for v in results.values())
+        ft.signature(f"clips={len(clip_paths)},detections={total_detections}")
+        ft.real()
+        return results
 
 
 def _detection_to_dict(fd: FaceDetection) -> dict:
