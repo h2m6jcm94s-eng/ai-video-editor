@@ -5,8 +5,9 @@ export const dynamic = "force-dynamic";
 import { ClerkProvider } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { AppChrome } from "@/components/AppChrome";
 import { AmbientBackground } from "@/components/dashboard/AmbientBackground";
-import { NotificationBell } from "@/components/NotificationBell";
+import { stencilFontVars } from "@/components/landing/fonts";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
@@ -26,16 +27,12 @@ export default function RootLayout({
   return (
     <ClerkProvider>
       <html lang="en" suppressHydrationWarning>
-        <body className={`${inter.variable} font-sans antialiased`}>
+        <body className={`${inter.variable} ${stencilFontVars} font-sans antialiased`}>
           <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
             <AmbientBackground />
             <div className="relative">
               {children}
-              <div className="fixed top-4 right-4 z-50 pointer-events-none">
-                <div className="glass rounded-full p-1.5">
-                  <NotificationBell />
-                </div>
-              </div>
+              <AppChrome />
             </div>
             <Toaster />
           </ThemeProvider>

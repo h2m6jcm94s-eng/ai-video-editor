@@ -1,9 +1,14 @@
 // Copyright (c) 2025 Devayan Dewri. All rights reserved.
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
-export const dynamic = "force-dynamic";
+import { stencilFontVars } from "@/components/landing/fonts";
+import { LandingPage } from "@/components/landing/LandingPage";
 
-import { redirect } from "next/navigation";
+export const metadata = {
+  title: "Stencil — Recut anything in any style",
+  description:
+    "Drop in a reference video; Stencil parses its cuts, grade, transitions, and text, then composes the same edit with your clips and your song.",
+};
 
 export default function Home() {
-  redirect("/dashboard");
+  return <LandingPage className={stencilFontVars} />;
 }

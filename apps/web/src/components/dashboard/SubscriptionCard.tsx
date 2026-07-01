@@ -5,7 +5,6 @@
 import { Check, CreditCard, Loader2, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
 import { useApi } from "@/lib/api/client";
 import type { Subscription } from "@/types/api";
 
@@ -24,45 +23,38 @@ export function SubscriptionCard() {
 
   if (loading) {
     return (
-      <div className="glass-card p-5 flex items-center justify-center h-32">
-        <Loader2 className="w-5 h-5 animate-spin text-zinc-500" />
+      <div className="dash-card dash-sub" style={{ justifyContent: "center", minHeight: 108 }}>
+        <Loader2 className="dash-spin" style={{ width: 20, height: 20, color: "var(--fg-muted)" }} />
       </div>
     );
   }
 
+  const active = subscription?.status === "active";
+
   return (
-    <div className="glass-card p-5 relative overflow-hidden">
-      <div className="absolute -top-6 -right-6 w-24 h-24 rounded-full bg-indigo-500/20 blur-2xl" />
-      <div className="relative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-            {subscription ? (
-              <CreditCard className="w-6 h-6 text-white" />
-            ) : (
-              <Sparkles className="w-6 h-6 text-white" />
-            )}
-          </div>
-          <div>
-            <p className="text-sm text-zinc-400">Subscription</p>
-            <p className="text-xl font-bold text-white capitalize">{subscription?.plan || "Free"}</p>
-            <p className="text-xs text-zinc-500">
-              {subscription?.status === "active"
-                ? `Renews ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}`
-                : "Upgrade to unlock more features"}
-            </p>
-          </div>
+    <div className="dash-card dash-sub">
+      <div className="dash-sub-left">
+        <span className="dash-sub-icon">{subscription ? <CreditCard /> : <Sparkles />}</span>
+        <div>
+          <p className="dash-sub-k">Subscription</p>
+          <p className="dash-sub-plan">{subscription?.plan || "Free"}</p>
+          <p className="dash-sub-desc">
+            {active
+              ? `Renews ${new Date(subscription.currentPeriodEnd).toLocaleDateString()}`
+              : "Upgrade to unlock more features"}
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          {subscription?.features.slice(0, 2).map((feature) => (
-            <span key={feature} className="hidden sm:flex items-center gap-1 text-xs text-zinc-300">
-              <Check className="w-3 h-3 text-emerald-400" />
-              {feature}
-            </span>
-          ))}
-          <Button asChild size="sm" className="shrink-0">
-            <Link href="/pricing">{subscription?.status === "active" ? "Manage" : "Upgrade"}</Link>
-          </Button>
-        </div>
+      </div>
+      <div className="dash-sub-right">
+        {subscription?.features.slice(0, 2).map((feature) => (
+          <span key={feature} className="dash-feature">
+            <Check />
+            {feature}
+          </span>
+        ))}
+        <Link href="/pricing" className="dash-btn dash-btn--sm">
+          {active ? "Manage" : "Upgrade"}
+        </Link>
       </div>
     </div>
   );

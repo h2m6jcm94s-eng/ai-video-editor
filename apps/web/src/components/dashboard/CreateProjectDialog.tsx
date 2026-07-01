@@ -26,6 +26,8 @@ import { useApi } from "@/lib/api/client";
 import { APIError } from "@/lib/api/error";
 import { mapApiValidationErrors } from "@/lib/api/formErrors";
 
+const ACCENT_BUTTON = "bg-[#ff4d1f] hover:bg-[#ff5c30] text-white border-0 shadow-none transition-colors";
+
 type FormData = z.infer<typeof createProjectSchema>;
 
 const STYLE_LABELS: Record<(typeof STYLE_TIER)[number], string> = {
@@ -41,7 +43,7 @@ const MODE_LABELS: Record<(typeof EDIT_MODE)[number], string> = {
   assisted: "Assisted (you approve the cutlist)",
 };
 
-export function CreateProjectDialog() {
+export function CreateProjectDialog({ className }: { className?: string } = {}) {
   const router = useRouter();
   const api = useApi();
   const [open, setOpen] = useState(false);
@@ -85,13 +87,10 @@ export function CreateProjectDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button
-          size="sm"
-          className="gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-glow hover:shadow-glow-lg transition-all border-0"
-        >
-          <Plus className="w-4 h-4" />
+        <button type="button" className={className ?? "dash-btn dash-btn--primary"}>
+          <Plus />
           New Project
-        </Button>
+        </button>
       </DialogTrigger>
       <DialogContent className="glass-strong border-glass-strong text-glass sm:max-w-md rounded-2xl">
         <DialogHeader>
@@ -106,7 +105,7 @@ export function CreateProjectDialog() {
             <Input
               id="project-name"
               placeholder="My Awesome Edit"
-              className="bg-glass border-glass-strong rounded-xl focus:border-indigo-400/50 focus:ring-indigo-400/20"
+              className="bg-glass border-glass-strong rounded-xl focus:border-[#ff4d1f]/60 focus:ring-[#ff4d1f]/20"
               {...register("name")}
             />
             {errors.name && <p className="text-xs text-red-400">{errors.name.message}</p>}
@@ -166,7 +165,7 @@ export function CreateProjectDialog() {
               type="submit"
               disabled={!isValid || isSubmitting}
               data-testid="create-project-submit"
-              className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-glow hover:shadow-glow-lg transition-all border-0"
+              className={ACCENT_BUTTON}
             >
               {isSubmitting ? "Creating..." : "Create"}
             </Button>
