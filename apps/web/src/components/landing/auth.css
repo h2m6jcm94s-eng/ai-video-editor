@@ -248,6 +248,9 @@
 }
 /* The password field wraps the input in a group; match its height + edge. */
 .stencil .auth-clerk .cl-formFieldInputGroup {
+  position: relative !important;
+  display: flex !important;
+  align-items: center !important;
   border: 1px solid var(--hairline) !important;
   border-radius: 6px !important;
   background: var(--bg) !important;
@@ -257,12 +260,24 @@
 }
 .stencil .auth-clerk .cl-formFieldInputGroup .cl-formFieldInput {
   border: 0 !important;
+  width: 100% !important;
+  flex: 1 1 auto !important;
   min-height: 50px !important;
   background: transparent !important;
+  /* Always reserve room for the eye button so it never reflows the field. */
+  padding: 14px 44px 14px 16px !important;
 }
-/* Nudge the password show/hide (eye) button slightly in from the right edge. */
+/*
+ * Take the show/hide (eye) button out of flow so mounting it (on first
+ * keystroke) doesn't resize the input and shift the field. Pin it to the
+ * right; the input's reserved right padding keeps text clear of it.
+ */
 .stencil .auth-clerk .cl-formFieldInputShowPasswordButton {
-  margin-right: 8px !important;
+  position: absolute !important;
+  right: 8px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  margin: 0 !important;
   color: var(--fg-muted) !important;
 }
 /* OTP code boxes — square cells, keep them compact but legible. */
