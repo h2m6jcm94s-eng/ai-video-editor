@@ -2,8 +2,8 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 "use client";
 
-import { useEffect } from "react";
 import { AlertTriangle } from "lucide-react";
+import { useEffect } from "react";
 
 export default function DashboardError({
   error,
@@ -17,15 +17,15 @@ export default function DashboardError({
   }, [error]);
 
   return (
-    <div className="flex min-h-[50vh] flex-col items-center justify-center p-4">
-      <AlertTriangle className="w-10 h-10 text-amber-500 mb-4" />
-      <h2 className="text-xl font-semibold mb-2">Dashboard failed to load</h2>
-      <p className="text-zinc-400 mb-6 text-center max-w-md">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-[#0a0908] p-6 text-center text-[#f5f1e8]">
+      <AlertTriangle className="mb-5 h-10 w-10 text-[#ff7a5c]" />
+      <h2 className="mb-3 font-serif text-2xl">Dashboard failed to load</h2>
+      <p className="mb-7 max-w-md text-[#b9b0a1]">
         {error.message || "Something went wrong while loading your projects."}
       </p>
       <button
         onClick={reset}
-        className="px-4 py-2 bg-zinc-800 text-zinc-100 rounded-lg hover:bg-zinc-700 transition"
+        className="rounded-full bg-[#ff4d1f] px-6 py-3 text-xs font-medium uppercase tracking-[0.18em] text-white transition-colors hover:bg-[#ff5c30]"
       >
         Try again
       </button>

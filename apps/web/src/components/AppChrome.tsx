@@ -6,8 +6,10 @@ import { usePathname } from "next/navigation";
 import { NotificationBell } from "@/components/NotificationBell";
 
 // Global app chrome (the fixed notification bell). Hidden on the public
-// marketing/auth pages (landing, sign-in, sign-up), which have their own design.
-const HIDE_CHROME = ["/", "/sign-in", "/sign-up"];
+// marketing/auth pages (landing, sign-in, sign-up), which have their own design,
+// and on the shell pages (dashboard, pricing, settings), which render their own
+// bell in the shell top bar.
+const HIDE_CHROME = ["/", "/sign-in", "/sign-up", "/dashboard", "/pricing", "/settings"];
 
 export function AppChrome() {
   const pathname = usePathname();

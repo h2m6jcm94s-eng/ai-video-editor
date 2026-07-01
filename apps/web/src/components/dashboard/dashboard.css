@@ -1,0 +1,1248 @@
+/*
+ * Stencil dashboard — scoped styles.
+ * Reuses the design tokens defined on `.stencil` in landing.css
+ * (--bg, --accent, --fg, --hairline, --serif, --body, --mono, …), so this file
+ * must be imported alongside landing.css. Everything is scoped under `.stencil`
+ * so nothing leaks into the rest of the app.
+ */
+
+/* ===== SHELL / LAYOUT ===== */
+.stencil.dash-root {
+  font-size: 16px;
+}
+.stencil .dash-layout {
+  display: grid;
+  grid-template-columns: 264px minmax(0, 1fr);
+  min-height: 100vh;
+}
+.stencil .dash-content {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.stencil .dash-main {
+  width: 100%;
+  min-width: 0;
+  padding: 36px 48px 96px;
+  max-width: 1200px;
+}
+.stencil .dash-main > * + * {
+  margin-top: 40px;
+}
+
+/* Content top bar — breadcrumb left, notification bell right */
+.stencil .dash-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: 58px;
+  padding: 0 48px;
+  border-bottom: 1px solid var(--hairline);
+  background: color-mix(in oklab, var(--bg) 78%, transparent);
+  backdrop-filter: blur(14px) saturate(1.1);
+}
+.stencil .dash-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.stencil .dash-crumb b {
+  color: var(--fg);
+  font-weight: 400;
+}
+.stencil .dash-crumb .sep {
+  opacity: 0.45;
+}
+.stencil .dash-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* ===== SIDEBAR ===== */
+.stencil .dash-sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  padding: 26px 20px 22px;
+  border-right: 1px solid var(--hairline);
+  background: color-mix(in oklab, var(--bg-elev) 55%, var(--bg));
+  z-index: 40;
+}
+.stencil .dash-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 8px 0;
+}
+.stencil .dash-brand .logo-mark {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 26px;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+.stencil .dash-brand .logo-mark em {
+  color: var(--accent);
+  font-style: italic;
+}
+.stencil .dash-brand .logo-word {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.stencil .dash-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.stencil .dash-nav-label {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  padding: 0 10px 10px;
+}
+.stencil .dash-nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  transition: color 0.18s ease, background 0.18s ease;
+}
+.stencil .dash-nav-item svg {
+  width: 16px;
+  height: 16px;
+  color: var(--fg-muted);
+  transition: color 0.18s ease;
+}
+.stencil .dash-nav-item:hover {
+  color: var(--fg);
+  background: color-mix(in oklab, var(--fg) 5%, transparent);
+}
+.stencil .dash-nav-item:hover svg {
+  color: var(--fg);
+}
+.stencil .dash-nav-item.active {
+  color: var(--fg);
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+}
+.stencil .dash-nav-item.active svg {
+  color: var(--accent);
+}
+.stencil .dash-nav-item.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+/* Plan chip in the sidebar */
+.stencil .dash-plan {
+  margin-top: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 16px;
+  background: color-mix(in oklab, var(--bg-elev) 60%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.stencil .dash-plan-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.stencil .dash-plan-k {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.stencil .dash-plan-v {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--fg);
+  text-transform: capitalize;
+}
+
+.stencil .dash-sidebar-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 16px;
+  border-top: 1px solid var(--hairline);
+}
+.stencil .dash-userchip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  min-width: 0;
+}
+.stencil .dash-userchip .avatar {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 1px solid var(--hairline);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 15px;
+  color: var(--fg);
+  background: color-mix(in oklab, var(--accent) 14%, var(--bg-elev));
+}
+.stencil .dash-userchip .who {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stencil .dash-bell {
+  position: relative;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+  color: var(--fg-dim);
+  transition: border-color 0.18s ease, color 0.18s ease;
+}
+.stencil .dash-bell:hover {
+  border-color: var(--fg);
+  color: var(--fg);
+}
+.stencil .dash-bell svg {
+  width: 16px;
+  height: 16px;
+}
+.stencil .dash-bell .badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ===== BUTTONS (pseudo-element border) ===== */
+/*
+ * The visible border is drawn by a masked ::before ring, not the `border`
+ * property — so it can be a gradient and animate on hover. `z-index: 0` on the
+ * button creates a stacking context; the ring (z-index:-1) then paints above
+ * the button's own fill but below the label, per CSS paint order.
+ */
+.stencil .dash-btn {
+  position: relative;
+  z-index: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 12px 20px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--bg-elev) 62%, transparent);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 0.16s ease, color 0.2s ease, background 0.2s ease;
+}
+.stencil .dash-btn svg {
+  width: 15px;
+  height: 15px;
+}
+.stencil .dash-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--fg) 24%, transparent),
+    color-mix(in oklab, var(--fg) 7%, transparent)
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  transition: background 0.25s ease, opacity 0.25s ease;
+}
+.stencil .dash-btn:hover {
+  transform: translateY(-1px);
+  color: var(--fg);
+  background: color-mix(in oklab, var(--accent) 8%, var(--bg-elev));
+}
+.stencil .dash-btn:hover::before {
+  background: linear-gradient(180deg, var(--accent), var(--accent-soft));
+}
+.stencil .dash-btn:focus-visible {
+  outline: none;
+}
+.stencil .dash-btn:focus-visible::before {
+  background: linear-gradient(180deg, var(--accent), var(--accent-soft));
+}
+.stencil .dash-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Primary — accent fill; ring becomes a top-lit bevel */
+.stencil .dash-btn--primary {
+  background: var(--accent);
+  color: #fff;
+}
+.stencil .dash-btn--primary::before {
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, #fff 50%, var(--accent)),
+    color-mix(in oklab, #000 18%, var(--accent))
+  );
+}
+.stencil .dash-btn--primary:hover {
+  background: var(--accent);
+  filter: brightness(1.06);
+}
+.stencil .dash-btn--primary:hover::before {
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, #fff 62%, var(--accent)),
+    color-mix(in oklab, #000 14%, var(--accent))
+  );
+}
+
+.stencil .dash-btn--block {
+  width: 100%;
+}
+.stencil .dash-btn--sm {
+  padding: 9px 15px;
+  font-size: 0.66rem;
+}
+
+/* ===== SECTION HEADER ===== */
+.stencil .dash-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.stencil .dash-eyebrow .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.stencil .dash-section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--hairline);
+  margin-bottom: 24px;
+}
+.stencil .dash-section-head h2 {
+  font-family: var(--serif);
+  font-size: clamp(28px, 3vw, 40px);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-weight: 400;
+}
+.stencil .dash-section-head h2 em {
+  font-style: italic;
+  color: var(--accent);
+}
+.stencil .dash-section-head .num {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.18em;
+  color: var(--fg-muted);
+}
+
+/* ===== HERO ===== */
+.stencil .dash-hero {
+  padding: 8px 0 4px;
+}
+.stencil .dash-hero h1 {
+  margin-top: 20px;
+  font-family: var(--serif);
+  font-size: clamp(48px, 6.4vw, 92px);
+  line-height: 0.9;
+  letter-spacing: -0.035em;
+  font-weight: 400;
+  text-wrap: balance;
+}
+.stencil .dash-hero h1 em {
+  font-style: italic;
+  color: var(--accent);
+}
+.stencil .dash-hero p {
+  margin-top: 22px;
+  max-width: 620px;
+  font-size: 18px;
+  line-height: 1.55;
+  color: var(--fg-dim);
+}
+.stencil .dash-hero .note {
+  margin-top: 14px;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.stencil .dash-hero .note b {
+  color: var(--accent);
+  font-weight: 400;
+}
+
+/* ===== CARDS ===== */
+.stencil .dash-card {
+  position: relative;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--bg-elev) 55%, transparent);
+  overflow: hidden;
+}
+
+/* Subscription card */
+.stencil .dash-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px 24px;
+}
+.stencil .dash-sub-left {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+}
+.stencil .dash-sub-icon {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: linear-gradient(150deg, var(--accent), color-mix(in oklab, #000 30%, var(--accent)));
+}
+.stencil .dash-sub-icon svg {
+  width: 22px;
+  height: 22px;
+}
+.stencil .dash-sub-k {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.stencil .dash-sub-plan {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 30px;
+  line-height: 1.05;
+  color: var(--fg);
+  text-transform: capitalize;
+}
+.stencil .dash-sub-desc {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  color: var(--fg-muted);
+  margin-top: 2px;
+}
+.stencil .dash-sub-right {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.stencil .dash-feature {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  color: var(--fg-dim);
+}
+.stencil .dash-feature svg {
+  width: 13px;
+  height: 13px;
+  color: var(--accent);
+}
+
+/* ===== STATS ===== */
+.stencil .dash-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+.stencil .dash-stat {
+  position: relative;
+  padding: 20px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--bg-elev) 50%, transparent);
+  overflow: hidden;
+  transition: border-color 0.25s ease, background 0.25s ease;
+}
+.stencil .dash-stat:hover {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--hairline));
+  background: color-mix(in oklab, var(--accent) 5%, var(--bg-elev));
+}
+.stencil .dash-stat-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.stencil .dash-stat-k {
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.stencil .dash-stat-icon {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  color: var(--fg-dim);
+}
+.stencil .dash-stat:hover .dash-stat-icon {
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--hairline));
+}
+.stencil .dash-stat-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.stencil .dash-stat-v {
+  margin-top: 20px;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 40px;
+  line-height: 1;
+  font-weight: 500;
+  color: var(--fg);
+}
+
+/* ===== PROJECT GRID ===== */
+.stencil .dash-projects {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+.stencil .dash-project {
+  position: relative;
+  display: block;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--bg-elev) 55%, transparent);
+  transition: border-color 0.25s ease, transform 0.25s ease;
+}
+.stencil .dash-project:hover {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--hairline));
+  transform: translateY(-3px);
+}
+.stencil .dash-project-thumb {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: var(--bg);
+  border-bottom: 1px solid var(--hairline);
+}
+.stencil .dash-project-thumb video,
+.stencil .dash-project-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.6s ease;
+}
+.stencil .dash-project:hover .dash-project-thumb video,
+.stencil .dash-project:hover .dash-project-thumb img {
+  transform: scale(1.05);
+}
+.stencil .dash-project-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
+}
+.stencil .dash-project-placeholder svg {
+  width: 34px;
+  height: 34px;
+}
+/* corner brackets on the thumbnail, like the landing film frames */
+.stencil .dash-project-thumb .bracket {
+  position: absolute;
+  z-index: 2;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--accent);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.stencil .dash-project:hover .dash-project-thumb .bracket {
+  opacity: 0.8;
+}
+.stencil .dash-project-thumb .bracket.tl {
+  top: 8px;
+  left: 8px;
+  border-right: 0;
+  border-bottom: 0;
+}
+.stencil .dash-project-thumb .bracket.br {
+  bottom: 8px;
+  right: 8px;
+  border-left: 0;
+  border-top: 0;
+}
+.stencil .dash-project-body {
+  padding: 16px 18px 18px;
+}
+.stencil .dash-project-title {
+  font-family: var(--serif);
+  font-size: 22px;
+  line-height: 1.1;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.2s ease;
+}
+.stencil .dash-project:hover .dash-project-title {
+  color: var(--accent);
+}
+.stencil .dash-project-meta {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.stencil .dash-project-meta svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Status badge */
+.stencil .dash-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline);
+  background: color-mix(in oklab, var(--bg) 70%, transparent);
+  backdrop-filter: blur(8px);
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.stencil .dash-badge svg {
+  width: 11px;
+  height: 11px;
+}
+.stencil .dash-badge[data-status="complete"] {
+  color: var(--teal);
+  border-color: color-mix(in oklab, var(--teal) 40%, var(--hairline));
+}
+.stencil .dash-badge[data-status="failed"] {
+  color: #ff7a5c;
+  border-color: color-mix(in oklab, #ff7a5c 40%, var(--hairline));
+}
+.stencil .dash-badge[data-status="uploading"],
+.stencil .dash-badge[data-status="processing"],
+.stencil .dash-badge[data-status="rendering"] {
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 40%, var(--hairline));
+}
+.stencil .dash-spin {
+  animation: dash-spin 1s linear infinite;
+}
+@keyframes dash-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ===== EMPTY STATE ===== */
+.stencil .dash-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 88px 24px;
+  border: 1px dashed var(--hairline);
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--bg-elev) 40%, transparent);
+}
+.stencil .dash-empty-icon {
+  width: 68px;
+  height: 68px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--hairline);
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+}
+.stencil .dash-empty-icon svg {
+  width: 30px;
+  height: 30px;
+}
+.stencil .dash-empty h3 {
+  margin-top: 22px;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 30px;
+  line-height: 1;
+  color: var(--fg);
+}
+.stencil .dash-empty p {
+  margin-top: 12px;
+  max-width: 380px;
+  font-size: 16px;
+  color: var(--fg-dim);
+  line-height: 1.55;
+}
+.stencil .dash-empty .dash-btn {
+  margin-top: 24px;
+}
+
+/* ===== ERROR BANNER ===== */
+.stencil .dash-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid color-mix(in oklab, #ff7a5c 40%, var(--hairline));
+  border-radius: 6px;
+  background: color-mix(in oklab, #ff4d1f 8%, transparent);
+}
+.stencil .dash-error svg {
+  width: 18px;
+  height: 18px;
+  color: #ff7a5c;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.stencil .dash-error .t {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #ff9a80;
+}
+.stencil .dash-error .d {
+  margin-top: 4px;
+  font-size: 15px;
+  color: var(--fg-dim);
+}
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 1080px) {
+  .stencil .dash-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .stencil .dash-projects {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 900px) {
+  .stencil .dash-layout {
+    grid-template-columns: 1fr;
+  }
+  .stencil .dash-sidebar {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 20px;
+    border-right: 0;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .stencil .dash-nav,
+  .stencil .dash-plan,
+  .stencil .dash-nav-label {
+    display: none;
+  }
+  .stencil .dash-brand {
+    padding: 0;
+    margin-right: auto;
+  }
+  .stencil .dash-sidebar-foot {
+    padding-top: 0;
+    border-top: 0;
+    gap: 12px;
+  }
+  .stencil .dash-main {
+    padding: 28px 24px 72px;
+  }
+}
+@media (max-width: 620px) {
+  .stencil .dash-stats {
+    grid-template-columns: 1fr;
+  }
+  .stencil .dash-projects {
+    grid-template-columns: 1fr;
+  }
+  .stencil .dash-sub {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+/* ===== NOTIFICATION PANEL (modal) ===== */
+.stencil .dash-noti {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 12px);
+  z-index: 60;
+  width: 344px;
+  max-width: calc(100vw - 32px);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--bg-elev) 94%, #000);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+.stencil .dash-noti-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 14px 13px 16px;
+  border-bottom: 1px solid var(--hairline);
+}
+.stencil .dash-noti-head h3 {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.stencil .dash-noti-actions {
+  display: flex;
+  gap: 4px;
+}
+.stencil .dash-noti-iconbtn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--fg-muted);
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.stencil .dash-noti-iconbtn:hover {
+  color: var(--fg);
+  background: color-mix(in oklab, var(--fg) 7%, transparent);
+}
+.stencil .dash-noti-iconbtn svg {
+  width: 15px;
+  height: 15px;
+}
+.stencil .dash-noti-body {
+  max-height: 340px;
+  overflow-y: auto;
+}
+.stencil .dash-noti-state {
+  padding: 30px 16px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.stencil .dash-noti-state.err {
+  color: #ff9a80;
+}
+.stencil .dash-noti-retry {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.stencil .dash-noti-item {
+  display: flex;
+  gap: 11px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--hairline);
+  transition: background 0.15s ease;
+}
+.stencil .dash-noti-item:last-child {
+  border-bottom: 0;
+}
+.stencil .dash-noti-item:hover {
+  background: color-mix(in oklab, var(--fg) 4%, transparent);
+}
+.stencil .dash-noti-ico {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--accent);
+}
+.stencil .dash-noti-ico.err {
+  color: #ff7a5c;
+}
+.stencil .dash-noti-ico svg {
+  width: 15px;
+  height: 15px;
+}
+.stencil .dash-noti-msg {
+  flex: 1;
+  min-width: 0;
+}
+.stencil .dash-noti-msg p {
+  font-family: var(--body);
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--fg);
+}
+.stencil .dash-noti-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+.stencil .dash-noti-count {
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.stencil .dash-noti-ack {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+  transition: color 0.15s ease;
+  align-self: flex-start;
+}
+.stencil .dash-noti-ack:hover {
+  color: var(--accent);
+}
+.stencil .dash-noti-ack svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ===== PRICING ===== */
+.stencil .dash-pricing {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+.stencil .dash-plan-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 28px 24px;
+  background: color-mix(in oklab, var(--bg-elev) 50%, transparent);
+  transition: border-color 0.25s ease, background 0.25s ease, transform 0.25s ease;
+}
+.stencil .dash-plan-card:hover {
+  border-color: color-mix(in oklab, var(--accent) 40%, var(--hairline));
+  transform: translateY(-3px);
+}
+.stencil .dash-plan-card.popular {
+  border-color: color-mix(in oklab, var(--accent) 55%, var(--hairline));
+  background: color-mix(in oklab, var(--accent) 6%, transparent);
+}
+.stencil .dash-plan-tag {
+  position: absolute;
+  top: -11px;
+  left: 24px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.stencil .dash-plan-name {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.stencil .dash-plan-price {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--serif);
+  font-size: 54px;
+  line-height: 1;
+  color: var(--fg);
+}
+.stencil .dash-plan-price .per {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+}
+.stencil .dash-plan-desc {
+  color: var(--fg-dim);
+  font-size: 15px;
+  line-height: 1.5;
+}
+.stencil .dash-plan-features {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  margin: 4px 0 0;
+  padding: 0;
+  flex: 1;
+}
+.stencil .dash-plan-features li {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 14.5px;
+  color: var(--fg-dim);
+  line-height: 1.4;
+}
+.stencil .dash-plan-features svg {
+  width: 15px;
+  height: 15px;
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+/* ===== SETTINGS ===== */
+.stencil .dash-settings {
+  display: grid;
+  grid-template-columns: 208px minmax(0, 1fr);
+  gap: 40px;
+}
+.stencil .dash-subnav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.stencil .dash-subnav-label {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  padding: 0 12px 10px;
+}
+.stencil .dash-subnav a,
+.stencil .dash-subnav span {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 12px;
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.stencil .dash-subnav a svg,
+.stencil .dash-subnav span svg {
+  width: 15px;
+  height: 15px;
+  color: var(--fg-muted);
+}
+.stencil .dash-subnav a:hover {
+  color: var(--fg);
+  background: color-mix(in oklab, var(--fg) 5%, transparent);
+}
+.stencil .dash-subnav a.active {
+  color: var(--fg);
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+}
+.stencil .dash-subnav a.active svg {
+  color: var(--accent);
+}
+.stencil .dash-subnav span.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.stencil .dash-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.stencil .dash-panel-head h2 {
+  font-family: var(--serif);
+  font-size: 30px;
+  line-height: 1;
+  color: var(--fg);
+}
+.stencil .dash-panel-head h2 em {
+  font-style: italic;
+  color: var(--accent);
+}
+.stencil .dash-panel-head p {
+  margin-top: 8px;
+  color: var(--fg-dim);
+  font-size: 15px;
+}
+.stencil .dash-list {
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.stencil .dash-list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--hairline);
+}
+.stencil .dash-list-row:last-child {
+  border-bottom: 0;
+}
+.stencil .dash-list-row .k {
+  font-family: var(--body);
+  font-size: 15px;
+  color: var(--fg-dim);
+}
+.stencil .dash-list-row .k .status {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  margin-top: 3px;
+}
+.stencil .dash-list-row .v {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  color: var(--fg);
+}
+
+/* ===== RESPONSIVE (extended) ===== */
+@media (max-width: 1080px) {
+  .stencil .dash-pricing {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 900px) {
+  .stencil .dash-topbar {
+    padding: 0 24px;
+  }
+  .stencil .dash-settings {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  .stencil .dash-subnav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .stencil .dash-subnav-label {
+    display: none;
+  }
+}

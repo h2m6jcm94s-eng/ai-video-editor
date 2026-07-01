@@ -7,6 +7,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { AppChrome } from "@/components/AppChrome";
 import { AmbientBackground } from "@/components/dashboard/AmbientBackground";
+import { stencilFontVars } from "@/components/landing/fonts";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
@@ -26,7 +27,7 @@ export default function RootLayout({
   return (
     <ClerkProvider>
       <html lang="en" suppressHydrationWarning>
-        <body className={`${inter.variable} font-sans antialiased`}>
+        <body className={`${inter.variable} ${stencilFontVars} font-sans antialiased`}>
           <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
             <AmbientBackground />
             <div className="relative">
