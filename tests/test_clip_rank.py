@@ -517,6 +517,78 @@ class TestWindowMotionFilter:
         # even if it is in the frozen patch.
         assert top.window_start_s is not None
 
+    def test_high_energy_rejects_short_clip_that_would_pad(self):
+        """A clip shorter than the slot should lose to a long enough clip."""
+        slots = [make_slot(index=0, energy=0.8, duration=4.0)]
+        clips = {
+            "short": {
+                "shot_type": "wide",
+                "motion_energy": 0.8,
+                "duration_sec": 2.0,
+                "aesthetic_score": 0.9,
+                "heatmap": [
+                    {"start_s": 0.0, "end_s": 0.5, "score": 0.9,
+                     "components": {"motion": 0.5}, "dominant_motion": "right"},
+                ],
+            },
+            "long": {
+                "shot_type": "wide",
+                "motion_energy": 0.8,
+                "duration_sec": 5.0,
+                "aesthetic_score": 0.5,
+                "heatmap": [
+                    {"start_s": 0.0, "end_s": 0.5, "score": 0.6,
+                     "components": {"motion": 0.5}, "dominant_motion": "right"},
+                    {"start_s": 0.25, "end_s": 0.75, "score": 0.6,
+                     "components": {"motion": 0.5}, "dominant_motion": "right"},
+                    {"start_s": 0.5, "end_s": 1.0, "score": 0.6,
+                     "components": {"motion": 0.5}, "dominant_motion": "right"},
+                    {"start_s": 0.75, "end_s": 1.25, "score": 0.6,
+                     "components": {"motion": 0.5}, "dominant_motion": "right"},
+                ],
+            },
+        }
+        rankings = rank_clips_for_slots(slots, clips)
+        top = rankings[0][0]
+        assert top.clip_id == "long"
+
+    def test_high_energy_rejects_slot_with_internal_static_patch(self):
+        """A window whose full duration contains any sub-second static patch is rejected."""
+        slots = [make_slot(index=0, energy=0.8, duration=2.0)]
+        clips = {
+            "patchy": {
+                "shot_type": "wide",
+                "motion_energy": 0.8,
+                "duration_sec": 10.0,
+                "aesthetic_score": 0.9,
+                "heatmap": [
+                    # First 1.5s frozen, then high motion.
+                    {"start_s": 0.0, "end_s": 0.5, "score": 0.9,
+                     "components": {"motion": 0.0}, "dominant_motion": "still"},
+                    {"start_s": 0.25, "end_s": 0.75, "score": 0.9,
+                     "components": {"motion": 0.0}, "dominant_motion": "still"},
+                    {"start_s": 0.5, "end_s": 1.0, "score": 0.9,
+                     "components": {"motion": 0.0}, "dominant_motion": "still"},
+                    {"start_s": 0.75, "end_s": 1.25, "score": 0.9,
+                     "components": {"motion": 0.0}, "dominant_motion": "still"},
+                    {"start_s": 1.0, "end_s": 1.5, "score": 0.9,
+                     "components": {"motion": 0.0}, "dominant_motion": "still"},
+                    {"start_s": 1.25, "end_s": 1.75, "score": 0.6,
+                     "components": {"motion": 0.5}, "dominant_motion": "right"},
+                    {"start_s": 1.5, "end_s": 2.0, "score": 0.6,
+                     "components": {"motion": 0.5}, "dominant_motion": "right"},
+                    {"start_s": 1.75, "end_s": 2.25, "score": 0.6,
+                     "components": {"motion": 0.5}, "dominant_motion": "right"},
+                ],
+            },
+        }
+        rankings = rank_clips_for_slots(slots, clips)
+        top = rankings[0][0]
+        # The 2s slot starting at 0.25 would overlap frozen windows, so the
+        # ranker should push past the static patch.
+        assert top.window_start_s is not None
+        assert top.window_start_s >= 1.0
+
 
 class TestMarengoSemanticScoring:
     def test_marengo_boosts_matching_clip(self):

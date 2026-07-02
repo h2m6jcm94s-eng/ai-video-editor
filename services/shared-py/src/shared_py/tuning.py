@@ -55,6 +55,13 @@ class RankTuning:
     WINDOW_MOTION_PERCENTILE: float = 0.05
     # Slots below this energy threshold are allowed to use very still windows.
     LOW_ENERGY_MOTION_THRESHOLD: float = 0.3
+    # Absolute minimum motion allowed inside a high-energy slot's source window.
+    # Measured as the minimum per-window motion across the full slot duration.
+    # Windows with any sub-second patch below this are treated as frozen/static.
+    HIGH_ENERGY_MIN_MOTION: float = 0.03
+    # Penalty applied to the window score when the clip is shorter than the slot
+    # and the compiler will have to pad/loop the segment.
+    SHORT_CLIP_WINDOW_PENALTY: float = 0.5
     # Duration score Gaussian denominator.
     DURATION_SCORE_DIVISOR: float = 0.5
 

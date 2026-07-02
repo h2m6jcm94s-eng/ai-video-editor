@@ -75,6 +75,25 @@ def _motion_floor(windows: List[dict]) -> float:
     return float(np.percentile(motions, RANK.WINDOW_MOTION_PERCENTILE * 100.0))
 
 
+def _slot_min_motion(
+    window_start_s: float,
+    slot_duration_s: float,
+    heatmap: List[dict],
+) -> float:
+    """Return the minimum motion across all heatmap windows overlapping the slot.
+
+    This catches static patches inside the source window, not just at the start.
+    """
+    slot_end = window_start_s + slot_duration_s
+    overlapping = [
+        w for w in heatmap
+        if w.get("start_s", 0.0) < slot_end and w.get("end_s", 0.0) > window_start_s
+    ]
+    if not overlapping:
+        return 0.0
+    return min(_window_motion(w) for w in overlapping)
+
+
 def _best_window(
     meta: dict,
     slot_duration_s: float,
@@ -100,6 +119,10 @@ def _best_window(
         # Penalise reusing the exact same window so repeated clips still vary.
         if window.get("start_s") in used_windows.get(clip_id, []):
             base -= RANK.WINDOW_REUSE_PENALTY
+        # Penalise clips that are shorter than the slot: the compiler will have
+        # to pad/loop, which often produces visible artefacts.
+        if clip_dur < slot_duration_s - 0.05:
+            base -= RANK.SHORT_CLIP_WINDOW_PENALTY
         return base
 
     used_starts = set(used_windows.get(clip_id, []))
@@ -118,10 +141,27 @@ def _best_window(
         candidates = heatmap
 
     # Frozen-frame guard: reject the bottom percentile of motion windows unless
-    # the slot explicitly calls for a low-energy / still moment.
+    # the slot explicitly calls for a low-energy / still moment. For high-energy
+    # slots also enforce an absolute minimum motion across the FULL slot duration
+    # so a single high-motion window cannot mask a static patch later in the slot.
     allow_still = slot_energy < RANK.LOW_ENERGY_MOTION_THRESHOLD
     floor = _motion_floor(heatmap)
-    non_frozen = [w for w in candidates if _window_motion(w) > floor or allow_still]
+    non_frozen = []
+    for w in candidates:
+        window_motion = _window_motion(w)
+        if allow_still:
+            non_frozen.append(w)
+            continue
+        if window_motion <= floor:
+            continue
+        if slot_energy >= RANK.LOW_ENERGY_MOTION_THRESHOLD:
+            slot_min = _slot_min_motion(
+                w.get("start_s", 0.0), slot_duration_s, heatmap
+            )
+            if slot_min < RANK.HIGH_ENERGY_MIN_MOTION:
+                continue
+        non_frozen.append(w)
+
     if non_frozen:
         candidates = non_frozen
 
