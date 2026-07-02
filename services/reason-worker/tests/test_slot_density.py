@@ -55,8 +55,24 @@ def test_generate_slots_adaptive_count_matches_density():
     energy_curve = _make_energy_curve()
 
     slots = generate_slots_adaptive(beat_grid, duration, behavior, energy_curve, duration)
-    expected = round(density * duration)
-    assert len(slots) == expected, f"Expected {expected} slots, got {len(slots)}"
+    # Density gives a lower-bound target; the max-gap enforcer adds cuts in
+    # oversized gaps so no slot exceeds the compiler's comfortable span.
+    expected_min = round(density * duration)
+    assert len(slots) >= expected_min, f"Expected at least {expected_min} slots, got {len(slots)}"
+
+
+def test_generate_slots_adaptive_respects_max_gap():
+    duration = 226.0
+    density = 0.16
+    behavior = BehaviorVector(cut_density_per_sec=density, slot_duration_mean_s=2.5)
+    beat_grid = _make_beat_grid(duration_s=duration)
+    energy_curve = _make_energy_curve()
+
+    slots = generate_slots_adaptive(beat_grid, duration, behavior, energy_curve, duration)
+    max_gap = 8.0
+    for i in range(len(slots) - 1):
+        gap = slots[i + 1].start_s - slots[i].start_s
+        assert gap <= max_gap + 0.1, f"Gap {gap:.2f}s between slots {slots[i].index} and {slots[i+1].index} exceeds {max_gap}s"
 
 
 def test_generate_slots_adaptive_starts_on_beats():

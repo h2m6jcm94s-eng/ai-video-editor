@@ -23,6 +23,12 @@ if shared_py_path not in sys.path:
 from shared_py.models import BeatGrid, BehaviorVector, Slot
 
 
+# No source window should be asked to cover more than this many seconds without a
+# cut. Longer slots force the compiler to pad/loop or display static footage,
+# which triggers the no_frozen_frames gate.
+MAX_SLOT_GAP_S = 8.0
+
+
 def _energy_at_time(time_s: float, energy_curve: List[float], content_end: float) -> float:
     """Sample the energy curve at a given time."""
     if not energy_curve or content_end <= 0:
@@ -150,6 +156,36 @@ def generate_slots_adaptive(
 
     if not cut_positions:
         cut_positions = [0.0]
+
+    # 6b. Enforce a maximum gap between cuts so no slot is forced to cover
+    # footage longer than a typical clip can provide without padding. Insert
+    # additional cuts at the beat candidate nearest to ``gap_start + max_gap``
+    # (i.e., the latest cut that still keeps the first sub-gap within the cap).
+    max_gap = max(min_gap * 2, min(MAX_SLOT_GAP_S, behavior.slot_duration_mean_s * 2))
+    extra_cuts: List[float] = []
+    all_positions = sorted(set([0.0] + list(cut_positions) + [content_end]))
+    for i in range(len(all_positions) - 1):
+        gap_start = all_positions[i]
+        gap_end = all_positions[i + 1]
+        while gap_end - gap_start > max_gap + 1e-6:
+            target_t = gap_start + max_gap
+            # Find the candidate closest to the target, avoiding the edges.
+            best_t = None
+            best_dist = float("inf")
+            for t in candidates:
+                if gap_start + 0.1 < t < gap_end - 0.1 and abs(t - gap_start) > 0.3:
+                    dist = abs(t - target_t)
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_t = t
+            if best_t is None:
+                # No beat candidate usable; fall back to the exact target time.
+                best_t = target_t
+            insert_t = round(best_t, 3)
+            extra_cuts.append(insert_t)
+            gap_start = insert_t
+    if extra_cuts:
+        cut_positions = sorted(set(cut_positions) | set(extra_cuts))
 
     # 7. Build slot skeletons; durations are gaps between consecutive cuts.
     slots: List[Slot] = []
