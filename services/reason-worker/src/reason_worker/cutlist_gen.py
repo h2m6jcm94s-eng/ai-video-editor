@@ -448,6 +448,15 @@ def _snap_slots_to_shots_and_beats(
             max_dur = max(0.0, slot.start_s + slot.duration_s - effect.start_s)
             effect.duration_s = max(0.0, min(effect.duration_s, max_dur))
 
+    # Final contiguity pass: extend each slot so it touches the next slot's
+    # start. Small rounding / cap-shift gaps would otherwise fail the
+    # max_slot_gap gate in the Golden Render Suite.
+    slots.sort(key=lambda s: s.start_s)
+    for i, slot in enumerate(slots):
+        next_start = slots[i + 1].start_s if i + 1 < len(slots) else content_end
+        if next_start > slot.start_s:
+            slot.duration_s = round(next_start - slot.start_s, 3)
+
     # Drop any slots that still collapsed to zero or negative duration.
     slots[:] = [s for s in slots if s.duration_s > 0.05]
     for i, slot in enumerate(slots):

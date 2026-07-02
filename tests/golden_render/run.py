@@ -47,12 +47,20 @@ def _run_suite(
     if result.returncode != 0 and not result.stdout.strip():
         print(result.stderr or "suite failed with no output", file=sys.stderr)
         sys.exit(1)
-    # The suite prints the JSON payload to stdout even on failure.
+    # The suite prints the JSON payload to stdout even on failure. The suite
+    # may also emit human-readable log lines before the JSON, so extract the
+    # first JSON object rather than parsing stdout as a single document.
+    raw = result.stdout
+    start = raw.find("{")
+    if start == -1:
+        print("suite produced no JSON object", file=sys.stderr)
+        print(raw[-2000:], file=sys.stderr)
+        sys.exit(1)
     try:
-        return json.loads(result.stdout)
+        return json.loads(raw[start:])
     except json.JSONDecodeError as e:
         print(f"failed to parse suite output: {e}", file=sys.stderr)
-        print(result.stdout[-2000:], file=sys.stderr)
+        print(raw[-2000:], file=sys.stderr)
         sys.exit(1)
 
 
