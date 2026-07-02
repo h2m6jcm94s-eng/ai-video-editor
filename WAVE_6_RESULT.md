@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-02
 **Branch:** `main`
-**Commit:** TBD
+**Commit:** `f6a5b8c`
 **Scope:** Stabilization, auto-reframe, and text-based editing primitives.
 
 ## What changed
