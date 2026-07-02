@@ -61,6 +61,23 @@ class SongMoodProfile(BaseModelCamel):
     section_moods: List[SectionMoodTags] = Field(default_factory=list)
 
 
+class VocalEmotionSample(BaseModelCamel):
+    """Emotion distribution for one vocal window."""
+
+    t_center_s: float
+    dominant_emotion: str
+    distribution: Dict[str, float] = Field(default_factory=dict)
+    rms: float
+
+
+class VocalEmotionCurve(BaseModelCamel):
+    """Time-indexed vocal emotion trajectory from a song's vocals stem."""
+
+    song_hash: str
+    samples: List[VocalEmotionSample] = Field(default_factory=list)
+    silent_ratio: float = 0.0
+
+
 class ClipEmotionProfile(BaseModelCamel):
     """Fused emotion profile for a user clip.
 

@@ -4,6 +4,7 @@
 """Temporal activities for the ingest worker."""
 
 import os
+from pathlib import Path
 from typing import Dict
 
 import httpx
@@ -14,6 +15,8 @@ from temporalio import activity
 from ingest_worker.beat_detect import compute_energy_curve, detect_beats
 from ingest_worker.heatmap import compute_clip_heatmap, heatmap_to_metadata
 from ingest_worker.song_mood import analyze_song
+from ingest_worker.stem_separate import separate_song_stems
+from ingest_worker.vocal_emotion import analyze_vocal_stem
 from ingest_worker.probe import probe_asset_remote
 from ingest_worker.shot_detect import detect_shot_boundaries
 
@@ -90,6 +93,26 @@ async def analyze_song_mood_activity(asset_id: str, storage_key: str) -> dict:
         metadata = {"songMoodProfile": mood_profile.model_dump(by_alias=True)}
         await _patch_asset_metadata(asset_id, metadata)
         return {"asset_id": asset_id, "song_mood_profile": metadata["songMoodProfile"]}
+    finally:
+        try:
+            os.remove(local_path)
+        except OSError:
+            pass
+
+
+@activity.defn
+async def analyze_vocal_emotion_activity(asset_id: str, storage_key: str) -> dict:
+    """Download a song asset, separate stems, and run Wav2Vec2 vocal emotion."""
+    local_path = download_asset(storage_key)
+    try:
+        stems = separate_song_stems(local_path)
+        vocals_path = stems.get("vocals")
+        if vocals_path is None or not Path(vocals_path).exists():
+            raise FileNotFoundError(f"vocals stem missing for asset {asset_id}")
+        curve = analyze_vocal_stem(str(vocals_path), song_hash=asset_id)
+        metadata = {"vocalEmotionCurve": curve.model_dump(by_alias=True)}
+        await _patch_asset_metadata(asset_id, metadata)
+        return {"asset_id": asset_id, "vocal_emotion_curve": metadata["vocalEmotionCurve"]}
     finally:
         try:
             os.remove(local_path)
