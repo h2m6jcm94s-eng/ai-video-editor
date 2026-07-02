@@ -49,16 +49,13 @@ class RankTuning:
 
     # Heatmap window reuse penalty so repeated clips still vary.
     WINDOW_REUSE_PENALTY: float = 0.5
-    # Reject heatmap windows whose per-window motion is below this percentile of
-    # the clip's own windows, unless the slot explicitly calls for low energy.
-    # This closes the no_frozen_frames gate (static source shots).
+    # Reject heatmap windows whose per-window motion is below the library-wide
+    # Nth percentile, unless the slot explicitly calls for low energy.
+    # The percentile is applied across ALL clip windows in the library so a
+    # clip that is entirely static cannot pass its own low bar.
     WINDOW_MOTION_PERCENTILE: float = 0.05
     # Slots below this energy threshold are allowed to use very still windows.
     LOW_ENERGY_MOTION_THRESHOLD: float = 0.3
-    # Absolute minimum motion allowed inside a high-energy slot's source window.
-    # Measured as the minimum per-window motion across the full slot duration.
-    # Windows with any sub-second patch below this are treated as frozen/static.
-    HIGH_ENERGY_MIN_MOTION: float = 0.03
     # Penalty applied to the window score when the clip is shorter than the slot
     # and the compiler will have to pad/loop the segment.
     SHORT_CLIP_WINDOW_PENALTY: float = 0.5

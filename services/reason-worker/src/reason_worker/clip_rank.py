@@ -58,40 +58,57 @@ def _semantic_score(
     return RANK.DEFAULT_SEMANTIC_SCORE
 
 
-def _window_motion(window: dict) -> float:
-    """Return the per-window optical-flow motion magnitude from heatmap metadata."""
-    return float(window.get("components", {}).get("motion", 0.0))
+def _window_motion(window: dict) -> Optional[float]:
+    """Return the per-window optical-flow motion magnitude from heatmap metadata.
 
-
-def _motion_floor(windows: List[dict]) -> float:
-    """Return the motion floor below which a window is considered frozen/static.
-
-    Uses a per-clip percentile so a clip with generally low motion still has
-    usable windows, while genuine static patches are rejected.
+    Returns ``None`` when the component is missing so the guard can skip the
+    window rather than treating it as frozen (motion=0).
     """
-    if not windows:
+    value = window.get("components", {}).get("motion")
+    if value is None:
+        return None
+    return float(value)
+
+
+def _library_motion_floor(
+    clip_metadata: Dict[str, dict], percentile: float
+) -> float:
+    """Return the Nth percentile of window motion across the whole clip library.
+
+    A per-clip percentile lets entirely-static clips pass their own filter,
+    which is why the frozen-frame guard regressed. The library-wide floor
+    measures "static" against all available footage.
+    """
+    all_motions: List[float] = []
+    for meta in clip_metadata.values():
+        for w in meta.get("heatmap", []):
+            m = _window_motion(w)
+            if m is not None:
+                all_motions.append(m)
+    if not all_motions:
         return 0.0
-    motions = np.array([_window_motion(w) for w in windows])
-    return float(np.percentile(motions, RANK.WINDOW_MOTION_PERCENTILE * 100.0))
+    return float(np.percentile(np.array(all_motions, dtype=np.float32), percentile))
 
 
 def _slot_min_motion(
     window_start_s: float,
     slot_duration_s: float,
     heatmap: List[dict],
-) -> float:
+) -> Optional[float]:
     """Return the minimum motion across all heatmap windows overlapping the slot.
 
     This catches static patches inside the source window, not just at the start.
+    Returns ``None`` if no motion data is available for the overlapping windows.
     """
     slot_end = window_start_s + slot_duration_s
-    overlapping = [
-        w for w in heatmap
+    motions = [
+        m for w in heatmap
         if w.get("start_s", 0.0) < slot_end and w.get("end_s", 0.0) > window_start_s
+        and (m := _window_motion(w)) is not None
     ]
-    if not overlapping:
-        return 0.0
-    return min(_window_motion(w) for w in overlapping)
+    if not motions:
+        return None
+    return min(motions)
 
 
 def _best_window(
@@ -100,6 +117,8 @@ def _best_window(
     used_windows: Dict[str, List[float]],
     clip_id: str,
     slot_energy: float = 0.5,
+    library_motion_floor: float = 0.0,
+    library_static_threshold: float = 0.0,
 ):
     """Pick the best usable heatmap window for a slot.
 
@@ -107,9 +126,15 @@ def _best_window(
     timeline was meaningless. Instead we pick the highest-scoring window that
     leaves enough room for the full slot duration, has not already been used
     for this clip, and is not in a frozen/static patch of the source.
+
+    The guard thresholds are computed once across the entire clip library so
+    a clip that is entirely static cannot pass its own low bar.
     """
     heatmap = meta.get("heatmap", [])
     if not heatmap:
+        # No heatmap = no motion information; keep the legacy neutral score so
+        # the ranker can still use the clip. This is different from "every
+        # window failed the guard", which returns -inf.
         return None, 0.5, "still"
 
     clip_dur = meta.get("duration_sec", 5.0)
@@ -140,32 +165,42 @@ def _best_window(
     if not candidates:
         candidates = heatmap
 
-    # Frozen-frame guard: reject the bottom percentile of motion windows unless
+    # Frozen-frame guard: reject library-bottom-percentile motion windows unless
     # the slot explicitly calls for a low-energy / still moment. For high-energy
     # slots also enforce an absolute minimum motion across the FULL slot duration
     # so a single high-motion window cannot mask a static patch later in the slot.
     allow_still = slot_energy < RANK.LOW_ENERGY_MOTION_THRESHOLD
-    floor = _motion_floor(heatmap)
+    # If the library floor is exactly zero (many/all clips are static), still
+    # reject zero-motion windows by using a tiny positive epsilon.
+    effective_floor = max(library_motion_floor, 1e-6)
     non_frozen = []
     for w in candidates:
         window_motion = _window_motion(w)
+        # Missing motion data: we cannot judge frozen/static, so allow the
+        # window. Real heatmaps always include motion; this preserves backward
+        # compatibility with test fixtures that omit it.
+        if window_motion is None:
+            non_frozen.append(w)
+            continue
         if allow_still:
             non_frozen.append(w)
             continue
-        if window_motion <= floor:
+        if window_motion < effective_floor:
             continue
         if slot_energy >= RANK.LOW_ENERGY_MOTION_THRESHOLD:
             slot_min = _slot_min_motion(
                 w.get("start_s", 0.0), slot_duration_s, heatmap
             )
-            if slot_min < RANK.HIGH_ENERGY_MIN_MOTION:
+            if slot_min is not None and slot_min + 1e-6 < library_static_threshold:
                 continue
         non_frozen.append(w)
 
-    if non_frozen:
-        candidates = non_frozen
+    if not non_frozen:
+        # Hard rejection: every candidate window for this clip is frozen/static.
+        # Return -inf so the ranker skips this clip for this slot entirely.
+        return None, float("-inf"), "still"
 
-    best = max(candidates, key=_window_score)
+    best = max(non_frozen, key=_window_score)
     return (
         best.get("start_s"),
         float(_window_score(best)),
@@ -199,6 +234,8 @@ def _score_clip(
     last_chosen_clip_id: Optional[str] = None,
     at_usage_cap: bool = False,
     emotion_profile: Optional[ClipEmotionProfile] = None,
+    library_motion_floor: float = 0.0,
+    library_static_threshold: float = 0.0,
 ) -> ClipScore:
     """Compute a single ClipScore for a slot/clip pair.
 
@@ -216,8 +253,38 @@ def _score_clip(
 
     used_windows = used_windows or {}
     window_start_s, window_score, dominant_motion = _best_window(
-        meta, slot.duration_s, used_windows, clip_id, slot.energy_level
+        meta,
+        slot.duration_s,
+        used_windows,
+        clip_id,
+        slot.energy_level,
+        library_motion_floor=library_motion_floor,
+        library_static_threshold=library_static_threshold,
     )
+
+    # If this clip has no non-frozen window for this slot, kill its total score
+    # so the ranker skips it. window_score is -inf only when the guard rejected
+    # every available window. Missing heatmap (window_score == 0.5) is not a
+    # rejection.
+    if window_start_s is None and window_score == float("-inf"):
+        total = float("-inf")
+        return ClipScore(
+            clip_id=clip_id,
+            semantic_score=0.0,
+            shot_type_score=0.0,
+            aesthetic_score=0.0,
+            motion_score=0.0,
+            duration_score=0.0,
+            window_score=window_score,
+            window_start_s=None,
+            dominant_motion="still",
+            diversity_penalty=0.0,
+            repetition_penalty=0.0,
+            total_score=total,
+            emotion_match_score=0.0,
+            arc_beat_name=slot.story_beat,
+            emotion_profile=emotion_profile,
+        )
 
     diversity = 0.0
     if embeddings and clip_id in embeddings and chosen_embeddings:
@@ -476,6 +543,16 @@ def rank_clips_for_slots(
             if emb is not None:
                 slot_embeddings[slot.index] = emb
 
+    # Library-wide motion thresholds: computed once per ranking pass so a
+    # clip cannot pass its own low bar (T.9.B.1-CORRECTION).
+    library_motion_floor = _library_motion_floor(
+        clip_metadata, RANK.WINDOW_MOTION_PERCENTILE * 100.0
+    )
+    # p15 proved too low for this clip library: many static patches have motion
+    # ~0.02-0.03 and slipped through. p25 (empirically ~0.025) catches them while
+    # still allowing genuinely moving windows.
+    library_static_threshold = max(_library_motion_floor(clip_metadata, 25.0), 0.02)
+
     last_chosen_clip_id: Optional[str] = None
     for slot in slots:
         scores = []
@@ -508,6 +585,8 @@ def rank_clips_for_slots(
                     last_chosen_clip_id=last_chosen_clip_id,
                     at_usage_cap=at_cap,
                     emotion_profile=clip_emotion_profiles.get(clip_id),
+                    library_motion_floor=library_motion_floor,
+                    library_static_threshold=library_static_threshold,
                 )
             )
 
@@ -571,6 +650,8 @@ def rank_clips_for_slots(
                 chosen_embeddings,
                 repeat_count=chosen_clip_counts.get(fallback_id, 0),
                 emotion_profile=clip_emotion_profiles.get(fallback_id),
+                library_motion_floor=library_motion_floor,
+                library_static_threshold=library_static_threshold,
             )
             rankings[slot.index] = [fallback_score]
 
