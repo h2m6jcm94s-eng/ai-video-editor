@@ -3,6 +3,7 @@
 # Commercial SaaS use is prohibited without written permission.
 """FFmpeg-based timeline compiler for beat-synced video rendering."""
 
+import json
 import os
 import shutil
 import tempfile
@@ -163,25 +164,90 @@ _ffprobe_duration_cache: Dict[str, float] = {}
 
 
 def _probe_duration(video_path: str) -> float:
-    """Return video duration in seconds using ffprobe, with caching."""
+    """Return the first video stream duration in seconds, with caching.
+
+    Uses the video stream duration rather than the container ``format`` duration
+    so that clips whose audio track outlasts their video stream are not treated
+    as longer than they really are.
+    """
     if video_path in _ffprobe_duration_cache:
         return _ffprobe_duration_cache[video_path]
 
-    cmd = [
-        "ffprobe", "-v", "error",
-        "-select_streams", "v:0",
-        "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1",
-        video_path,
-    ]
-    try:
-        out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, text=True).strip()
-        duration = float(out) if out else 0.0
-    except Exception:
-        duration = 0.0
+    duration = 0.0
+    for entries in ("stream=duration", "format=duration"):
+        cmd = [
+            "ffprobe", "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", entries,
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            video_path,
+        ]
+        try:
+            out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, text=True).strip()
+            if out and out.lower() != "n/a":
+                duration = float(out)
+                break
+        except Exception:
+            continue
 
     _ffprobe_duration_cache[video_path] = duration
     return duration
+
+
+def _validate_output_tracks(output_path: str, expected_duration: Optional[float] = None) -> None:
+    """Raise if the output file's video and audio tracks have mismatched durations.
+
+    This catches the container-level bug where the video track dies mid-render
+    (e.g. xfade/timebase failure) while the audio track completes.
+    """
+    try:
+        out = subprocess.check_output(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "stream=codec_type,duration",
+                "-of", "json",
+                output_path,
+            ],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        data = json.loads(out)
+    except Exception as e:
+        raise RuntimeError(f"Could not probe output tracks for {output_path}: {e}") from e
+
+    durations: Dict[str, float] = {}
+    for stream in data.get("streams", []):
+        ctype = stream.get("codec_type")
+        dur = stream.get("duration")
+        if ctype in ("video", "audio") and dur is not None:
+            try:
+                durations[ctype] = float(dur)
+            except (TypeError, ValueError):
+                pass
+
+    video_dur = durations.get("video")
+    audio_dur = durations.get("audio")
+    if video_dur is None:
+        raise RuntimeError(f"Output {output_path} has no video stream")
+    if audio_dur is None:
+        # Silent outputs are allowed in some paths.
+        return
+
+    diff = abs(video_dur - audio_dur)
+    tolerance = 0.5
+    if diff > tolerance:
+        raise RuntimeError(
+            f"Output track duration mismatch: video={video_dur:.3f}s, "
+            f"audio={audio_dur:.3f}s, diff={diff:.3f}s (tolerance {tolerance}s). "
+            "The video track died before the audio track."
+        )
+
+    if expected_duration and expected_duration > 0:
+        if abs(video_dur - expected_duration) > tolerance:
+            raise RuntimeError(
+                f"Output video duration mismatch: expected={expected_duration:.3f}s, "
+                f"actual={video_dur:.3f}s, diff={abs(video_dur - expected_duration):.3f}s"
+            )
 
 
 def _db_to_linear(gain_db: float) -> float:
@@ -635,6 +701,7 @@ def _drawtext_filter(
     fontsize_expr = str(font_size_px)
     alpha_expr = ""
     x_anim_expr = x_expr
+    y_anim_expr = y_expr
 
     # T.7 H4: cinematic kinetic-text animations.  We avoid fontsize expressions
     # because they crash the Windows FFmpeg build when spawned from Python, so
@@ -1279,6 +1346,24 @@ def _extract_segment(args) -> Optional[dict]:
     start = max(0.0, base_start + anticipation)
     clip_duration = _probe_duration(clip_path)
 
+    # Ensure the chosen source window actually contains enough footage for this
+    # slot. If the heatmap window or anticipation offset pushes the start too
+    # late, rewind to the latest feasible start. This is the H2 residual fix:
+    # never ask FFmpeg to read past the end of the source clip.
+    speed_factor = _speed_ramp_factor(slot)
+    source_duration = scaled_duration * speed_factor
+    max_feasible_start = max(0.0, clip_duration - source_duration - 0.05)
+    if start > max_feasible_start:
+        logger.warning(
+            "source_window_rewound_for_feasibility",
+            slot_index=slot.index,
+            requested_start=start,
+            rewound_start=max_feasible_start,
+            clip_duration=clip_duration,
+            source_duration=source_duration,
+        )
+        start = max_feasible_start
+
     # Speed ramps consume more source time when speeding up and less when slowing
     # down, but the rendered slot duration stays fixed to the beat grid. Clamp the
     # speed factor to the amount of source footage actually available so we never
@@ -1315,6 +1400,35 @@ def _extract_segment(args) -> Optional[dict]:
         slot, base_vf, temp_dir, font_map, config,
         style_tier=style_tier, speed_factor=speed_factor,
     )
+
+    # If the available source footage is shorter than the slot's timeline
+    # duration (after speed ramps and window clamping), extend the segment to
+    # the full slot duration so the container video track never underflows
+    # during xfade/concat. Long extensions loop the available footage to avoid
+    # a frozen-frame artefact; short gaps clone the last frame.
+    rendered_output_duration = duration / speed_factor if speed_factor else duration
+    pad_duration = max(0.0, scaled_duration - rendered_output_duration)
+    if pad_duration > 0.05:
+        logger.warning(
+            "segment_extended_to_timeline",
+            slot_index=slot.index,
+            rendered_duration=rendered_output_duration,
+            target_duration=scaled_duration,
+            pad_duration=pad_duration,
+            clip_id=getattr(slot, "selected_clip_id", None),
+        )
+        if pad_duration > 1.0:
+            # Loop the existing footage. size is the number of frames in the
+            # source window (after fps conversion), capped at the filter max.
+            fps = config.fps or 30.0
+            loop_size = min(32767, max(1, int(round(duration * fps))))
+            vf = (
+                f"{vf},"
+                f"loop=loop=-1:size={loop_size}:start=0,"
+                f"trim=duration={scaled_duration:.3f}"
+            )
+        else:
+            vf = f"{vf},tpad=stop_mode=clone:stop_duration={pad_duration:.3f}"
 
     encode_args = _segment_video_args(config)
     input_prefix = ["-hwaccel", "cuda"] if config.use_hwaccel else []
@@ -1381,6 +1495,21 @@ def _extract_segment(args) -> Optional[dict]:
             raw_mask_path = config.mask_paths[slot.selected_clip_id]
     mask_path = raw_mask_path and _safe_path(raw_mask_path, must_exist=True)
     mask_exists = bool(mask_path and os.path.exists(mask_path))
+    # Validate that the rendered segment is roughly the requested length. A
+    # severe underflow means the source window was too short; we keep the
+    # segment but surface it in the runtime report so the Golden Render gate
+    # can catch the freeze class rather than silently shipping it.
+    rendered_duration = _probe_duration(segment_path)
+    expected_duration = scaled_duration
+    if rendered_duration > 0 and abs(rendered_duration - expected_duration) > 0.2:
+        logger.warning(
+            "segment_duration_mismatch",
+            slot_index=slot.index,
+            expected=expected_duration,
+            actual=rendered_duration,
+            clip_id=getattr(slot, "selected_clip_id", None),
+        )
+
     if mask_exists:
         masked_segment_path = os.path.join(temp_dir, f"slot_{slot.index:03d}_masked.mp4")
         _apply_subject_mask(segment_path, mask_path, masked_segment_path, config, temp_dir)
@@ -1570,30 +1699,63 @@ def _merge_two_video_nodes(
     decoder contexts at once, which exhausts memory on Windows when 100+ slots
     are chained in a single filter graph.
     """
-    transition = _transition_name_for_pair(left.last_slot, right.first_slot, enable_effects)
+    requested_transition = _transition_name_for_pair(left.last_slot, right.first_slot, enable_effects)
     out_path = os.path.join(temp_dir, f"merge_{merge_index:04d}.mp4")
     out_path_rel = os.path.basename(out_path)
 
-    if transition == "hard_cut":
-        xfade_duration = 0.0
-        filter_complex = (
-            "[0:v]setpts=PTS-STARTPTS[a];"
-            "[1:v]setpts=PTS-STARTPTS[b];"
-            "[a][b]concat=n=2:v=1:a=0[outv]"
-        )
-    else:
+    # Normalize inputs before concat/xfade: identical fps, pixel format, SAR,
+    # timebase, and resolution. This prevents container-level video track death
+    # when heterogeneous source clips (different fps/timebase/SAR) meet in xfade.
+    norm = (
+        f"fps={config.fps or 30.0}:round=near,"
+        f"scale={config.width}:{config.height}:force_original_aspect_ratio=decrease,"
+        f"pad={config.width}:{config.height}:(ow-iw)/2:(oh-ih)/2,"
+        "format=yuv420p,"
+        "setsar=1,"
+        "settb=1/30000"
+    )
+
+    def _build_filter_complex(transition: str) -> str:
+        if transition == "hard_cut":
+            return (
+                f"[0:v]{norm},setpts=PTS-STARTPTS[a];"
+                f"[1:v]{norm},setpts=PTS-STARTPTS[b];"
+                "[a][b]concat=n=2:v=1:a=0[outv]"
+            )
         # xfade duration is limited by the actual media lengths of the two
-        # bordering slots, but the transition is anchored to the *timeline*
-        # boundary so slots do not drift.
-        left_dur = actual_durations[left.last_slot.index]
-        right_dur = actual_durations[right.first_slot.index]
-        xfade_duration = min(0.3, left_dur * 0.5, right_dur * 0.5)
+        # inputs. The transition is anchored to the end of the left node's
+        # timeline so that merged subtrees do not have their tails cut off.
+        xfade_duration = min(0.3, left.media_duration * 0.5, right.media_duration * 0.5)
         offset = max(0.0, left.timeline_duration - xfade_duration)
-        filter_complex = (
-            "[0:v]setpts=PTS-STARTPTS[a];"
-            "[1:v]setpts=PTS-STARTPTS[b];"
+        return (
+            f"[0:v]{norm},setpts=PTS-STARTPTS[a];"
+            f"[1:v]{norm},setpts=PTS-STARTPTS[b];"
             f"[a][b]xfade=transition={transition}:duration={xfade_duration:.3f}:offset={offset:.3f}[outv]"
         )
+
+    # If either bordering slot is shorter than its timeline (source underflow),
+    # xfade can seek past the end of the input and kill the video track. Fall
+    # back to a hard cut for this boundary and log it.
+    left_underflow = left.media_duration < left.timeline_duration - 0.2
+    right_underflow = right.media_duration < right.timeline_duration - 0.2
+    if requested_transition != "hard_cut" and (left_underflow or right_underflow):
+        logger.warning(
+            "merge_underflow_hard_cut",
+            merge_index=merge_index,
+            transition=requested_transition,
+            left_slot=left.last_slot.index,
+            left_timeline=left.timeline_duration,
+            left_media=left.media_duration,
+            right_slot=right.first_slot.index,
+            right_timeline=right.timeline_duration,
+            right_media=right.media_duration,
+        )
+        transition = "hard_cut"
+    else:
+        transition = requested_transition
+
+    xfade_duration = 0.0
+    filter_complex = _build_filter_complex(transition)
 
     cmd = [
         "ffmpeg", "-y",
@@ -1606,10 +1768,39 @@ def _merge_two_video_nodes(
         "-movflags", "+faststart",
         out_path_rel,
     ]
-    _run_ffmpeg(cmd, f"video merge {merge_index}", cwd=temp_dir)
+    try:
+        _run_ffmpeg(cmd, f"video merge {merge_index}", cwd=temp_dir)
+    except RuntimeError:
+        if transition != "hard_cut":
+            logger.warning(
+                "merge_xfade_failed_fallback_to_hard_cut",
+                merge_index=merge_index,
+                transition=transition,
+            )
+            transition = "hard_cut"
+            filter_complex = _build_filter_complex("hard_cut")
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", left.path,
+                "-i", right.path,
+                "-filter_complex", filter_complex,
+                "-map", "[outv]",
+                "-an",
+                *_video_encode_args(config),
+                "-movflags", "+faststart",
+                out_path_rel,
+            ]
+            _run_ffmpeg(cmd, f"video merge {merge_index} (hard cut fallback)", cwd=temp_dir)
+        else:
+            raise
 
-    merged_timeline_duration = left.timeline_duration + right.timeline_duration - xfade_duration
-    merged_media_duration = _probe_duration(out_path) or merged_timeline_duration
+    # The merged output's actual length is what matters for downstream merges.
+    # Using the probed media duration as the timeline duration keeps the binary
+    # merge tree honest when source underflow has shortened one of the inputs.
+    merged_media_duration = _probe_duration(out_path) or (
+        left.timeline_duration + right.timeline_duration - xfade_duration
+    )
+    merged_timeline_duration = merged_media_duration
     return _MergeNode(
         path=out_path_rel,
         timeline_duration=merged_timeline_duration,
@@ -2011,6 +2202,12 @@ def compile_timeline(
                 copy_cmd.extend(["-t", str(duration_cap)])
             copy_cmd.append(output_path)
             _run_ffmpeg(copy_cmd, "copy video pass", cwd=temp_dir)
+
+        # Container-level integrity gate: the rendered video stream must span the
+        # same duration as the audio stream (within 0.5 s). A mismatch here means
+        # the video track died mid-render while audio continued — the exact
+        # symptom of the slot 4→5 xfade/timebase bug.
+        _validate_output_tracks(output_path, duration_cap)
 
         shutil.rmtree(temp_dir, ignore_errors=True)
         return output_path

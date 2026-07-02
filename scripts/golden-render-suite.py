@@ -447,6 +447,116 @@ def _check_no_frozen_frames(result: SuiteResult) -> None:
     )
 
 
+def _check_output_track_integrity(result: SuiteResult) -> None:
+    """Ensure the output container has a video track that spans the full song.
+
+    Catches the container-level bug where the video track dies mid-render (e.g.
+    xfade/timebase failure) while the audio track continues to the end.
+    """
+    if not OUTPUT_VIDEO.exists():
+        result.add(Criterion("output_track_integrity", False, detail="output video missing"))
+        return
+
+    try:
+        out = subprocess.check_output(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "stream=codec_type,duration",
+                "-of", "json",
+                str(OUTPUT_VIDEO),
+            ],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        data = json.loads(out)
+    except Exception as e:
+        result.add(Criterion("output_track_integrity", False, detail=f"ffprobe failed: {e}"))
+        return
+
+    durations: Dict[str, float] = {}
+    for stream in data.get("streams", []):
+        ctype = stream.get("codec_type")
+        dur = stream.get("duration")
+        if ctype in ("video", "audio") and dur is not None:
+            try:
+                durations[ctype] = float(dur)
+            except (TypeError, ValueError):
+                pass
+
+    video_dur = durations.get("video")
+    audio_dur = durations.get("audio")
+    if video_dur is None:
+        result.add(Criterion("output_track_integrity", False, detail="no video stream"))
+        return
+    if audio_dur is None:
+        result.add(
+            Criterion(
+                "output_track_integrity",
+                True,
+                value=round(video_dur, 1),
+                detail="no audio stream; skipped",
+                required=False,
+            )
+        )
+        return
+
+    diff = abs(video_dur - audio_dur)
+    passed = diff <= 0.5
+    result.add(
+        Criterion(
+            "output_track_integrity",
+            passed,
+            value=round(diff, 3),
+            threshold=0.5,
+            detail=f"video={video_dur:.1f}s audio={audio_dur:.1f}s diff={diff:.3f}s",
+        )
+    )
+
+
+def _check_seekable_at_checkpoints(result: SuiteResult) -> None:
+    """Verify frames can be extracted at 50%, 75%, and 95% of the output.
+
+    A truncated video track may report a long container duration while having
+    no actual frames past a certain point.
+    """
+    if not OUTPUT_VIDEO.exists():
+        result.add(Criterion("seekable_at_checkpoints", False, detail="output video missing"))
+        return
+
+    duration = _probe_duration(OUTPUT_VIDEO)
+    if duration <= 0:
+        result.add(Criterion("seekable_at_checkpoints", False, detail="could not probe duration"))
+        return
+
+    checkpoints = [0.50, 0.75, 0.95]
+    failed: List[str] = []
+    with tempfile.TemporaryDirectory(prefix="ave_golden_seek_") as tmp:
+        for ratio in checkpoints:
+            ts = duration * ratio
+            out_path = Path(tmp) / f"checkpoint_{int(ratio*100)}.jpg"
+            cmd = [
+                "ffmpeg", "-y", "-ss", str(ts),
+                "-i", str(OUTPUT_VIDEO),
+                "-frames:v", "1",
+                "-q:v", "5",
+                str(out_path),
+            ]
+            proc = subprocess.run(cmd, capture_output=True, text=True, check=False, stdin=subprocess.DEVNULL)
+            if proc.returncode != 0 or not out_path.exists() or out_path.stat().st_size < 1024:
+                failed.append(f"{ratio*100:.0f}% ({ts:.1f}s)")
+
+    passed = not failed
+    result.add(
+        Criterion(
+            "seekable_at_checkpoints",
+            passed,
+            value=len(checkpoints) - len(failed),
+            threshold=len(checkpoints),
+            detail=("all checkpoints ok" if passed else f"failed: {', '.join(failed)}"),
+        )
+    )
+
+
 def _check_ssim_vs_previous(result: SuiteResult) -> None:
     previous = os.environ.get("AVE_GOLDEN_REFERENCE")
     if not previous or not Path(previous).exists():
@@ -633,6 +743,8 @@ def run_suite(args: argparse.Namespace) -> SuiteResult:
     _check_no_triton_warnings(log, result)
     _check_non_system_font(cutlist, result)
     _check_no_frozen_frames(result)
+    _check_output_track_integrity(result)
+    _check_seekable_at_checkpoints(result)
     _check_ssim_vs_previous(result)
     _check_kinetic_relevance(cutlist, result)
 

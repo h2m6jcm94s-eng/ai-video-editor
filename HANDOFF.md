@@ -1,52 +1,45 @@
 # AI Video Editor — Handoff
 
-> Generated after splitting the working tree into PRs. Last updated: 2026-06-30 (session 7 — E2E pipeline green: `CUTLIST_SCHEMA_DRIFT` fix, Render button overlay fix, pipeline test refresh).
+> Generated after splitting the working tree into PRs. Last updated: 2026-07-02 (session 8 — container-level video truncation fix; Golden Render `output_track_integrity` now PASS, `no_frozen_frames` remains the only failure).
 
 ---
 
 ## 0. Latest Session Snapshot
 
 **Current branch:** `main`  
-**Latest commit:** `6cbec75` — wip: checkpoint current working state (T.7 validation + H4 animations + T.8 narrative rewrite + Golden Render Suite)
+**Latest commit:** Uncommitted working tree (changes in `compiler.py`, `test_zindex_text.py`; previous checkpoint `6cbec75`)
 
 ### What just happened
 
-- **T.7 Sprint A regression audit completed.**
-  - H1 (kinetic text unrelated to scenes) was a stale diagnosis: `cutlist_gen.py` uses `KINETIC_TEXT_LLM=1` by default and the LLM path is active. The word bank exists only as historical fallback code, not the active path.
-  - H2 (speed-ramp freeze) ✅ shipped — `compiler.py` clamps source duration before applying speed ramps.
-  - H3 (captions don't match scene) ✅ shipped — `captions.py` gates on `speaker_visible_in_frame` via face detection.
-  - H4 (hideous text) ✅ shipped now — 77 cinematic display fonts bundled at `E:\ai-video-editor-storage\fonts\display\`; `compiler.py` now implements `punch_in_3f`, `shake_3f`, and `smash_cut_2f` kinetic-text animations; `kinetic_compose.py` presets map to them.
-  - H5 (clip repetition) ✅ shipped — `batch2-offline-render.py` asserts `clip_count >= slot_count * 1.2`.
-  - GPU-6 faster-whisper ✅ already active in `audio_scoring.py` (`from faster_whisper import WhisperModel`).
-- **T.8 Narrative algorithm rewrite shipped.**
-  - Per-clip emotion profiles (`clip_emotion.py`), arc template library (`narrative_arcs.py`), arc-to-song anchor mapping (`arc_anchor.py`), arc-aware clip ranking (`clip_rank.py`), arc-aware kinetic text (`kinetic_compose.py`), and past/glimpse interleaving.
-  - Gated behind `AdaptiveFeatures.use_emotion_led_cuts`.
-- **Golden Render Regression Suite shipped.**
-  - Runner: `scripts/golden-render-suite.py`.
-  - Plan-compliant wrapper: `tests/golden_render/run.py` + `tests/golden_render/expected/expected_signatures.json`.
-  - Phase 1 gate: **16/16** criteria pass.
-  - Phase 2 gate: **21/21** criteria pass with `--feature-emotion-led-cuts`.
-- **Anti-decoration rule codified (T.7.3).**
-  - Banned: disabling a feature to make tests pass, placeholder constants, skipped tests for broken features, random/word-bank fallbacks pretending to be real output.
-  - If a feature cannot be fixed in time, set `capability_status="blocked_<reason>"` and let the Golden Render gate show the honest missing state.
-- **Amitansu Priyadarsan** (`Amitansu-priyadarsan`) added as collaborator with push access.
+- **Container-level video truncation bug fixed.**
+  - Root cause was per-slot source underflow: slot durations exceeded available clip footage after speed-ramp clamping and anticipation offsets, causing xfade/concat to silently EOF the video track while audio continued.
+  - `_probe_duration()` now returns the **video stream duration** instead of container duration, so audio-longer clips are not treated as longer than they really are.
+  - `_extract_segment()` now rewinds `source_window_start_s` to the latest feasible start, clamps speed ramps to available footage, and guarantees the rendered segment covers the full slot timeline by looping large gaps or cloning the last frame for small gaps.
+  - `_merge_two_video_nodes()` now anchors xfade to the left node’s actual merged timeline duration rather than the leaf slot’s media duration, preventing merged subtrees from being truncated.
+- **Golden Render Suite status:**
+  - `output_track_integrity` now **PASS** (video=227.1s, audio=227.1s).
+  - `duration_match` now **PASS** (video=227.07s, song=227.05s).
+  - Overall: **22/23** criteria pass with `--feature-emotion-led-cuts`.
+  - Remaining failure: `no_frozen_frames` (longest_frozen=2.00s, threshold 1.0s). This is a **content-selection** issue — a genuinely static source shot in slot 31 after the compiler had to rewind to the start of a short clip — not the container/xfade truncation bug.
+- **Render-worker tests green.**
+  - Fixed pre-existing `UnboundLocalError` in `_drawtext_filter` for the `bold_bounce` animation.
+  - Fixed `test_zindex_text.py` to pass a `font_map` dict instead of a raw font path.
+  - Full render-worker suite: **24/24 passed**.
 
 ### Verification
 
-- `scripts/golden-render-suite.py --json` → Phase 1 **16/16** pass.
-- `scripts/golden-render-suite.py --json --feature-emotion-led-cuts` → Phase 2 **21/21** pass.
-- `services/reason-worker/tests/test_kinetic_compose.py` → **8 passed**.
-- `services/reason-worker/tests/test_arc_anchor.py test_clip_rank_arc.py test_glimpse_interleave.py test_narrative_arcs.py` → **22 passed**.
-- `services/ingest-worker/tests/test_clip_emotion.py` → **10 passed**.
-- `services/render-worker/tests/test_compiler.py` → **1 passed**.
+- `.venv/Scripts/python scripts/golden-render-suite.py --feature-emotion-led-cuts`
+  - Passed: 22, Failed: 1 (`no_frozen_frames`).
+- `.venv/Scripts/python -m pytest services/render-worker/tests -q`
+  - **24 passed**.
 
 ### Next priority
 
-- Fix or refactor `AnalyzeStyleWorkflow` so it does not deadlock in the Temporal worker; re-enable Scenario B.
-- Decide whether to align the YouTube 16:9 export preset enum (`1280×720`) with the render worker's actual `1920×1080` output.
-- Wire up the guardrails service so it is reachable instead of failing open.
-- Continue Section N external-service setup (SAM 3 server, ComfyUI/SDXL inpaint, Wan 2.2) when ready.
-- Fix the pre-existing Vitest/CommonJS test-runner config issue so `pnpm test` runs cleanly.
+- Decide how to clear the last `no_frozen_frames` gate. Options:
+  1. Improve clip/window selection in `reason_worker` so short, static-opening clips are not assigned to slots (preferred — honest fix).
+  2. Accept that source static shots may exceed the 1.0s threshold and document it as a known limitation.
+- Commit the truncation fix and test correction.
+- Continue pre-existing priorities: `AnalyzeStyleWorkflow` deadlock, export preset mismatch, guardrails wiring, Section N setup, Vitest/CommonJS config.
 
 ---
 
@@ -69,6 +62,67 @@ If you can't make a feature work in the time you have:
 
 **Never ship a feature that's "always-on" but produces meaningless output.**
 The Golden Render Suite will catch this; if it doesn't catch this, ADD the check.
+
+---
+
+## Session 8 — Container-level video truncation fix (in progress)
+
+### What changed
+
+- `services/render-worker/src/render_worker/compiler.py`
+  - `_probe_duration()`:
+    - Now probes `stream=duration` first, falling back to `format=duration` only when the video stream has no duration.
+    - Prevents source-window math from using container duration when the audio track is longer than the video stream.
+  - `_extract_segment()`:
+    - Added feasibility rewind: `start = min(requested_start, clip_duration - source_duration - 0.05)` so the requested window never reads past the clip’s actual video end.
+    - Speed-ramp clamp now respects the footage really available after the rewind.
+    - Added timeline-duration guarantee:
+      - If `rendered_output_duration < scaled_duration`:
+        - Gaps > 1.0s → loop the available footage with `loop=loop=-1:size=<frames>:start=0,trim=duration=...`.
+        - Gaps ≤ 1.0s → clone the last frame with `tpad=stop_mode=clone:stop_duration=...`.
+    - Segment mismatch check now compares probed duration against the slot’s timeline duration instead of the raw source-read duration.
+  - `_merge_two_video_nodes()`:
+    - xfade offset now uses `left.timeline_duration` (the probed merged length) instead of `actual_durations[left.last_slot.index]`.
+    - This fixes the case where a merged subtree was being truncated because the transition anchor was based on the border leaf slot rather than the end of the subtree.
+    - Underflow fallback uses node `media_duration` instead of leaf slot durations.
+  - `_drawtext_filter()`:
+    - Fixed `UnboundLocalError` for `bold_bounce` animation by initializing `y_anim_expr = y_expr`.
+
+- `services/render-worker/tests/test_zindex_text.py`
+  - `test_layered_text_filter_includes_drawtext_and_overlay` was passing a font path string as `font_map`; it now passes `{"anime_impact": relative_font}` so `_render_layered_text()` receives the expected dict.
+
+### Verification
+
+- **Golden Render Suite — `--feature-emotion-led-cuts`**
+  - `duration_match`: PASS (diff=0.014s)
+  - `output_track_integrity`: PASS (video=227.1s, audio=227.1s, diff=0.014s)
+  - `real_path_ratio`: PASS (1.0)
+  - `slot_window_fallback_count`: PASS (0)
+  - `max_slot_gap`: PASS (0.000s)
+  - `audio_ducking_real`, `kinetic_text_real`, `captions_real`, `speed_ramps_real`: all real
+  - `kinetic_text_llm_ratio`: PASS (3/3)
+  - `no_clip_repeats`: PASS (0)
+  - `caption_density`: PASS
+  - `no_triton_warnings`: PASS
+  - `non_system_font`: PASS
+  - `seekable_at_checkpoints`: PASS
+  - `kinetic_text_relevance`: PASS
+  - Arc/emotion gates (emotion-led-cuts only): all PASS
+  - **FAIL:** `no_frozen_frames` — longest_frozen=2.00s at ~t=142s (slot 31, `clip_080`). The compiler had to rewind to the start of a 4.38s clip; the opening of that clip is a static close-up.
+
+- **Render-worker unit tests**
+  - `services/render-worker/tests/test_anticipation_seek.py`: 1 passed
+  - `services/render-worker/tests/test_compiler.py`: 1 passed
+  - `services/render-worker/tests/test_identity_matte.py`: 1 passed
+  - `services/render-worker/tests/test_object_edit.py`: 9 passed
+  - `services/render-worker/tests/test_sam3_client.py`: 9 passed
+  - `services/render-worker/tests/test_zindex_text.py`: 3 passed
+  - **Total: 24/24 passed**
+
+### Blockers / follow-up
+
+- The `no_frozen_frames` gate is now the only Golden Render failure. It is not caused by the render pipeline dying; it is caused by selecting a source window that begins with a static shot. The fix belongs upstream in clip/window selection (`reason_worker/clip_rank.py`, `clip_rank._best_window`) so that short clips with static openings are either avoided or windowed to a motion-rich region.
+- No commits have been made yet for this session.
 
 ---
 

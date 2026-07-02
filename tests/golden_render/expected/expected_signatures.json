@@ -13,6 +13,8 @@
   "no_triton_warnings": { "required": true },
   "non_system_font": { "max": 0, "required": true },
   "no_frozen_frames": { "max": 1.0, "required": true },
+  "output_track_integrity": { "max": 0.5, "required": true },
+  "seekable_at_checkpoints": { "min": 3, "required": true },
   "ssim_vs_previous": { "required": false },
   "kinetic_text_relevance": { "min": 0.5, "required": true },
   "arc_beats_detected": { "min": 3, "required": false },

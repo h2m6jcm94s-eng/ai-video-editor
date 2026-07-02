@@ -115,7 +115,8 @@ def test_layered_text_filter_includes_drawtext_and_overlay(monkeypatch):
 
     monkeypatch.setattr("render_worker.compiler._run_ffmpeg", fake_run_ffmpeg)
 
-    result = _extract_segment((slot, clip_path, 1.0, config, temp_dir, relative_font, "full_remix", kinetic_overlays))
+    font_map = {"anime_impact": relative_font} if relative_font else {}
+    result = _extract_segment((slot, clip_path, 1.0, config, temp_dir, font_map, "full_remix", kinetic_overlays))
 
     assert result is not None
     assert os.path.exists(result["path"])
