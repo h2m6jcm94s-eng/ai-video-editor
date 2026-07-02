@@ -13,6 +13,7 @@ from temporalio import activity
 
 from ingest_worker.beat_detect import compute_energy_curve, detect_beats
 from ingest_worker.heatmap import compute_clip_heatmap, heatmap_to_metadata
+from ingest_worker.song_mood import analyze_song
 from ingest_worker.probe import probe_asset_remote
 from ingest_worker.shot_detect import detect_shot_boundaries
 
@@ -72,6 +73,23 @@ async def detect_shot_boundaries_activity(asset_id: str, storage_key: str, fps: 
         }
         await _patch_asset_metadata(asset_id, metadata)
         return {"asset_id": asset_id, "shot_boundaries": metadata["shotBoundaries"]}
+    finally:
+        try:
+            os.remove(local_path)
+        except OSError:
+            pass
+
+
+@activity.defn
+async def analyze_song_mood_activity(asset_id: str, storage_key: str) -> dict:
+    """Download a song asset, detect beats, and run CLAP mood/genre tagging."""
+    local_path = download_asset(storage_key)
+    try:
+        beat_grid = detect_beats(local_path)
+        mood_profile = analyze_song(local_path, beat_grid)
+        metadata = {"songMoodProfile": mood_profile.model_dump(by_alias=True)}
+        await _patch_asset_metadata(asset_id, metadata)
+        return {"asset_id": asset_id, "song_mood_profile": metadata["songMoodProfile"]}
     finally:
         try:
             os.remove(local_path)

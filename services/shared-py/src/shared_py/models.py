@@ -2,7 +2,7 @@
 # Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
 # Commercial SaaS use is prohibited without written permission.
 from datetime import datetime, timezone
-from typing import List, Optional, Literal, Any, Dict
+from typing import List, Optional, Literal, Any, Dict, Tuple
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic.alias_generators import to_camel
 
@@ -42,6 +42,23 @@ class EmotionSample(BaseModelCamel):
     arousal: float = Field(default=0.0, ge=0.0, le=1.0)
     dominance: float = Field(default=0.0, ge=0.0, le=1.0)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class SectionMoodTags(BaseModelCamel):
+    """CLAP mood tags for one song section."""
+
+    start_s: float
+    end_s: float
+    section_label: str
+    top_moods: List[Tuple[str, float]] = Field(default_factory=list)
+
+
+class SongMoodProfile(BaseModelCamel):
+    """Per-section and global mood/genre tags for a song."""
+
+    song_hash: str
+    genre_tags: List[Tuple[str, float]] = Field(default_factory=list)
+    section_moods: List[SectionMoodTags] = Field(default_factory=list)
 
 
 class ClipEmotionProfile(BaseModelCamel):
