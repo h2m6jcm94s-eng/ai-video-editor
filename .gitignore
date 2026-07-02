@@ -89,3 +89,9 @@ optimisations.md
 test files/
 
 .tmp/
+.heatmap-cache/
+tmp_*/
+tmp_frames/
+tmp_outfine/
+tmp_seg/
+tmp_src/

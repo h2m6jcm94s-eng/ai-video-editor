@@ -14,7 +14,9 @@ from temporalio import activity
 
 from ingest_worker.beat_detect import compute_energy_curve, detect_beats
 from ingest_worker.heatmap import compute_clip_heatmap, heatmap_to_metadata
+from ingest_worker.song_lyrics import transcribe_song_lyrics
 from ingest_worker.song_mood import analyze_song
+from ingest_worker.stem_events import detect_music_events
 from ingest_worker.stem_separate import separate_song_stems
 from ingest_worker.vocal_emotion import analyze_vocal_stem
 from ingest_worker.probe import probe_asset_remote
@@ -113,6 +115,27 @@ async def analyze_vocal_emotion_activity(asset_id: str, storage_key: str) -> dic
         metadata = {"vocalEmotionCurve": curve.model_dump(by_alias=True)}
         await _patch_asset_metadata(asset_id, metadata)
         return {"asset_id": asset_id, "vocal_emotion_curve": metadata["vocalEmotionCurve"]}
+    finally:
+        try:
+            os.remove(local_path)
+        except OSError:
+            pass
+
+
+@activity.defn
+async def detect_music_events_activity(asset_id: str, storage_key: str) -> dict:
+    """Download a song asset, separate stems, transcribe lyrics, and detect per-stem music events."""
+    local_path = download_asset(storage_key)
+    try:
+        stems = separate_song_stems(local_path)
+        stems_dir = Path(stems.get("drums", "")).parent
+        if not stems_dir.exists():
+            raise FileNotFoundError(f"stems directory missing for asset {asset_id}")
+        words = transcribe_song_lyrics(local_path)
+        grid = detect_music_events(stems_dir, words, cache_dir=None)
+        metadata = {"musicEventGrid": grid.model_dump(by_alias=True)}
+        await _patch_asset_metadata(asset_id, metadata)
+        return {"asset_id": asset_id, "music_event_grid": metadata["musicEventGrid"]}
     finally:
         try:
             os.remove(local_path)

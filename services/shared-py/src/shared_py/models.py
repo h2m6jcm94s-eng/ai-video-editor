@@ -78,6 +78,61 @@ class VocalEmotionCurve(BaseModelCamel):
     silent_ratio: float = 0.0
 
 
+class MusicEvent(BaseModelCamel):
+    """A single detected music event."""
+
+    time_s: float
+    intensity: float
+    stem: str
+
+
+class MusicEventGrid(BaseModelCamel):
+    """Detected music events across all stems."""
+
+    song_hash: str
+    kick_times: List[float] = Field(default_factory=list)
+    snare_times: List[float] = Field(default_factory=list)
+    hihat_times: List[float] = Field(default_factory=list)
+    bass_drop_times: List[float] = Field(default_factory=list)
+    vocal_onset_times: List[float] = Field(default_factory=list)
+    phrase_boundary_times: List[float] = Field(default_factory=list)
+    sweep_peak_times: List[float] = Field(default_factory=list)
+
+    def events_in_window(self, t: float, window_s: float = 0.1) -> List[MusicEvent]:
+        """Return all events within ``±window_s`` of ``t``.
+
+        Sorted by a simple priority (drum > bass > vocals > other).
+        """
+        priority = {
+            "snare": 100,
+            "kick": 90,
+            "bass_drop": 85,
+            "vocal_onset": 70,
+            "phrase_boundary": 60,
+            "sweep_peak": 55,
+        }
+        events: List[MusicEvent] = []
+        for event_type, times in [
+            ("snare", self.snare_times),
+            ("kick", self.kick_times),
+            ("bass_drop", self.bass_drop_times),
+            ("vocal_onset", self.vocal_onset_times),
+            ("phrase_boundary", self.phrase_boundary_times),
+            ("sweep_peak", self.sweep_peak_times),
+        ]:
+            for time_s in times:
+                if abs(time_s - t) <= window_s:
+                    events.append(
+                        MusicEvent(
+                            time_s=time_s,
+                            intensity=1.0,
+                            stem=event_type,
+                        )
+                    )
+        events.sort(key=lambda e: (-priority.get(e.stem, 0), abs(e.time_s - t)))
+        return events
+
+
 class ClipEmotionProfile(BaseModelCamel):
     """Fused emotion profile for a user clip.
 
