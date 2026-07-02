@@ -133,6 +133,24 @@ class MusicEventGrid(BaseModelCamel):
         return events
 
 
+class SongMeaning(BaseModelCamel):
+    """Unified song analysis produced by the ingest worker.
+
+    Aggregates mood tags, vocal emotion, and per-stem music events into a single
+    artifact that the reason worker can load in one lookup.
+    """
+
+    song_hash: str
+    genre_tags: List[Tuple[str, float]] = Field(default_factory=list)
+    section_moods: List[SectionMoodTags] = Field(default_factory=list)
+    vocal_emotion_curve: VocalEmotionCurve = Field(
+        default_factory=lambda: VocalEmotionCurve(song_hash="")
+    )
+    music_event_grid: MusicEventGrid = Field(
+        default_factory=lambda: MusicEventGrid(song_hash="")
+    )
+
+
 class ClipEmotionProfile(BaseModelCamel):
     """Fused emotion profile for a user clip.
 

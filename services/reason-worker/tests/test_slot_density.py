@@ -5,7 +5,7 @@
 
 import pytest
 
-from shared_py.models import AdaptiveFeatures, BeatGrid, BeatSegment, BehaviorVector, ShotBoundary
+from shared_py.models import AdaptiveFeatures, BeatGrid, BeatSegment, BehaviorVector, MusicEventGrid, ShotBoundary
 from reason_worker.cutlist_gen import generate_cutlist_programmatic, _behavior_from_style_analysis
 from reason_worker.slot_generator import generate_slots_adaptive, weighted_sample_with_min_gap
 
@@ -167,3 +167,23 @@ def test_behavior_from_style_analysis_override_clamps_extremes():
     }
     behavior = _behavior_from_style_analysis(style_analysis, total_duration=10.0)
     assert behavior.cut_density_per_sec == pytest.approx(2.0, abs=0.01)
+
+
+def test_generate_slots_adaptive_boosts_event_candidates():
+    """A strong music event between beats becomes a cut candidate when a grid is supplied."""
+    duration = 20.0
+    beat_grid = BeatGrid(
+        bpm=60.0,
+        beats=[round(i * 1.0, 3) for i in range(21)],
+        downbeats=[0.0, 4.0, 8.0, 12.0, 16.0, 20.0],
+        beat_positions=[1] * 21,
+        segments=[BeatSegment(start=0.0, end=duration, label="verse")],
+    )
+    energy_curve = [0.5] * 20
+    behavior = BehaviorVector(cut_density_per_sec=0.10, slot_duration_mean_s=2.5)
+    events = MusicEventGrid(song_hash="fake", kick_times=[2.35])
+
+    slots = generate_slots_adaptive(beat_grid, duration, behavior, energy_curve, duration, music_event_grid=events)
+    start_times = [s.start_s for s in slots]
+    # 2.35 should be picked (or a beat very close to it) because it is boosted.
+    assert any(abs(t - 2.35) < 0.05 for t in start_times), f"event time 2.35 not in starts {start_times}"

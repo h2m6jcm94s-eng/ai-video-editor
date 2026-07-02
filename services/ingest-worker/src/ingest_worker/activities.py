@@ -15,6 +15,7 @@ from temporalio import activity
 from ingest_worker.beat_detect import compute_energy_curve, detect_beats
 from ingest_worker.heatmap import compute_clip_heatmap, heatmap_to_metadata
 from ingest_worker.song_lyrics import transcribe_song_lyrics
+from ingest_worker.song_meaning import aggregate_song_meaning
 from ingest_worker.song_mood import analyze_song
 from ingest_worker.stem_events import detect_music_events
 from ingest_worker.stem_separate import separate_song_stems
@@ -136,6 +137,22 @@ async def detect_music_events_activity(asset_id: str, storage_key: str) -> dict:
         metadata = {"musicEventGrid": grid.model_dump(by_alias=True)}
         await _patch_asset_metadata(asset_id, metadata)
         return {"asset_id": asset_id, "music_event_grid": metadata["musicEventGrid"]}
+    finally:
+        try:
+            os.remove(local_path)
+        except OSError:
+            pass
+
+
+@activity.defn
+async def analyze_song_meaning_activity(asset_id: str, storage_key: str) -> dict:
+    """Download a song asset, run all song analyses, and persist unified SongMeaning."""
+    local_path = download_asset(storage_key)
+    try:
+        meaning = aggregate_song_meaning(local_path)
+        metadata = {"songMeaning": meaning.model_dump(by_alias=True)}
+        await _patch_asset_metadata(asset_id, metadata)
+        return {"asset_id": asset_id, "song_meaning": metadata["songMeaning"]}
     finally:
         try:
             os.remove(local_path)

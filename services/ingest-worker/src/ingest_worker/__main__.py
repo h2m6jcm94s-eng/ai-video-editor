@@ -9,6 +9,7 @@ from shared_py.startup import validate_startup
 from shared_py.worker_runner import run_worker
 
 from ingest_worker.activities import (
+    analyze_song_meaning_activity,
     analyze_song_mood_activity,
     analyze_vocal_emotion_activity,
     compute_clip_heatmap_activity,
@@ -33,6 +34,7 @@ async def main() -> None:
             analyze_song_mood_activity,
             analyze_vocal_emotion_activity,
             detect_music_events_activity,
+            analyze_song_meaning_activity,
         ],
         validate=validate_startup,
     )

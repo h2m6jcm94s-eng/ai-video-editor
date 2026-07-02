@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     # Beat snapping in cutlist generation
     beat_snap_downbeat_radius: float = 0.10
     beat_snap_beat_radius: float = 0.05
+    beat_snap_event_radius: float = 0.08
 
     # API callback
     api_base: str = os.environ.get("API_BASE", "http://localhost:4000/api")

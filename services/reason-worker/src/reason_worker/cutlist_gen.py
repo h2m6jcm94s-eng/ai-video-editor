@@ -19,7 +19,7 @@ from shared_py.logging_config import StructuredLogger
 from shared_py.models import (
     CutList, CutListGlobals, Slot, Overlay, Effect, BeatGrid, BeatSegment, ShotBoundary, SectionMarker, AudioTrack,
     ZoomPunchInParams, FocusPullParams, FilmGrainParams, VignetteParams,
-    BehaviorVector, AdaptiveFeatures,
+    BehaviorVector, AdaptiveFeatures, MusicEventGrid,
 )
 from reason_worker.kinetic_compose import assign_kinetic_text_to_slots
 from reason_worker.speed_ramps import assign_speed_ramps_to_slots
@@ -340,10 +340,14 @@ def _snap_slots_to_shots_and_beats(
     content_end: float,
     downbeat_lock_radius: float = 0.10,
     beat_prefer_radius: float = 0.05,
+    music_event_grid: Optional[MusicEventGrid] = None,
+    event_snap_radius: float = 0.08,
 ) -> None:
     """Snap slot starts to shot boundaries and ensure slots do not overlap or exceed content.
 
-    Uses tiered beat importance:
+    Uses tiered importance:
+    - Music events (kick/snare/bass-drop) within ``event_snap_radius`` take top priority
+      when a grid is provided.
     - Downbeats within ``downbeat_lock_radius`` are locked, ignoring shot boundaries.
     - Regular beats within ``beat_prefer_radius`` are preferred, yielding only to shots
       within the same small radius.
@@ -359,13 +363,21 @@ def _snap_slots_to_shots_and_beats(
     # Snap starts and drop anything that falls past the content.
     snapped = []
     for slot in slots:
-        # Tiered snap: downbeat > beat > shot.
+        # Tiered snap: music event > downbeat > beat > shot.
+        event = None
+        if music_event_grid is not None:
+            events = music_event_grid.events_in_window(slot.start_s, event_snap_radius)
+            if events:
+                event = events[0]
+
         nearest_downbeat_dist = min((abs(slot.start_s - d) for d in downbeats), default=float("inf"))
         nearest_beat_dist = min((abs(slot.start_s - b) for b in beats), default=float("inf"))
         nearest_downbeat = min(downbeats, key=lambda d: abs(d - slot.start_s)) if downbeats else None
         nearest_beat = min(beats, key=lambda b: abs(b - slot.start_s)) if beats else None
 
-        if nearest_downbeat is not None and nearest_downbeat_dist < downbeat_lock_radius:
+        if event is not None and abs(event.time_s - slot.start_s) <= event_snap_radius:
+            new_start = event.time_s
+        elif nearest_downbeat is not None and nearest_downbeat_dist < downbeat_lock_radius:
             new_start = nearest_downbeat
         elif nearest_beat is not None and nearest_beat_dist < beat_prefer_radius:
             new_start = nearest_beat
@@ -557,6 +569,7 @@ def generate_cutlist(
     user_clip_count: Optional[int] = None,
     behavior: Optional[BehaviorVector] = None,
     features: Optional[AdaptiveFeatures] = None,
+    music_event_grid: Optional[MusicEventGrid] = None,
 ) -> CutList:
     """Generate a cut-list using the configured AI provider chain.
 
@@ -577,6 +590,7 @@ def generate_cutlist(
                 style_analysis, style_tier, song_asset_id, user_clip_count,
                 behavior=behavior,
                 features=features,
+                music_event_grid=music_event_grid,
             )
 
         try:
@@ -620,6 +634,7 @@ def generate_cutlist_programmatic(
     user_clip_count: Optional[int] = None,
     behavior: Optional[BehaviorVector] = None,
     features: Optional[AdaptiveFeatures] = None,
+    music_event_grid: Optional[MusicEventGrid] = None,
 ) -> CutList:
     """Generate a cut-list programmatically without LLM."""
     enable_text = _tier_index(style_tier) >= _tier_index("with_text")
@@ -688,6 +703,7 @@ def generate_cutlist_programmatic(
             behavior,
             energy_curve,
             content_end,
+            music_event_grid=music_event_grid,
         )
         for slot in slot_skeletons:
             _apply_slot_style(
@@ -788,6 +804,8 @@ def generate_cutlist_programmatic(
         content_end,
         downbeat_lock_radius=settings.beat_snap_downbeat_radius,
         beat_prefer_radius=settings.beat_snap_beat_radius,
+        music_event_grid=music_event_grid,
+        event_snap_radius=settings.beat_snap_event_radius,
     )
 
     # Cap slot count to prevent over-cutting when the user has few clips.

@@ -43,6 +43,14 @@ class ProbeAssetWorkflow:
                     retry_policy=RetryPolicy(maximum_attempts=2),
                 )
             )
+            futures.append(
+                workflow.execute_activity(
+                    "analyze_song_meaning_activity",
+                    args=(input.asset_id, input.storage_key),
+                    start_to_close_timeout=timedelta(seconds=1200),
+                    retry_policy=RetryPolicy(maximum_attempts=2),
+                )
+            )
 
         if asset_type in {"reference_video", "clip"}:
             fps = probe.get("fps") or 30.0

@@ -20,7 +20,7 @@ shared_py_path = os.path.join(repo_root, "shared-py", "src")
 if shared_py_path not in sys.path:
     sys.path.insert(0, shared_py_path)
 
-from shared_py.models import BeatGrid, BehaviorVector, Slot
+from shared_py.models import BeatGrid, BehaviorVector, MusicEventGrid, Slot
 
 
 # No source window should be asked to cover more than this many seconds without a
@@ -93,6 +93,7 @@ def generate_slots_adaptive(
     behavior: BehaviorVector,
     energy_curve: List[float],
     content_end: float,
+    music_event_grid: Optional[MusicEventGrid] = None,
 ) -> List[Slot]:
     """Generate slot skeletons from a target cut density and beat candidates.
 
@@ -140,6 +141,36 @@ def generate_slots_adaptive(
     for i, t in enumerate(candidates):
         if any(abs(t - d) < 0.02 for d in downbeat_set):
             weights[i] *= 2.5
+
+    # 4b. Boost/add high-priority music-event candidates (kick/snare/bass-drop).
+    if music_event_grid is not None:
+        event_times: List[float] = []
+        for times in (
+            music_event_grid.snare_times,
+            music_event_grid.kick_times,
+            music_event_grid.bass_drop_times,
+        ):
+            event_times.extend(times)
+        new_candidates: List[float] = []
+        new_weights: List[float] = []
+        for event_t in event_times:
+            if event_t <= 0 or event_t >= content_end:
+                continue
+            # Snap to the nearest existing candidate if within 50 ms.
+            nearest_idx = None
+            nearest_dist = float("inf")
+            for i, t in enumerate(candidates):
+                dist = abs(t - event_t)
+                if dist < nearest_dist:
+                    nearest_dist = dist
+                    nearest_idx = i
+            if nearest_idx is not None and nearest_dist <= 0.05:
+                weights[nearest_idx] = max(weights[nearest_idx], max(weights) * 1.5)
+            else:
+                new_candidates.append(event_t)
+                new_weights.append(max(max(weights) * 1.5, 1.0))
+        candidates.extend(new_candidates)
+        weights.extend(new_weights)
 
     # 5. Force the cutlist to start at t=0 so the video begins immediately.
     # Find the 0.0 candidate (always inserted above) and give it the highest weight.

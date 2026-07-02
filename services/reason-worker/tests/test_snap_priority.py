@@ -3,7 +3,7 @@
 import pytest
 
 from reason_worker.cutlist_gen import _snap_slots_to_shots_and_beats
-from shared_py.models import BeatGrid, ShotBoundary, Slot
+from shared_py.models import BeatGrid, MusicEventGrid, ShotBoundary, Slot
 
 
 def _make_beat_grid(beats, downbeats=None):
@@ -104,3 +104,42 @@ def test_beat_index_updated_after_snap():
 
     assert slot.start_s == 5.0
     assert slot.beat_index == 1
+
+
+def test_music_event_wins_over_downbeat_and_shot():
+    """A kick/snare within the event snap radius takes priority over downbeats/shots."""
+    slot = _make_slot(start_s=5.08)
+    beat_grid = _make_beat_grid(beats=[4.5, 5.0, 5.5], downbeats=[5.0])
+    shots = [ShotBoundary(start_frame=0, end_frame=30, start_s=5.04, end_s=6.0)]
+    events = MusicEventGrid(song_hash="fake", snare_times=[5.09])
+
+    _snap_slots_to_shots_and_beats(
+        [slot],
+        shots,
+        beat_grid,
+        content_end=10.0,
+        downbeat_lock_radius=0.10,
+        beat_prefer_radius=0.05,
+        music_event_grid=events,
+        event_snap_radius=0.08,
+    )
+
+    assert slot.start_s == pytest.approx(5.09, abs=0.001)
+
+
+def test_event_snap_ignored_when_grid_missing():
+    """Without a grid, the existing tiered behavior is unchanged."""
+    slot = _make_slot(start_s=5.0)
+    beat_grid = _make_beat_grid(beats=[4.5, 5.0, 5.5], downbeats=[5.0])
+    shots = [ShotBoundary(start_frame=0, end_frame=30, start_s=5.23, end_s=6.0)]
+
+    _snap_slots_to_shots_and_beats(
+        [slot],
+        shots,
+        beat_grid,
+        content_end=10.0,
+        downbeat_lock_radius=0.10,
+        beat_prefer_radius=0.05,
+    )
+
+    assert slot.start_s == 5.0

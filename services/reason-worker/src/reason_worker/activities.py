@@ -9,7 +9,7 @@ from typing import Dict, List, Optional
 import httpx
 from shared_py.config import settings
 from shared_py.logging_config import StructuredLogger
-from shared_py.models import BeatGrid, CutList, ShotBoundary, AdaptiveFeatures, BehaviorVector, ClipEmotionProfile
+from shared_py.models import BeatGrid, CutList, MusicEventGrid, ShotBoundary, AdaptiveFeatures, BehaviorVector, ClipEmotionProfile, SongMeaning
 from shared_py.storage import download_asset
 from temporalio import activity
 
@@ -125,6 +125,35 @@ async def ensure_shot_boundaries(
 
 
 @activity.defn
+async def ensure_song_meaning(song_asset_id: str, song_metadata: dict, storage_key: str) -> dict:
+    """Return cached SongMeaning or aggregate it from the song asset."""
+    from ingest_worker.song_meaning import aggregate_song_meaning
+
+    existing = (song_metadata or {}).get("songMeaning")
+    if existing:
+        return {"song_meaning": existing}
+
+    local_path = download_asset(storage_key)
+    try:
+        meaning = aggregate_song_meaning(local_path)
+        metadata = {"songMeaning": meaning.model_dump(by_alias=True)}
+        async with httpx.AsyncClient() as client:
+            resp = await client.patch(
+                f"{settings.api_base}/internal/assets/{song_asset_id}/metadata",
+                json={"metadata": metadata},
+                headers=_internal_headers(),
+                timeout=30,
+            )
+        resp.raise_for_status()
+        return {"song_meaning": metadata["songMeaning"]}
+    finally:
+        try:
+            os.remove(local_path)
+        except OSError:
+            pass
+
+
+@activity.defn
 async def generate_cutlist_activity(
     beat_grid_raw: dict,
     shot_boundaries_raw: List[dict],
@@ -135,6 +164,7 @@ async def generate_cutlist_activity(
     song_asset_id: Optional[str] = None,
     clip_asset_ids: Optional[List[str]] = None,
     options: Optional[dict] = None,
+    music_event_grid_raw: Optional[dict] = None,
 ) -> dict:
     """Generate a cutlist from beats, shots, and style analysis."""
     beat_grid = BeatGrid(**beat_grid_raw)
@@ -157,6 +187,8 @@ async def generate_cutlist_activity(
     behavior_raw = options.get("behaviorVector")
     behavior = BehaviorVector(**behavior_raw) if behavior_raw else None
 
+    music_event_grid = MusicEventGrid(**music_event_grid_raw) if music_event_grid_raw else None
+
     cutlist = generate_cutlist(
         beat_grid,
         shot_boundaries,
@@ -169,6 +201,7 @@ async def generate_cutlist_activity(
         user_clip_count=len(clip_asset_ids) if clip_asset_ids else None,
         behavior=behavior,
         features=features,
+        music_event_grid=music_event_grid,
     )
     return {
         "cutlist": cutlist.model_dump(by_alias=True),

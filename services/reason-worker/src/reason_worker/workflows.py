@@ -171,6 +171,18 @@ class GenerateFromReferenceWorkflow:
                 retry_policy=RetryPolicy(maximum_attempts=2),
             )
 
+            await self._publish(job_id, "analyzing_song_meaning", 35, "Loading song meaning")
+            meaning_result = await workflow.execute_activity(
+                "ensure_song_meaning",
+                args=(
+                    song_asset_id,
+                    song_asset.get("metadata") or {},
+                    song_storage_key,
+                ),
+                start_to_close_timeout=timedelta(seconds=1200),
+                retry_policy=RetryPolicy(maximum_attempts=2),
+            )
+
             clip_asset_ids = input.clip_asset_ids or project.get("clipAssetIds") or []
 
             signals = _extract_content_signals(
@@ -200,6 +212,7 @@ class GenerateFromReferenceWorkflow:
                 predictor_reasoning = prediction.get("predictorReasoning", "")
 
             await self._publish(job_id, "generating_cutlist", 50, "Generating cutlist from analysis")
+            music_event_grid_raw = (meaning_result.get("song_meaning") or {}).get("musicEventGrid")
             generation_result = await workflow.execute_activity(
                 "generate_cutlist_activity",
                 args=(
@@ -212,6 +225,7 @@ class GenerateFromReferenceWorkflow:
                     song_asset_id,
                     clip_asset_ids,
                     options,
+                    music_event_grid_raw,
                 ),
                 start_to_close_timeout=timedelta(seconds=300),
                 retry_policy=RetryPolicy(maximum_attempts=2),

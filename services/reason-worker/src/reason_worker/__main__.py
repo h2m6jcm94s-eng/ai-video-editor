@@ -11,6 +11,7 @@ from shared_py.worker_runner import run_worker
 from reason_worker.activities import (
     ensure_beat_grid,
     ensure_shot_boundaries,
+    ensure_song_meaning,
     fail_generation_job,
     fetch_project_context,
     generate_cutlist_activity,
@@ -31,6 +32,7 @@ async def main() -> None:
             fetch_project_context,
             ensure_beat_grid,
             ensure_shot_boundaries,
+            ensure_song_meaning,
             generate_cutlist_activity,
             rank_clips_activity,
             save_generated_cutlist,
