@@ -29,6 +29,7 @@ OUTPUT_DIR = BATCH_DIR / "output"
 RENDER_LOG = OUTPUT_DIR / "render.log"
 OUTPUT_VIDEO = OUTPUT_DIR / "output.mp4"
 CUTLIST_JSON = OUTPUT_DIR / "cutlist.json"
+SONG_ANALYSIS_JSON = OUTPUT_DIR / "song_analysis.json"
 
 WORD_BANKS = {
     "triumphant": [
@@ -125,6 +126,13 @@ def _load_render_log() -> str:
     if not RENDER_LOG.exists():
         return ""
     return RENDER_LOG.read_text(encoding="utf-8", errors="replace")
+
+
+def _load_song_analysis() -> Optional[Dict[str, Any]]:
+    if not SONG_ANALYSIS_JSON.exists():
+        return None
+    with open(SONG_ANALYSIS_JSON, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def _load_cutlist() -> Optional[CutList]:
@@ -601,6 +609,44 @@ def _check_ssim_vs_previous(result: SuiteResult) -> None:
     )
 
 
+def _check_lyrics_available(result: SuiteResult) -> None:
+    analysis = _load_song_analysis()
+    if analysis is None:
+        result.add(Criterion("lyrics_available", False, detail="song_analysis.json missing"))
+        return
+    count = analysis.get("lyric_word_count", 0)
+    passed = isinstance(count, int) and count >= 50
+    result.add(
+        Criterion(
+            "lyrics_available",
+            passed,
+            value=count,
+            threshold=50,
+            detail=f"lyric_words={count}",
+        )
+    )
+
+
+def _check_stems_available(result: SuiteResult) -> None:
+    analysis = _load_song_analysis()
+    if analysis is None:
+        result.add(Criterion("stems_available", False, detail="song_analysis.json missing"))
+        return
+    present = analysis.get("stems_present", {})
+    total = len(present)
+    found = sum(1 for v in present.values() if v)
+    passed = total == 4 and found == 4
+    result.add(
+        Criterion(
+            "stems_available",
+            passed,
+            value=found,
+            threshold=4,
+            detail=f"stems={found}/{total}",
+        )
+    )
+
+
 def _check_kinetic_relevance(cutlist: CutList, result: SuiteResult) -> None:
     texts: List[str] = []
     for slot in cutlist.slots:
@@ -747,6 +793,8 @@ def run_suite(args: argparse.Namespace) -> SuiteResult:
     _check_seekable_at_checkpoints(result)
     _check_ssim_vs_previous(result)
     _check_kinetic_relevance(cutlist, result)
+    _check_lyrics_available(result)
+    _check_stems_available(result)
 
     if args.feature_emotion_led_cuts:
         _check_arc_beats_detected(cutlist, result)

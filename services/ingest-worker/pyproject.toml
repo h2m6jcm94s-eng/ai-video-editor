@@ -17,6 +17,9 @@ dependencies = [
     "onnxruntime-gpu>=1.27.0",
     "deepface>=0.0.93",
     "transformers>=4.40.0",
+    "demucs==4.0.1",
+    "faster-whisper>=1.0.0",
+    "torchaudio==2.6.0+cu124",
 ]
 
 [project.optional-dependencies]

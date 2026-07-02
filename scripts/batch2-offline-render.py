@@ -22,6 +22,7 @@ import platform
 import sys
 import time
 from pathlib import Path
+from typing import Any, Dict
 
 # Windows consoles often default to cp1252; force UTF-8 for progress JSON and filenames.
 if hasattr(sys.stdout, "reconfigure"):
@@ -38,6 +39,8 @@ from ingest_worker.beat_detect import detect_beats, compute_energy_curve
 from ingest_worker.heatmap import compute_clip_heatmaps_batch, heatmap_to_metadata
 from ingest_worker.shot_detect import detect_shot_boundaries
 from ingest_worker.clip_emotion import compute_clip_emotion_profiles
+from ingest_worker.song_lyrics import transcribe_song_lyrics
+from ingest_worker.stem_separate import separate_song_stems
 from reason_worker.clip_rank import rank_clips_for_slots
 from reason_worker.aspect_detect import detect_aspect_preset, ASPECT_PRESETS
 from reason_worker.cutlist_gen import generate_cutlist_programmatic, _behavior_from_style_analysis
@@ -156,6 +159,11 @@ def main():
         help="Apply Save-the-Cat 15-beat story structure to slot sections",
     )
     parser.add_argument(
+        "--skip-song-analysis",
+        action="store_true",
+        help="Skip Whisper lyric transcription and Demucs stem separation",
+    )
+    parser.add_argument(
         "--source-ip-hint",
         type=str,
         default=None,
@@ -204,6 +212,26 @@ def main():
         "camera_motions": [],
         "detected_overlays": [],
     }
+
+    # 3b. Song analysis: lyrics and stems (cached).
+    song_analysis: Dict[str, Any] = {}
+    if args.skip_song_analysis:
+        log_progress("song_analysis", 0.28, "Skipping lyric transcription and stem separation")
+    else:
+        log_progress("song_analysis", 0.28, "Transcribing lyrics and separating stems")
+        lyric_words = transcribe_song_lyrics(str(song_path))
+        stems = separate_song_stems(str(song_path))
+        song_analysis = {
+            "lyric_word_count": len(lyric_words),
+            "stems_present": {name: bool(path) for name, path in stems.items()},
+            "stems_paths": {name: str(path) if path else None for name, path in stems.items()},
+        }
+        print(
+            f"Song analysis: {len(lyric_words)} lyrics words, "
+            f"stems present={sum(song_analysis['stems_present'].values())}/4"
+        )
+        song_analysis_path = OUTPUT_DIR / "song_analysis.json"
+        song_analysis_path.write_text(json.dumps(song_analysis, indent=2, default=str), encoding="utf-8")
 
     # 4. Collect clips
     log_progress("collect_clips", 0.30, "Collecting user clips")

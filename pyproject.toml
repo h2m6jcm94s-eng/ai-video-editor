@@ -102,6 +102,7 @@ explicit = true
 [tool.uv.sources]
 torch = { index = "torch-cu124" }
 torchvision = { index = "torch-cu124" }
+torchaudio = { index = "torch-cu124" }
 shared-py = { workspace = true }
 ingest-worker = { workspace = true }
 reason-worker = { workspace = true }

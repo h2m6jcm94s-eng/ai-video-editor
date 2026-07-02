@@ -17,6 +17,8 @@
   "seekable_at_checkpoints": { "min": 3, "required": true },
   "ssim_vs_previous": { "required": false },
   "kinetic_text_relevance": { "min": 0.5, "required": true },
+  "lyrics_available": { "min": 50, "required": true },
+  "stems_available": { "min": 4, "required": true },
   "arc_beats_detected": { "min": 3, "required": false },
   "emotion_match_per_slot": { "min": 0.6, "required": false },
   "interleaved_glimpse_present_in_rising_action": { "required": false },
