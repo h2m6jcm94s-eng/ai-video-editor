@@ -503,6 +503,7 @@ def main():
     result_path = compile_timeline(cutlist, clip_path_map, str(output_path), config, style_tier=args.tier)
     render_time = time.time() - start_render
     fallback_count = get_slot_window_fallback_count()
+    cutlist.slot_window_fallback_count = fallback_count
     print(f"slot_window_fallback_count: {fallback_count}")
 
     log_progress("complete", 1.0, f"Render complete in {render_time:.1f}s")

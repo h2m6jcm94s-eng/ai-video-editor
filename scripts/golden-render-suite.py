@@ -163,7 +163,7 @@ def _probe_duration(path: Path) -> float:
         return 0.0
 
 
-def _parse_feature_summary(log: str) -> Dict[str, Any]:
+def _parse_feature_summary(log: str, cutlist: CutList) -> Dict[str, Any]:
     summary: Dict[str, Any] = {}
     in_summary = False
     for line in log.splitlines():
@@ -185,6 +185,21 @@ def _parse_feature_summary(log: str) -> Dict[str, Any]:
                 summary[name] = {"status": "fallback", "reason": rest}
             elif "real" in rest:
                 summary[name] = {"status": "real"}
+
+    # Fallback to the structured cutlist report when the text summary is missing
+    # or incomplete (e.g. the render log was overwritten by a failed run).
+    if not summary.get("real_path_ratio") and cutlist.real_path_ratio:
+        summary["real_path_ratio"] = float(cutlist.real_path_ratio)
+    for report in cutlist.feature_runtime_report:
+        name = report.feature
+        if name in summary:
+            continue
+        if report.real_path_ran:
+            summary[name] = {"status": "real"}
+        elif report.fallback_reason:
+            summary[name] = {"status": "fallback", "reason": report.fallback_reason}
+        else:
+            summary[name] = {"status": "fallback", "reason": "no_path_declared"}
     return summary
 
 
@@ -207,8 +222,8 @@ def _check_duration_match(cutlist: CutList, result: SuiteResult) -> None:
     )
 
 
-def _check_real_path_ratio(summary: Dict[str, Any], result: SuiteResult) -> None:
-    ratio = summary.get("real_path_ratio", 0.0)
+def _check_real_path_ratio(summary: Dict[str, Any], cutlist: CutList, result: SuiteResult) -> None:
+    ratio = summary.get("real_path_ratio") or cutlist.real_path_ratio or 0.0
     passed = isinstance(ratio, float) and ratio >= 0.95
     result.add(
         Criterion(
@@ -221,9 +236,9 @@ def _check_real_path_ratio(summary: Dict[str, Any], result: SuiteResult) -> None
     )
 
 
-def _check_slot_window_fallback(log: str, result: SuiteResult) -> None:
+def _check_slot_window_fallback(log: str, cutlist: CutList, result: SuiteResult) -> None:
     m = re.search(r"slot_window_fallback_count:\s*(\d+)", log)
-    count = int(m.group(1)) if m else None
+    count = int(m.group(1)) if m else cutlist.slot_window_fallback_count
     passed = count == 0
     result.add(
         Criterion(
@@ -768,16 +783,17 @@ def run_suite(args: argparse.Namespace) -> SuiteResult:
     _run_render(args)
     log = _load_render_log()
     cutlist = _load_cutlist()
-    summary = _parse_feature_summary(log)
 
     result = SuiteResult()
     if cutlist is None:
         result.add(Criterion("cutlist_loaded", False, detail="cutlist.json missing"))
         return result
 
+    summary = _parse_feature_summary(log, cutlist)
+
     _check_duration_match(cutlist, result)
-    _check_real_path_ratio(summary, result)
-    _check_slot_window_fallback(log, result)
+    _check_real_path_ratio(summary, cutlist, result)
+    _check_slot_window_fallback(log, cutlist, result)
     _check_max_slot_gap(cutlist, result)
     _check_feature_real(summary, "audio_ducking", result)
     _check_feature_real(summary, "kinetic_text", result)

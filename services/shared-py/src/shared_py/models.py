@@ -296,6 +296,7 @@ class CutList(BaseModelCamel):
     feature_runtime_report: List[FeaturePathReport] = Field(default_factory=list)
     real_path_ratio: float = 0.0
     demo_grade: bool = False
+    slot_window_fallback_count: Optional[int] = None
 
 
 class ShotBoundary(BaseModelCamel):

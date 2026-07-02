@@ -3,9 +3,13 @@
 # Commercial SaaS use is prohibited without written permission.
 """Beat, downbeat, and section detection using allin1 + librosa fallback."""
 
+import hashlib
+import json
 import os
+import shutil
 import subprocess
 import tempfile
+from pathlib import Path
 from typing import List, Optional, Tuple
 import numpy as np
 
@@ -30,6 +34,38 @@ from shared_py.models import BeatGrid, BeatSegment
 logger = StructuredLogger("ingest_worker.beat_detect")
 
 
+def _song_hash(audio_path: str) -> str:
+    path = Path(audio_path).resolve()
+    try:
+        stat = path.stat()
+        raw = f"{path}|{stat.st_mtime}|{stat.st_size}"
+    except FileNotFoundError:
+        raw = str(path)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+def _default_cache_dir() -> Path:
+    root = os.environ.get("STORAGE_ROOT", r"E:\ai-video-editor-storage")
+    return Path(root) / "beat"
+
+
+def _safe_audio_path(input_path: str) -> Tuple[str, Optional[Path]]:
+    """Return (path_to_decode, temp_copy_to_clean_up).
+
+    FFmpeg on Windows can fail or corrupt metadata when the input path contains
+    characters outside the active code page (e.g. Polish ``Ł``). Copy to an
+    ASCII-only temporary file when necessary.
+    """
+    try:
+        input_path.encode("ascii")
+        return input_path, None
+    except UnicodeEncodeError:
+        suffix = Path(input_path).suffix or ".flac"
+        tmp_copy = Path(tempfile.mkstemp(suffix=suffix, prefix="beat_safe_")[1])
+        shutil.copy2(input_path, tmp_copy)
+        return str(tmp_copy), tmp_copy
+
+
 def decode_to_wav(input_path: str) -> str:
     """Decode any audio to 44.1kHz WAV PCM.
 
@@ -39,23 +75,32 @@ def decode_to_wav(input_path: str) -> str:
     fd, wav_path = tempfile.mkstemp(suffix=".wav", prefix="ingest_beat_")
     os.close(fd)
 
-    cmd = [
-        "ffmpeg", "-y", "-i", input_path,
-        "-ar", "44100", "-ac", "2", "-c:a", "pcm_s16le",
-        wav_path,
-    ]
+    safe_input, safe_copy = _safe_audio_path(input_path)
     try:
-        subprocess.run(cmd, check=True, capture_output=True)
-    except subprocess.CalledProcessError as e:
-        stderr = e.stderr.decode("utf-8", errors="replace")[:1000] if e.stderr else ""
-        # Best-effort cleanup so failed decodes do not leak temp files.
+        cmd = [
+            "ffmpeg", "-y", "-i", safe_input,
+            "-ar", "44100", "-ac", "2", "-c:a", "pcm_s16le",
+            "-map", "0:a:0",  # ignore attached cover art / video streams
+            wav_path,
+        ]
         try:
-            os.remove(wav_path)
-        except FileNotFoundError:
-            pass
-        raise RuntimeError(
-            f"FFmpeg decode_to_wav failed (exit {e.returncode}): {stderr}"
-        ) from e
+            subprocess.run(cmd, check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr.decode("utf-8", errors="replace")[:1000] if e.stderr else ""
+            # Best-effort cleanup so failed decodes do not leak temp files.
+            try:
+                os.remove(wav_path)
+            except FileNotFoundError:
+                pass
+            raise RuntimeError(
+                f"FFmpeg decode_to_wav failed (exit {e.returncode}): {stderr}"
+            ) from e
+    finally:
+        if safe_copy is not None:
+            try:
+                safe_copy.unlink(missing_ok=True)
+            except Exception:
+                pass
     return wav_path
 
 
@@ -292,14 +337,32 @@ def detect_beats_librosa(audio_path: str) -> BeatGrid:
     )
 
 
-def detect_beats(audio_path: str) -> BeatGrid:
+def detect_beats(
+    audio_path: str,
+    cache_dir: Optional[Path] = None,
+    use_cache: bool = True,
+) -> BeatGrid:
     """Detect beat grid. Cascade: madmom -> librosa -> synthetic 120 BPM grid.
 
     The synthetic grid guarantees that cutlist generation never crashes, even
     when every analyzer is unavailable or the audio is unanalyzable.
+    Results are cached under ``<cache_dir>/<song_hash>/beatgrid.json``.
     """
-    wav_path = decode_to_wav(audio_path)
+    cache_dir = cache_dir or _default_cache_dir()
+    song_hash = _song_hash(audio_path)
+    cache_file = cache_dir / song_hash / "beatgrid.json"
+    path_exists = Path(audio_path).exists()
 
+    if use_cache and path_exists and cache_file.exists():
+        try:
+            data = json.loads(cache_file.read_text(encoding="utf-8"))
+            grid = BeatGrid(**data)
+            logger.info("beat grid loaded from cache", song_hash=song_hash)
+            return grid
+        except Exception as e:
+            logger.warning("beat grid cache corrupt; recomputing", error=str(e))
+
+    wav_path = decode_to_wav(audio_path)
     try:
         result = detect_beats_madmom(wav_path)
         if result is None:
@@ -310,6 +373,16 @@ def detect_beats(audio_path: str) -> BeatGrid:
                     logger.warning("librosa beat detection failed, using synthetic grid", error=str(e))
             if result is None:
                 result = _synthetic_beat_grid(wav_path)
+
+        if path_exists:
+            try:
+                cache_file.parent.mkdir(parents=True, exist_ok=True)
+                tmp = cache_file.with_suffix(".tmp")
+                tmp.write_text(result.model_dump_json(), encoding="utf-8")
+                tmp.replace(cache_file)
+                logger.info("beat grid cached", song_hash=song_hash)
+            except Exception as e:
+                logger.warning("failed to write beat grid cache", error=str(e))
         return result
     finally:
         if os.path.exists(wav_path) and wav_path != audio_path:
