@@ -49,6 +49,12 @@ class RankTuning:
 
     # Heatmap window reuse penalty so repeated clips still vary.
     WINDOW_REUSE_PENALTY: float = 0.5
+    # Reject heatmap windows whose per-window motion is below this percentile of
+    # the clip's own windows, unless the slot explicitly calls for low energy.
+    # This closes the no_frozen_frames gate (static source shots).
+    WINDOW_MOTION_PERCENTILE: float = 0.05
+    # Slots below this energy threshold are allowed to use very still windows.
+    LOW_ENERGY_MOTION_THRESHOLD: float = 0.3
     # Duration score Gaussian denominator.
     DURATION_SCORE_DIVISOR: float = 0.5
 

@@ -58,18 +58,36 @@ def _semantic_score(
     return RANK.DEFAULT_SEMANTIC_SCORE
 
 
+def _window_motion(window: dict) -> float:
+    """Return the per-window optical-flow motion magnitude from heatmap metadata."""
+    return float(window.get("components", {}).get("motion", 0.0))
+
+
+def _motion_floor(windows: List[dict]) -> float:
+    """Return the motion floor below which a window is considered frozen/static.
+
+    Uses a per-clip percentile so a clip with generally low motion still has
+    usable windows, while genuine static patches are rejected.
+    """
+    if not windows:
+        return 0.0
+    motions = np.array([_window_motion(w) for w in windows])
+    return float(np.percentile(motions, RANK.WINDOW_MOTION_PERCENTILE * 100.0))
+
+
 def _best_window(
     meta: dict,
     slot_duration_s: float,
     used_windows: Dict[str, List[float]],
     clip_id: str,
+    slot_energy: float = 0.5,
 ):
     """Pick the best usable heatmap window for a slot.
 
     Heatmap windows are clip-relative, so comparing them to the global slot
     timeline was meaningless. Instead we pick the highest-scoring window that
-    leaves enough room for the full slot duration and has not already been used
-    for this clip.
+    leaves enough room for the full slot duration, has not already been used
+    for this clip, and is not in a frozen/static patch of the source.
     """
     heatmap = meta.get("heatmap", [])
     if not heatmap:
@@ -98,6 +116,14 @@ def _best_window(
     # Fallback 2: reuse an already-used window (penalty will still apply).
     if not candidates:
         candidates = heatmap
+
+    # Frozen-frame guard: reject the bottom percentile of motion windows unless
+    # the slot explicitly calls for a low-energy / still moment.
+    allow_still = slot_energy < RANK.LOW_ENERGY_MOTION_THRESHOLD
+    floor = _motion_floor(heatmap)
+    non_frozen = [w for w in candidates if _window_motion(w) > floor or allow_still]
+    if non_frozen:
+        candidates = non_frozen
 
     best = max(candidates, key=_window_score)
     return (
@@ -150,7 +176,7 @@ def _score_clip(
 
     used_windows = used_windows or {}
     window_start_s, window_score, dominant_motion = _best_window(
-        meta, slot.duration_s, used_windows, clip_id
+        meta, slot.duration_s, used_windows, clip_id, slot.energy_level
     )
 
     diversity = 0.0

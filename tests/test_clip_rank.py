@@ -462,6 +462,62 @@ class FakeMarengoClient:
         return self._text_embeddings.get(text)
 
 
+class TestWindowMotionFilter:
+    """Reject frozen/static source windows unless the slot needs stillness."""
+
+    def _make_heatmap(self, duration=10.0, frozen_start=0.0, frozen_end=2.0):
+        """Build a heatmap where the first 2s are frozen and the rest moves."""
+        windows = []
+        t = 0.0
+        while t < duration:
+            is_frozen = frozen_start <= t < frozen_end
+            windows.append({
+                "start_s": round(t, 3),
+                "end_s": round(min(t + 0.5, duration), 3),
+                "score": 0.9 if is_frozen else 0.6,
+                "components": {"motion": 0.0 if is_frozen else 0.8},
+                "dominant_motion": "still" if is_frozen else "right",
+            })
+            t += 0.25
+        return windows
+
+    def test_high_energy_slot_avoids_frozen_window(self):
+        slots = [make_slot(index=0, energy=0.8, duration=2.0)]
+        clips = {
+            "moving": {
+                "shot_type": "wide",
+                "motion_energy": 0.8,
+                "duration_sec": 10.0,
+                "aesthetic_score": 0.5,
+                "heatmap": self._make_heatmap(),
+            },
+        }
+        rankings = rank_clips_for_slots(slots, clips)
+        top = rankings[0][0]
+        # The frozen window starts at 0.0; the filter should push us past it.
+        assert top.window_start_s is not None
+        assert top.window_start_s >= 2.0, (
+            f"expected non-frozen window (>=2.0s), got {top.window_start_s}"
+        )
+
+    def test_low_energy_slot_may_use_still_window(self):
+        slots = [make_slot(index=0, energy=0.1, duration=2.0)]
+        clips = {
+            "moving": {
+                "shot_type": "wide",
+                "motion_energy": 0.1,
+                "duration_sec": 10.0,
+                "aesthetic_score": 0.5,
+                "heatmap": self._make_heatmap(),
+            },
+        }
+        rankings = rank_clips_for_slots(slots, clips)
+        top = rankings[0][0]
+        # Low-energy slots are allowed to land on the highest-scoring window,
+        # even if it is in the frozen patch.
+        assert top.window_start_s is not None
+
+
 class TestMarengoSemanticScoring:
     def test_marengo_boosts_matching_clip(self):
         """When Marengo text/video embeddings align, the matching clip wins."""

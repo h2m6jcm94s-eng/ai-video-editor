@@ -464,15 +464,37 @@ def _tier_index(tier: str) -> int:
         return len(STYLE_TIERS) - 1
 
 
-def _behavior_from_style_analysis(style_analysis: Dict[str, Any]) -> BehaviorVector:
-    """Derive an initial behavior vector from a reference style genome."""
+def _behavior_from_style_analysis(
+    style_analysis: Dict[str, Any],
+    total_duration: float = 30.0,
+) -> BehaviorVector:
+    """Derive an initial behavior vector from a reference style genome.
+
+    T.8.13: User/LLM overrides (``requested_cut_density_per_min`` or
+    ``requested_slot_count``) take precedence over reference-derived density,
+    so the edit is not slaved to the duration of the inspiration clip.
+    """
     families = style_analysis.get("families") or {}
     cut_rhythm = families.get("cut_rhythm") or families.get("cutRhythm") or {}
     density_per_min = cut_rhythm.get("cut_density_per_min") or cut_rhythm.get("cutDensityPerMin")
 
+    # T.8.13: explicit user / LLM pacing requests.
+    requested_density_per_min = (
+        cut_rhythm.get("requested_cut_density_per_min")
+        or cut_rhythm.get("requestedCutDensityPerMin")
+    )
+    requested_slot_count = (
+        style_analysis.get("requested_slot_count")
+        or style_analysis.get("requestedSlotCount")
+    )
+
     reference_present = bool(style_analysis)
 
-    if density_per_min:
+    if requested_density_per_min is not None:
+        cut_density_per_sec = max(0.01, min(2.0, float(requested_density_per_min) / 60.0))
+    elif requested_slot_count is not None and total_duration > 0:
+        cut_density_per_sec = max(0.01, min(2.0, float(requested_slot_count) / total_duration))
+    elif density_per_min:
         cut_density_per_sec = max(0.01, min(2.0, density_per_min / 60.0))
     else:
         # Fallback for music-video-like content. This is the Phase 1 scaffold;
@@ -536,7 +558,7 @@ def generate_cutlist(
     provider_chain = os.environ.get("AI_PROVIDER", "programmatic")
     names = [n.strip() for n in provider_chain.split(",") if n.strip()]
 
-    behavior = behavior or _behavior_from_style_analysis(style_analysis or {})
+    behavior = behavior or _behavior_from_style_analysis(style_analysis or {}, total_duration=total_duration)
     features = features or AdaptiveFeatures()
 
     for name in names:
@@ -621,7 +643,7 @@ def generate_cutlist_programmatic(
 
     shot_pool = available_shot_types if available_shot_types else ["wide", "medium", "close_up"]
 
-    behavior = behavior or _behavior_from_style_analysis(style_analysis)
+    behavior = behavior or _behavior_from_style_analysis(style_analysis, total_duration=total_duration)
     features = features or AdaptiveFeatures()
 
     slots = []

@@ -117,3 +117,37 @@ def test_behavior_from_style_analysis_uses_reference_density():
 def test_behavior_from_style_analysis_fallback():
     behavior = _behavior_from_style_analysis({})
     assert behavior.cut_density_per_sec == 0.16
+
+
+def test_behavior_from_style_analysis_requested_density_override():
+    style_analysis = {
+        "families": {
+            "cut_rhythm": {
+                "cut_density_per_min": 30.0,
+                "requested_cut_density_per_min": 60.0,
+            }
+        }
+    }
+    behavior = _behavior_from_style_analysis(style_analysis)
+    assert behavior.cut_density_per_sec == pytest.approx(1.0, abs=0.01)
+
+
+def test_behavior_from_style_analysis_requested_slot_count_override():
+    style_analysis = {
+        "requested_slot_count": 20,
+        "families": {
+            "cut_rhythm": {
+                "cut_density_per_min": 30.0,
+            }
+        }
+    }
+    behavior = _behavior_from_style_analysis(style_analysis, total_duration=40.0)
+    assert behavior.cut_density_per_sec == pytest.approx(0.5, abs=0.01)
+
+
+def test_behavior_from_style_analysis_override_clamps_extremes():
+    style_analysis = {
+        "requested_slot_count": 100000,
+    }
+    behavior = _behavior_from_style_analysis(style_analysis, total_duration=10.0)
+    assert behavior.cut_density_per_sec == pytest.approx(2.0, abs=0.01)
