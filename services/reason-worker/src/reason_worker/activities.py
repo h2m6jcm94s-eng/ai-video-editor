@@ -9,7 +9,7 @@ from typing import Dict, List, Optional
 import httpx
 from shared_py.config import settings
 from shared_py.logging_config import StructuredLogger
-from shared_py.models import BeatGrid, CutList, MusicEventGrid, ShotBoundary, AdaptiveFeatures, BehaviorVector, ClipEmotionProfile, SongMeaning
+from shared_py.models import AudioTrack, BeatGrid, CutList, LoudnessMeasurement, MusicEventGrid, ShotBoundary, AdaptiveFeatures, BehaviorVector, ClipEmotionProfile, SongMeaning
 from shared_py.storage import download_asset
 from temporalio import activity
 
@@ -165,6 +165,7 @@ async def generate_cutlist_activity(
     clip_asset_ids: Optional[List[str]] = None,
     options: Optional[dict] = None,
     music_event_grid_raw: Optional[dict] = None,
+    loudness_measurement_raw: Optional[dict] = None,
 ) -> dict:
     """Generate a cutlist from beats, shots, and style analysis."""
     beat_grid = BeatGrid(**beat_grid_raw)
@@ -188,6 +189,7 @@ async def generate_cutlist_activity(
     behavior = BehaviorVector(**behavior_raw) if behavior_raw else None
 
     music_event_grid = MusicEventGrid(**music_event_grid_raw) if music_event_grid_raw else None
+    loudness_measurement = LoudnessMeasurement(**loudness_measurement_raw) if loudness_measurement_raw else None
 
     cutlist = generate_cutlist(
         beat_grid,
@@ -202,11 +204,67 @@ async def generate_cutlist_activity(
         behavior=behavior,
         features=features,
         music_event_grid=music_event_grid,
+        loudness_measurement=loudness_measurement,
     )
     return {
         "cutlist": cutlist.model_dump(by_alias=True),
         "behavior": behavior.model_dump(by_alias=True) if behavior else BehaviorVector().model_dump(by_alias=True),
     }
+
+
+@activity.defn
+async def build_audio_mix_activity(
+    cutlist_raw: dict,
+    clip_asset_ids: List[str],
+    clip_storage_keys: Dict[str, str],
+    song_meaning_raw: Optional[dict] = None,
+    options: Optional[dict] = None,
+    beat_grid_raw: Optional[dict] = None,
+    song_asset_id: Optional[str] = None,
+) -> dict:
+    """Build dialogue/audio tracks, apply J/L cuts and stem-aware ducking.
+
+    Falls back to the existing cutlist audio tracks if clip paths are unavailable.
+    """
+    from reason_worker.audio_mix import build_audio_tracks
+
+    cutlist = CutList(**cutlist_raw)
+    features = AdaptiveFeatures(**{k: v for k, v in (options.get("adaptiveFeatures") or {}).items()})
+
+    if not clip_storage_keys or not features.use_jl_cuts and not features.use_stem_aware_audio:
+        return {"cutlist": cutlist.model_dump(by_alias=True)}
+
+    clip_paths: Dict[str, str] = {}
+    downloaded: List[str] = []
+    try:
+        for clip_id in clip_asset_ids:
+            key = clip_storage_keys.get(clip_id)
+            if not key:
+                continue
+            local_path = download_asset(key)
+            downloaded.append(local_path)
+            clip_paths[clip_id] = local_path
+
+        beat_grid = BeatGrid(**beat_grid_raw) if beat_grid_raw else None
+        song_meaning = SongMeaning(**song_meaning_raw) if song_meaning_raw else None
+
+        audio_tracks = build_audio_tracks(
+            cutlist,
+            beat_grid=beat_grid,
+            song_asset_id=song_asset_id,
+            clip_paths=clip_paths,
+            behavior=BehaviorVector(),
+            song_meaning=song_meaning,
+            features=features,
+        )
+        cutlist.audio_tracks = audio_tracks
+        return {"cutlist": cutlist.model_dump(by_alias=True)}
+    finally:
+        for path in downloaded:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
 
 @activity.defn

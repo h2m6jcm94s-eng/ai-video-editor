@@ -133,6 +133,19 @@ class MusicEventGrid(BaseModelCamel):
         return events
 
 
+class LoudnessMeasurement(BaseModelCamel):
+    """EBU R128 / loudnorm measurement for a piece of audio."""
+
+    input_i: float = 0.0
+    input_tp: float = 0.0
+    input_lra: float = 0.0
+    input_thresh: float = 0.0
+    target_offset: float = 0.0
+    target_i: float = -14.0
+    target_tp: float = -1.5
+    target_lra: float = 11.0
+
+
 class SongMeaning(BaseModelCamel):
     """Unified song analysis produced by the ingest worker.
 
@@ -149,6 +162,7 @@ class SongMeaning(BaseModelCamel):
     music_event_grid: MusicEventGrid = Field(
         default_factory=lambda: MusicEventGrid(song_hash="")
     )
+    loudness: Optional[LoudnessMeasurement] = None
 
 
 class ClipEmotionProfile(BaseModelCamel):
@@ -306,6 +320,7 @@ class CutListGlobals(BaseModelCamel):
     section_markers: List["SectionMarker"] = Field(default_factory=list)
     color_grade_ref: Optional[str] = None
     aspect_ratio: str = "9:16"
+    loudness: Optional[LoudnessMeasurement] = None
 
 
 class SectionMarker(BaseModelCamel):
@@ -392,6 +407,11 @@ class AudioTrack(BaseModelCamel):
     slot_index: Optional[int] = None
     # If True, sidechain ducking is skipped for this music track (e.g. drop).
     duck_disabled: bool = False
+    # J-cut / L-cut offsets: extend this audio track before/after its slot video.
+    j_cut_lead_in_s: float = Field(default=0.0, ge=0.0)
+    l_cut_tail_s: float = Field(default=0.0, ge=0.0)
+    # Cached EBU R128 loudness measurement for the source asset.
+    loudness: Optional[LoudnessMeasurement] = None
 
 
 class CutList(BaseModelCamel):
@@ -606,6 +626,9 @@ class AdaptiveFeatures(BaseModelCamel):
     use_emotion_led_cuts: bool = False
     use_corpus_knn: bool = False
     use_per_user_bias: bool = False
+    use_loudness_normalization: bool = False
+    use_jl_cuts: bool = False
+    use_stem_aware_audio: bool = False
 
 
 class ContentSignals(BaseModelCamel):

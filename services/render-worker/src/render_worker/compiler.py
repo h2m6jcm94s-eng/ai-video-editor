@@ -2167,6 +2167,21 @@ def compile_timeline(
                 dialogue_bus_idx=dialogue_bus_idx,
             )
 
+            # Apply EBU R128 loudness normalization if the cutlist carries a
+            # loudness measurement. This is a true second-pass loudnorm using
+            # measured input values from the ingest worker.
+            audio_out_label = "[a_out]"
+            loudness = getattr(cutlist.globals, "loudness", None)
+            if loudness is not None:
+                loudnorm_filter = (
+                    f"loudnorm=I={loudness.target_i}:TP={loudness.target_tp}:LRA={loudness.target_lra}:"
+                    f"measured_I={loudness.input_i}:measured_TP={loudness.input_tp}:"
+                    f"measured_LRA={loudness.input_lra}:measured_thresh={loudness.input_thresh}:"
+                    f"offset={loudness.target_offset}"
+                )
+                audio_filter += f";[a_out]{loudnorm_filter}[a_out_norm]"
+                audio_out_label = "[a_out_norm]"
+
             try:
                 debug_fc_path = os.path.join(os.getcwd(), "filter_complex_audio_debug.txt")
                 with open(debug_fc_path, "w", encoding="utf-8") as f:
@@ -2179,7 +2194,7 @@ def compile_timeline(
                 *audio_input_args,
                 "-filter_complex", audio_filter,
                 "-map", "0:v",
-                "-map", "[a_out]",
+                "-map", audio_out_label,
                 "-c:v", "copy",
                 "-c:a", config.audio_codec,
                 "-b:a", config.audio_bitrate,

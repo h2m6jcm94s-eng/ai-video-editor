@@ -12,6 +12,7 @@ from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from reason_worker.aspect_detect import detect_aspect_preset
+    from shared_py.models import AdaptiveFeatures
 
 
 def _extract_content_signals(
@@ -212,7 +213,9 @@ class GenerateFromReferenceWorkflow:
                 predictor_reasoning = prediction.get("predictorReasoning", "")
 
             await self._publish(job_id, "generating_cutlist", 50, "Generating cutlist from analysis")
-            music_event_grid_raw = (meaning_result.get("song_meaning") or {}).get("musicEventGrid")
+            song_meaning_raw = meaning_result.get("song_meaning") or {}
+            music_event_grid_raw = song_meaning_raw.get("musicEventGrid")
+            loudness_measurement_raw = song_meaning_raw.get("loudness")
             generation_result = await workflow.execute_activity(
                 "generate_cutlist_activity",
                 args=(
@@ -226,6 +229,7 @@ class GenerateFromReferenceWorkflow:
                     clip_asset_ids,
                     options,
                     music_event_grid_raw,
+                    loudness_measurement_raw,
                 ),
                 start_to_close_timeout=timedelta(seconds=300),
                 retry_policy=RetryPolicy(maximum_attempts=2),
@@ -267,6 +271,29 @@ class GenerateFromReferenceWorkflow:
                 start_to_close_timeout=timedelta(seconds=120),
                 retry_policy=retry,
             )
+
+            features = AdaptiveFeatures(**{k: v for k, v in (options.get("adaptiveFeatures") or {}).items()})
+            if features.use_jl_cuts or features.use_stem_aware_audio:
+                await self._publish(job_id, "building_audio_mix", 80, "Applying J-cuts, L-cuts, and stem-aware ducking")
+                clip_storage_keys = {
+                    clip_id: (input.asset_key_map.get(clip_id) or (assets_by_id.get(clip_id) or {}).get("storageKey"))
+                    for clip_id in clip_asset_ids
+                }
+                mix_result = await workflow.execute_activity(
+                    "build_audio_mix_activity",
+                    args=(
+                        ranked_cutlist,
+                        clip_asset_ids,
+                        clip_storage_keys,
+                        song_meaning_raw,
+                        options,
+                        beat_result["beat_grid"],
+                        song_asset_id,
+                    ),
+                    start_to_close_timeout=timedelta(seconds=300),
+                    retry_policy=RetryPolicy(maximum_attempts=2),
+                )
+                ranked_cutlist = mix_result["cutlist"]
 
             await self._publish(job_id, "saving", 95, "Saving generated cutlist")
             await workflow.execute_activity(

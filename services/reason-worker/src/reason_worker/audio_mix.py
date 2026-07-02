@@ -18,7 +18,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from shared_py.models import AudioTrack, BeatGrid, BeatSegment, CutList, BehaviorVector
+from shared_py.models import AudioTrack, BeatGrid, BeatSegment, CutList, BehaviorVector, SongMeaning, AdaptiveFeatures
 from shared_py.feature_tracer import FeatureTracer
 from shared_py.logging_config import StructuredLogger
 
@@ -342,6 +342,8 @@ def build_audio_tracks(
     behavior: Optional[BehaviorVector] = None,
     source_ip_hint: Optional[str] = None,
     content_embedding: Optional[dict] = None,
+    song_meaning: Optional[SongMeaning] = None,
+    features: Optional[AdaptiveFeatures] = None,
 ) -> List[AudioTrack]:
     """Build the final music + dialogue AudioTrack list for ``cutlist``.
 
@@ -364,6 +366,8 @@ def build_audio_tracks(
             behavior,
             source_ip_hint,
             content_embedding,
+            song_meaning,
+            features,
             ft,
         )
 
@@ -378,11 +382,14 @@ def _build_audio_tracks(
     behavior: Optional[BehaviorVector] = None,
     source_ip_hint: Optional[str] = None,
     content_embedding: Optional[dict] = None,
+    song_meaning: Optional[SongMeaning] = None,
+    features: Optional[AdaptiveFeatures] = None,
     ft: Optional[FeatureTracer] = None,
 ) -> List[AudioTrack]:
     clip_paths = clip_paths or {}
     scoring_cfg = scoring_cfg or ScoringConfig()
     behavior = behavior or BehaviorVector()
+    features = features or AdaptiveFeatures()
     total_duration = cutlist.globals.total_duration_s
 
     segments = beat_grid.segments if beat_grid else []
@@ -525,6 +532,12 @@ def _build_audio_tracks(
                     track.duck_threshold = 1.0
             duck_ft.fallback(f"gate:{ducking_reason}")
 
+    if features.use_jl_cuts:
+        _apply_jl_cuts(merged, cutlist.slots, clip_paths, total_duration)
+
+    if features.use_stem_aware_audio and song_meaning is not None:
+        _apply_stem_aware_ducking(tracks, song_meaning, total_duration)
+
     tracks.extend(merged)
 
     # AC1 captions: burn word-level dialogue captions into the output.
@@ -542,3 +555,111 @@ def _build_audio_tracks(
         ft.signature(f"tracks={len(tracks)},dialogue={dialogue_count}")
         ft.real()
     return tracks
+
+
+def _probe_duration(path: str) -> float:
+    """Best-effort media duration using ffprobe."""
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", path],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        return float(out.strip())
+    except Exception:
+        return 0.0
+
+
+def _apply_jl_cuts(
+    dialogue_tracks: List[AudioTrack],
+    slots: List[Any],
+    clip_paths: Dict[str, str],
+    total_duration: float,
+) -> None:
+    """Extend dialogue audio slightly before/after its slot video for J/L cuts.
+
+    Lead-in/tail are clamped by neighboring slots and the source clip duration.
+    """
+    slot_by_index = {s.index: s for s in slots}
+    sorted_slots = sorted(slots, key=lambda s: s.start_s)
+    for track in dialogue_tracks:
+        slot = slot_by_index.get(track.slot_index) if track.slot_index is not None else None
+        if slot is None:
+            continue
+
+        lead_in = 0.25
+        tail = 0.25
+
+        # Neighbor boundaries.
+        slot_start = slot.start_s
+        slot_end = slot.start_s + slot.duration_s
+        prev_end = 0.0
+        next_start = total_duration
+        for s in sorted_slots:
+            if s.start_s + s.duration_s <= slot_start:
+                prev_end = max(prev_end, s.start_s + s.duration_s)
+            if s.start_s >= slot_end:
+                next_start = min(next_start, s.start_s)
+                break
+
+        lead_in = min(lead_in, slot_start - prev_end)
+        tail = min(tail, next_start - slot_end)
+
+        # Source clip duration boundary.
+        clip_path = clip_paths.get(track.asset_id)
+        clip_dur = _probe_duration(clip_path) if clip_path else 0.0
+        if clip_dur > 0 and track.source_start_s is not None:
+            lead_in = min(lead_in, track.source_start_s)
+            tail = min(tail, clip_dur - (track.source_end_s or clip_dur))
+
+        lead_in = max(0.0, lead_in)
+        tail = max(0.0, tail)
+
+        track.j_cut_lead_in_s = round(lead_in, 3)
+        track.l_cut_tail_s = round(tail, 3)
+        track.start_s = round(max(0.0, track.start_s - lead_in), 3)
+        track.end_s = round(min(total_duration, track.end_s + tail), 3)
+        if track.source_start_s is not None:
+            track.source_start_s = round(max(0.0, track.source_start_s - lead_in), 3)
+        if track.source_end_s is not None:
+            track.source_end_s = round(min(clip_dur or float("inf"), track.source_end_s + tail), 3)
+
+
+def _vocal_arousal_at_time(t: float, song_meaning: SongMeaning, window_s: float = 1.0) -> float:
+    """Compute a weighted arousal score from vocal emotion samples near ``t``."""
+    samples = [
+        s for s in song_meaning.vocal_emotion_curve.samples
+        if abs(s.t_center_s - t) <= window_s
+    ]
+    if not samples:
+        return 0.5
+    arousal_map = {"happy": 0.8, "angry": 0.8, "excited": 0.9, "neutral": 0.4, "sad": 0.2, "fear": 0.6, "calm": 0.2}
+    total = 0.0
+    weight = 0.0
+    for s in samples:
+        for emotion, score in (s.distribution or {}).items():
+            total += arousal_map.get(emotion, 0.5) * score
+            weight += score
+    return total / weight if weight > 0 else 0.5
+
+
+def _apply_stem_aware_ducking(
+    tracks: List[AudioTrack],
+    song_meaning: SongMeaning,
+    total_duration: float,
+) -> None:
+    """Disable ducking during bass drops and make ducking more aggressive during high-arousal vocals."""
+    bass_drops = sorted(song_meaning.music_event_grid.bass_drop_times)
+    for track in tracks:
+        if track.role != "music":
+            continue
+        t_mid = (track.start_s + track.end_s) / 2.0
+        window = 0.25
+        if bass_drops and any(abs(d - t_mid) <= window for d in bass_drops):
+            track.duck_disabled = True
+
+        # High-arousal vocal section -> duck music harder.
+        arousal = _vocal_arousal_at_time(t_mid, song_meaning)
+        if arousal > 0.65 and not track.duck_disabled:
+            track.duck_gain_db = max(-20.0, track.duck_gain_db - 2.0)

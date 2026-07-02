@@ -15,6 +15,7 @@ from shared_py.logging_config import StructuredLogger
 from shared_py.models import BeatGrid, SongMeaning, SongMoodProfile, VocalEmotionCurve
 
 from ingest_worker.beat_detect import detect_beats
+from ingest_worker.loudness import analyze_loudness
 from ingest_worker.song_lyrics import transcribe_song_lyrics
 from ingest_worker.song_mood import analyze_song
 from ingest_worker.stem_events import detect_music_events
@@ -93,6 +94,7 @@ def aggregate_song_meaning(
     )
 
     music_events = detect_music_events(stems_dir, words, cache_dir=cache_dir)
+    loudness = analyze_loudness(song_path, cache_dir=cache_dir)
 
     meaning = SongMeaning(
         song_hash=song_hash,
@@ -100,6 +102,7 @@ def aggregate_song_meaning(
         section_moods=mood_profile.section_moods,
         vocal_emotion_curve=vocal_emotion,
         music_event_grid=music_events,
+        loudness=loudness,
     )
 
     try:

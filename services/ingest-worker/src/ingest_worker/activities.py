@@ -14,6 +14,7 @@ from temporalio import activity
 
 from ingest_worker.beat_detect import compute_energy_curve, detect_beats
 from ingest_worker.heatmap import compute_clip_heatmap, heatmap_to_metadata
+from ingest_worker.loudness import analyze_loudness
 from ingest_worker.song_lyrics import transcribe_song_lyrics
 from ingest_worker.song_meaning import aggregate_song_meaning
 from ingest_worker.song_mood import analyze_song
@@ -137,6 +138,22 @@ async def detect_music_events_activity(asset_id: str, storage_key: str) -> dict:
         metadata = {"musicEventGrid": grid.model_dump(by_alias=True)}
         await _patch_asset_metadata(asset_id, metadata)
         return {"asset_id": asset_id, "music_event_grid": metadata["musicEventGrid"]}
+    finally:
+        try:
+            os.remove(local_path)
+        except OSError:
+            pass
+
+
+@activity.defn
+async def analyze_loudness_activity(asset_id: str, storage_key: str) -> dict:
+    """Download a song asset and measure EBU R128 loudness."""
+    local_path = download_asset(storage_key)
+    try:
+        measurement = analyze_loudness(local_path)
+        metadata = {"loudness": measurement.model_dump(by_alias=True)}
+        await _patch_asset_metadata(asset_id, metadata)
+        return {"asset_id": asset_id, "loudness": metadata["loudness"]}
     finally:
         try:
             os.remove(local_path)

@@ -19,7 +19,7 @@ from shared_py.logging_config import StructuredLogger
 from shared_py.models import (
     CutList, CutListGlobals, Slot, Overlay, Effect, BeatGrid, BeatSegment, ShotBoundary, SectionMarker, AudioTrack,
     ZoomPunchInParams, FocusPullParams, FilmGrainParams, VignetteParams,
-    BehaviorVector, AdaptiveFeatures, MusicEventGrid,
+    BehaviorVector, AdaptiveFeatures, MusicEventGrid, LoudnessMeasurement,
 )
 from reason_worker.kinetic_compose import assign_kinetic_text_to_slots
 from reason_worker.speed_ramps import assign_speed_ramps_to_slots
@@ -570,6 +570,7 @@ def generate_cutlist(
     behavior: Optional[BehaviorVector] = None,
     features: Optional[AdaptiveFeatures] = None,
     music_event_grid: Optional[MusicEventGrid] = None,
+    loudness_measurement: Optional["LoudnessMeasurement"] = None,
 ) -> CutList:
     """Generate a cut-list using the configured AI provider chain.
 
@@ -591,6 +592,7 @@ def generate_cutlist(
                 behavior=behavior,
                 features=features,
                 music_event_grid=music_event_grid,
+                loudness_measurement=loudness_measurement,
             )
 
         try:
@@ -635,6 +637,7 @@ def generate_cutlist_programmatic(
     behavior: Optional[BehaviorVector] = None,
     features: Optional[AdaptiveFeatures] = None,
     music_event_grid: Optional[MusicEventGrid] = None,
+    loudness_measurement: Optional[LoudnessMeasurement] = None,
 ) -> CutList:
     """Generate a cut-list programmatically without LLM."""
     enable_text = _tier_index(style_tier) >= _tier_index("with_text")
@@ -896,6 +899,12 @@ def generate_cutlist_programmatic(
     # requested target. Clamp to the requested cap so we never exceed user intent.
     final_duration_s = min(actual_content_end, total_duration)
 
+    globals_loudness = (
+        loudness_measurement
+        if features and features.use_loudness_normalization
+        else None
+    )
+
     return CutList(
         globals=CutListGlobals(
             total_duration_s=final_duration_s,
@@ -907,6 +916,7 @@ def generate_cutlist_programmatic(
                 for s in segments
             ],
             aspect_ratio="9:16",
+            loudness=globals_loudness,
         ),
         slots=slots,
         overlays=overlays,
