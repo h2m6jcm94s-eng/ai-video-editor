@@ -818,6 +818,24 @@ def generate_cutlist_programmatic(
         if len(slots) > max_slots:
             slots = slots[:max_slots]
 
+    # Tag slots with reframe/stabilize effects when those features are enabled.
+    if features.use_auto_reframe:
+        for slot in slots:
+            slot.effects.append(Effect(
+                type="reframe",
+                start_s=slot.start_s,
+                duration_s=slot.duration_s,
+                params={"target_aspect": "9:16"},
+            ))
+    if features.use_stabilization:
+        for slot in slots:
+            slot.effects.append(Effect(
+                type="stabilize",
+                start_s=slot.start_s,
+                duration_s=slot.duration_s,
+                params={"method": "deshake"},
+            ))
+
     # Assign cinematic kinetic text to high-energy / peak narrative slots.
     # This replaces the old lyric-overlay stub with LLM-composed or word-bank
     # phrases that actually match the edit's mood.

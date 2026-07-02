@@ -629,6 +629,9 @@ class AdaptiveFeatures(BaseModelCamel):
     use_loudness_normalization: bool = False
     use_jl_cuts: bool = False
     use_stem_aware_audio: bool = False
+    use_stabilization: bool = False
+    use_auto_reframe: bool = False
+    use_text_based_edits: bool = False
 
 
 class ContentSignals(BaseModelCamel):

@@ -15,6 +15,8 @@ from typing import List, Optional, Dict, NamedTuple
 from shared_py.models import CutList, Slot, RenderConfig, AudioTrack, Overlay
 from shared_py.tuning import COMPILER
 from shared_py.logging_config import StructuredLogger
+from render_worker.reframe import reframe_filter
+from render_worker.stabilize import stabilization_filter
 
 logger = StructuredLogger("render_worker.compiler")
 
@@ -775,6 +777,7 @@ def _apply_video_effects(
     config: RenderConfig,
     style_tier: str = "full_remix",
     speed_factor: float = 1.0,
+    clip_path: Optional[str] = None,
 ) -> str:
     """Apply video effects to a slot's filter chain.
 
@@ -782,7 +785,19 @@ def _apply_video_effects(
     start of the slot.  ``effect.start_s`` is absolute timeline time; we compute
     a relative window for timeline-enabled filters.
     """
-    filters = [base_vf] if base_vf else []
+    # Optional reframe / stabilization pre-filters applied to the source
+    # resolution before scaling/padding.
+    prefilters: List[str] = []
+    for effect in slot.effects or []:
+        if effect.type == "reframe" and clip_path:
+            target_aspect = effect.params.get("target_aspect") if effect.params else None
+            if target_aspect:
+                prefilters.append(reframe_filter(clip_path, target_aspect))
+        elif effect.type == "stabilize":
+            method = effect.params.get("method", "deshake") if effect.params else "deshake"
+            prefilters.append(stabilization_filter(method))
+
+    filters = prefilters + ([base_vf] if base_vf else [])
 
     # Apply uniform speed scaling immediately after scaling/padding so that all
     # subsequent effect timings are relative to the final (scaled) slot timeline.
@@ -1399,6 +1414,7 @@ def _extract_segment(args) -> Optional[dict]:
     vf = _apply_video_effects(
         slot, base_vf, temp_dir, font_map, config,
         style_tier=style_tier, speed_factor=speed_factor,
+        clip_path=clip_path,
     )
 
     # If the available source footage is shorter than the slot's timeline

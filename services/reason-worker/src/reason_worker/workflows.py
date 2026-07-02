@@ -237,6 +237,17 @@ class GenerateFromReferenceWorkflow:
             cutlist_raw = generation_result["cutlist"]
             behavior_raw = generation_result.get("behavior") or {}
 
+            text_edits = options.get("textEdits") or options.get("text_edits")
+            if text_edits:
+                await self._publish(job_id, "applying_text_edits", 55, "Applying text-based edits")
+                edit_result = await workflow.execute_activity(
+                    "apply_text_edits_activity",
+                    args=(cutlist_raw, text_edits if isinstance(text_edits, list) else [text_edits]),
+                    start_to_close_timeout=timedelta(seconds=60),
+                    retry_policy=RetryPolicy(maximum_attempts=2),
+                )
+                cutlist_raw = edit_result["cutlist"]
+
             # Persist signals + behavior when this generation is tied to a render.
             if input.render_id:
                 await workflow.execute_activity(

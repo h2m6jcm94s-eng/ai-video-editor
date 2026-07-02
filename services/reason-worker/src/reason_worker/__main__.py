@@ -9,6 +9,7 @@ from shared_py.startup import validate_startup
 from shared_py.worker_runner import run_worker
 
 from reason_worker.activities import (
+    apply_text_edits_activity,
     build_audio_mix_activity,
     ensure_beat_grid,
     ensure_shot_boundaries,
@@ -35,6 +36,7 @@ async def main() -> None:
             ensure_shot_boundaries,
             ensure_song_meaning,
             generate_cutlist_activity,
+            apply_text_edits_activity,
             build_audio_mix_activity,
             rank_clips_activity,
             save_generated_cutlist,

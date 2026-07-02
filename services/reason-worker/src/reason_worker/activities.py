@@ -17,6 +17,7 @@ from reason_worker.behavior_corpus import ingest_render_to_corpus
 from reason_worker.behavior_engine import BehaviorEngine
 from reason_worker.clip_rank import compute_confidence, rank_clips_for_slots
 from reason_worker.cutlist_gen import generate_cutlist
+from reason_worker.text_edit import apply_text_edits, parse_edit_command
 from reason_worker.transition_select import select_xfade
 
 logger = StructuredLogger("reason_worker.activities")
@@ -265,6 +266,18 @@ async def build_audio_mix_activity(
                 os.remove(path)
             except OSError:
                 pass
+
+
+@activity.defn
+async def apply_text_edits_activity(
+    cutlist_raw: dict,
+    edit_commands: List[str],
+) -> dict:
+    """Parse natural-language edit commands and mutate the cutlist."""
+    cutlist = CutList(**cutlist_raw)
+    operations = [op for cmd in edit_commands if (op := parse_edit_command(cmd)) is not None]
+    apply_text_edits(cutlist, operations)
+    return {"cutlist": cutlist.model_dump(by_alias=True)}
 
 
 @activity.defn
