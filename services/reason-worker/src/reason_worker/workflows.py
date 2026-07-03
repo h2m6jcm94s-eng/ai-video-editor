@@ -230,6 +230,7 @@ class GenerateFromReferenceWorkflow:
                     options,
                     music_event_grid_raw,
                     loudness_measurement_raw,
+                    song_meaning_raw,
                 ),
                 start_to_close_timeout=timedelta(seconds=300),
                 retry_policy=RetryPolicy(maximum_attempts=2),
@@ -276,9 +277,14 @@ class GenerateFromReferenceWorkflow:
                 clip_id: (assets_by_id.get(clip_id) or {}).get("metadata") or {}
                 for clip_id in clip_asset_ids
             }
+            clip_storage_keys = {
+                clip_id: (input.asset_key_map.get(clip_id) or (assets_by_id.get(clip_id) or {}).get("storageKey"))
+                for clip_id in clip_asset_ids
+            }
             ranked_cutlist = await workflow.execute_activity(
                 "rank_clips_activity",
                 args=(cutlist_raw, clip_asset_ids, clip_metadata),
+                kwargs={"clip_storage_keys": clip_storage_keys},
                 start_to_close_timeout=timedelta(seconds=120),
                 retry_policy=retry,
             )
@@ -286,10 +292,6 @@ class GenerateFromReferenceWorkflow:
             features = AdaptiveFeatures(**{k: v for k, v in (options.get("adaptiveFeatures") or {}).items()})
             if features.use_jl_cuts or features.use_stem_aware_audio:
                 await self._publish(job_id, "building_audio_mix", 80, "Applying J-cuts, L-cuts, and stem-aware ducking")
-                clip_storage_keys = {
-                    clip_id: (input.asset_key_map.get(clip_id) or (assets_by_id.get(clip_id) or {}).get("storageKey"))
-                    for clip_id in clip_asset_ids
-                }
                 mix_result = await workflow.execute_activity(
                     "build_audio_mix_activity",
                     args=(

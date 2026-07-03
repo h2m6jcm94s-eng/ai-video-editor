@@ -1322,10 +1322,35 @@ def _build_audio_filter_v2(
 
 
 def _has_nvenc() -> bool:
-    """Return True if FFmpeg was built with h264_nvenc."""
+    """Return True if FFmpeg can actually encode with h264_nvenc.
+
+    Some builds list the encoder but fail at runtime because no NVIDIA
+    hardware is present. A short test encode avoids selecting NVENC in
+    those environments.
+    """
     try:
         out = subprocess.check_output(["ffmpeg", "-encoders"], stderr=subprocess.DEVNULL, text=True)
-        return "h264_nvenc" in out
+        if "h264_nvenc" not in out:
+            return False
+    except Exception:
+        return False
+
+    try:
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-f", "lavfi",
+                "-i", "color=c=black:s=64x64:d=0.1",
+                "-c:v", "h264_nvenc",
+                "-f", "null",
+                "-",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
+        return True
     except Exception:
         return False
 

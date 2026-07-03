@@ -19,7 +19,7 @@ from shared_py.logging_config import StructuredLogger
 from shared_py.models import (
     CutList, CutListGlobals, Slot, Overlay, Effect, BeatGrid, BeatSegment, ShotBoundary, SectionMarker, AudioTrack,
     ZoomPunchInParams, FocusPullParams, FilmGrainParams, VignetteParams,
-    BehaviorVector, AdaptiveFeatures, MusicEventGrid, LoudnessMeasurement,
+    BehaviorVector, AdaptiveFeatures, MusicEventGrid, LoudnessMeasurement, SongMeaning,
 )
 from reason_worker.kinetic_compose import assign_kinetic_text_to_slots
 from reason_worker.speed_ramps import assign_speed_ramps_to_slots
@@ -571,6 +571,7 @@ def generate_cutlist(
     features: Optional[AdaptiveFeatures] = None,
     music_event_grid: Optional[MusicEventGrid] = None,
     loudness_measurement: Optional["LoudnessMeasurement"] = None,
+    song_meaning: Optional[SongMeaning] = None,
 ) -> CutList:
     """Generate a cut-list using the configured AI provider chain.
 
@@ -593,6 +594,7 @@ def generate_cutlist(
                 features=features,
                 music_event_grid=music_event_grid,
                 loudness_measurement=loudness_measurement,
+                song_meaning=song_meaning,
             )
 
         try:
@@ -621,6 +623,7 @@ def generate_cutlist(
         style_analysis, style_tier, song_asset_id, user_clip_count,
         behavior=behavior,
         features=features,
+        song_meaning=song_meaning,
     )
 
 
@@ -638,6 +641,7 @@ def generate_cutlist_programmatic(
     features: Optional[AdaptiveFeatures] = None,
     music_event_grid: Optional[MusicEventGrid] = None,
     loudness_measurement: Optional[LoudnessMeasurement] = None,
+    song_meaning: Optional[SongMeaning] = None,
 ) -> CutList:
     """Generate a cut-list programmatically without LLM."""
     enable_text = _tier_index(style_tier) >= _tier_index("with_text")
@@ -687,7 +691,7 @@ def generate_cutlist_programmatic(
     # its beats to concrete song time windows using energy valleys/peaks.
     if features.use_emotion_led_cuts:
         arc_template = select_arc(energy_curve, style_analysis, key=None)
-        arc_anchors = map_arc_to_song(arc_template, energy_curve, beat_grid, content_end)
+        arc_anchors = map_arc_to_song(arc_template, energy_curve, beat_grid, content_end, song_meaning=song_meaning)
         state["arc_template"] = arc_template
         state["arc_anchors"] = arc_anchors
         logger.info(

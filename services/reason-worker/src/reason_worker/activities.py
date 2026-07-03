@@ -4,12 +4,14 @@
 """Temporal activities for the reason worker."""
 
 import os
+import tempfile
+from pathlib import Path
 from typing import Dict, List, Optional
 
 import httpx
 from shared_py.config import settings
 from shared_py.logging_config import StructuredLogger
-from shared_py.models import AudioTrack, BeatGrid, CutList, LoudnessMeasurement, MusicEventGrid, ShotBoundary, AdaptiveFeatures, BehaviorVector, ClipEmotionProfile, SongMeaning
+from shared_py.models import AudioTrack, BeatGrid, CutList, LoudnessMeasurement, MusicEventGrid, ShotBoundary, AdaptiveFeatures, BehaviorVector, ClipEmotionProfile, SongMeaning, SongMoodProfile
 from shared_py.storage import download_asset
 from temporalio import activity
 
@@ -167,6 +169,7 @@ async def generate_cutlist_activity(
     options: Optional[dict] = None,
     music_event_grid_raw: Optional[dict] = None,
     loudness_measurement_raw: Optional[dict] = None,
+    song_meaning_raw: Optional[dict] = None,
 ) -> dict:
     """Generate a cutlist from beats, shots, and style analysis."""
     beat_grid = BeatGrid(**beat_grid_raw)
@@ -191,6 +194,7 @@ async def generate_cutlist_activity(
 
     music_event_grid = MusicEventGrid(**music_event_grid_raw) if music_event_grid_raw else None
     loudness_measurement = LoudnessMeasurement(**loudness_measurement_raw) if loudness_measurement_raw else None
+    song_meaning = SongMeaning(**song_meaning_raw) if song_meaning_raw else None
 
     cutlist = generate_cutlist(
         beat_grid,
@@ -206,6 +210,7 @@ async def generate_cutlist_activity(
         features=features,
         music_event_grid=music_event_grid,
         loudness_measurement=loudness_measurement,
+        song_meaning=song_meaning,
     )
     return {
         "cutlist": cutlist.model_dump(by_alias=True),
@@ -289,11 +294,16 @@ async def rank_clips_activity(
     style_analysis: Optional[dict] = None,
     clip_order_fallback: str = "smart",
     clip_order_smart_threshold: float = 0.15,
+    clip_storage_keys: Optional[Dict[str, str]] = None,
 ) -> dict:
     """Rank user clips for each slot in the cutlist.
 
     Falls back to ``fallback_policy`` if a slot receives no ranking, so the
     generated cutlist is always renderable as long as at least one clip exists.
+
+    When ``clip_storage_keys`` is provided, clips are downloaded locally so the
+    ranker can fall back to SigLIP-2 text-to-clip embeddings and optical-flow
+    momentum/anticipation signals.
     """
     if not clip_asset_ids:
         raise ValueError("MISSING_CLIPS: at least one clip is required to generate a renderable cutlist")
@@ -319,58 +329,87 @@ async def rank_clips_activity(
             except Exception:
                 logger.warning("Invalid emotion_profile for clip %s", clip_id)
 
-    has_arc_slots = any(s.story_beat for s in cutlist.slots)
-    rankings = rank_clips_for_slots(
-        cutlist.slots,
-        populated_metadata,
-        fallback_policy=fallback_policy,
-        clip_order_fallback=clip_order_fallback,
-        clip_order_smart_threshold=clip_order_smart_threshold,
-        clip_emotion_profiles=clip_emotion_profiles or None,
-        interleave_glimpses=has_arc_slots and bool(clip_emotion_profiles),
-    )
+    # Download clips when storage keys are available so SigLIP-2 and optical-flow
+    # features can run during ranking.
+    clip_paths: Dict[str, str] = {}
+    local_paths_to_clean: List[str] = []
+    if clip_storage_keys:
+        for clip_id, storage_key in clip_storage_keys.items():
+            if not storage_key:
+                continue
+            ext = os.path.splitext(storage_key)[1] or ".mp4"
+            local_dir = Path(tempfile.gettempdir()) / "ave_rank" / clip_id
+            local_dir.mkdir(parents=True, exist_ok=True)
+            local_path = str(local_dir / f"clip{ext}")
+            try:
+                download_asset(storage_key, local_path)
+                clip_paths[clip_id] = local_path
+                local_paths_to_clean.append(local_path)
+            except Exception as exc:
+                logger.warning("rank_clip_download_failed", clip_id=clip_id, error=str(exc))
 
-    confidences = compute_confidence(rankings)
+    try:
+        has_arc_slots = any(s.story_beat for s in cutlist.slots)
+        rankings = rank_clips_for_slots(
+            cutlist.slots,
+            populated_metadata,
+            fallback_policy=fallback_policy,
+            clip_order_fallback=clip_order_fallback,
+            clip_order_smart_threshold=clip_order_smart_threshold,
+            clip_emotion_profiles=clip_emotion_profiles or None,
+            interleave_glimpses=has_arc_slots and bool(clip_emotion_profiles),
+            clip_paths=clip_paths or None,
+        )
 
-    # Reference transition archetypes (e.g., whip, hard_cut, dissolve) from style
-    # analysis, used to pick direction-aware transitions for each slot.
-    style_analysis = style_analysis or {}
-    ref_archetypes = (
-        style_analysis.get("detected_transition_types")
-        or style_analysis.get("detectedTransitionTypes")
-        or []
-    )
+        confidences = compute_confidence(rankings)
 
-    # First pass: select clips and copy heatmap window info.
-    selected_motions: dict = {}
-    for slot in cutlist.slots:
-        scores = rankings.get(slot.index, [])
-        if scores:
-            top = scores[0]
-            slot.selected_clip_id = top.clip_id
-            slot.ranked_clip_ids = [s.clip_id for s in scores[:3]]
-            # Clamp confidence to the valid API range [0, 0.99].
-            slot.confidence = max(0.0, min(0.99, confidences.get(slot.index, 0.5)))
-            # Carry the heatmap-best window into the slot so the compiler seeks
-            # to the interesting part of the clip instead of the reference time.
-            if top.window_start_s is not None:
-                slot.source_window_start_s = top.window_start_s
-            if top.window_score is not None:
-                slot.heatmap_score = top.window_score
-            slot.emotion_match_score = top.emotion_match_score
-            selected_motions[slot.index] = top.dominant_motion
+        # Reference transition archetypes (e.g., whip, hard_cut, dissolve) from style
+        # analysis, used to pick direction-aware transitions for each slot.
+        style_analysis = style_analysis or {}
+        ref_archetypes = (
+            style_analysis.get("detected_transition_types")
+            or style_analysis.get("detectedTransitionTypes")
+            or []
+        )
 
-    # Second pass: direction-aware transition selection using outgoing motion from
-    # the current slot's clip and incoming motion from the next slot's clip.
-    slots = cutlist.slots
-    for i, slot in enumerate(slots):
-        ref_archetype = ref_archetypes[i % len(ref_archetypes)] if ref_archetypes else "dissolve"
-        out_motion = selected_motions.get(slot.index, "still")
-        next_slot = slots[i + 1] if i + 1 < len(slots) else None
-        in_motion = selected_motions.get(next_slot.index, "still") if next_slot else "still"
-        slot.transition_out = select_xfade(out_motion, in_motion, ref_archetype)
+        # First pass: select clips and copy heatmap window info.
+        selected_motions: dict = {}
+        for slot in cutlist.slots:
+            scores = rankings.get(slot.index, [])
+            if scores:
+                top = scores[0]
+                slot.selected_clip_id = top.clip_id
+                slot.ranked_clip_ids = [s.clip_id for s in scores[:3]]
+                # Clamp confidence to the valid API range [0, 0.99].
+                slot.confidence = max(0.0, min(0.99, confidences.get(slot.index, 0.5)))
+                # Carry the heatmap-best window into the slot so the compiler seeks
+                # to the interesting part of the clip instead of the reference time.
+                if top.window_start_s is not None:
+                    slot.source_window_start_s = top.window_start_s
+                if top.window_score is not None:
+                    slot.heatmap_score = top.window_score
+                slot.emotion_match_score = top.emotion_match_score
+                selected_motions[slot.index] = top.dominant_motion
 
-    return cutlist.model_dump(by_alias=True)
+        # Second pass: direction-aware transition selection using outgoing motion from
+        # the current slot's clip and incoming motion from the next slot's clip.
+        slots = cutlist.slots
+        for i, slot in enumerate(slots):
+            ref_archetype = ref_archetypes[i % len(ref_archetypes)] if ref_archetypes else "dissolve"
+            out_motion = selected_motions.get(slot.index, "still")
+            next_slot = slots[i + 1] if i + 1 < len(slots) else None
+            in_motion = selected_motions.get(next_slot.index, "still") if next_slot else "still"
+            slot.transition_out = select_xfade(out_motion, in_motion, ref_archetype)
+
+        result = cutlist.model_dump(by_alias=True)
+    finally:
+        for local_path in local_paths_to_clean:
+            try:
+                os.remove(local_path)
+            except OSError:
+                pass
+
+    return result
 
 
 @activity.defn

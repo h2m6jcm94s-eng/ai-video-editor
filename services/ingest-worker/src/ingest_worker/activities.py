@@ -4,6 +4,8 @@
 """Temporal activities for the ingest worker."""
 
 import os
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Dict
 
@@ -21,7 +23,10 @@ from ingest_worker.song_mood import analyze_song
 from ingest_worker.stem_events import detect_music_events
 from ingest_worker.stem_separate import separate_song_stems
 from ingest_worker.vocal_emotion import analyze_vocal_stem
+from ingest_worker.clip_emotion import compute_clip_emotion_profile
+from ingest_worker.clip_semantic import embed_clip
 from ingest_worker.probe import probe_asset_remote
+from style_worker.siglip2 import embed_video_frames as siglip2_embed_video_frames
 from ingest_worker.shot_detect import detect_shot_boundaries
 
 
@@ -30,6 +35,18 @@ def _internal_headers() -> Dict[str, str]:
     if not token:
         raise RuntimeError("INTERNAL_WORKER_TOKEN not set")
     return {"x-internal-token": token}
+
+
+def _local_clip_path(asset_id: str, storage_key: str) -> str:
+    """Return a deterministic local path for a downloaded clip.
+
+    Uses ``asset_id`` as the file stem so downstream embedding caches are keyed
+    consistently regardless of the temporary filename assigned by ``download_asset``.
+    """
+    ext = os.path.splitext(storage_key)[1] or ".mp4"
+    local_dir = Path(tempfile.gettempdir()) / "ave_ingest" / asset_id
+    local_dir.mkdir(parents=True, exist_ok=True)
+    return str(local_dir / f"clip{ext}")
 
 
 async def _patch_asset_metadata(asset_id: str, metadata: dict) -> None:
@@ -180,12 +197,71 @@ async def analyze_song_meaning_activity(asset_id: str, storage_key: str) -> dict
 @activity.defn
 async def compute_clip_heatmap_activity(asset_id: str, storage_key: str) -> dict:
     """Download a clip asset, compute an interestingness heatmap, and persist metadata."""
-    local_path = download_asset(storage_key)
+    local_path = download_asset(storage_key, _local_clip_path(asset_id, storage_key))
     try:
         heatmap = compute_clip_heatmap(local_path, audio_path=None, window_s=0.5, stride_s=0.25)
         metadata = {"heatmap": heatmap_to_metadata(heatmap)}
         await _patch_asset_metadata(asset_id, metadata)
         return {"asset_id": asset_id, "heatmap": metadata["heatmap"]}
+    finally:
+        try:
+            os.remove(local_path)
+        except OSError:
+            pass
+
+
+@activity.defn
+async def compute_clip_semantic_activity(asset_id: str, storage_key: str) -> dict:
+    """Download a clip asset, compute DINO-v2 semantic embeddings, and persist metadata."""
+    local_path = download_asset(storage_key, _local_clip_path(asset_id, storage_key))
+    try:
+        embedding = embed_clip(local_path, clip_id=asset_id)
+        cache_dir = Path(os.environ.get("STORAGE_ROOT", r"E:\ai-video-editor-storage")) / "clip_semantic"
+        cache_path = str(cache_dir / f"{asset_id}.npz")
+        metadata = {
+            "dinoEmbeddingPath": cache_path,
+            "dinoFirstFramePath": cache_path,
+            "dinoLastFramePath": cache_path,
+        }
+        await _patch_asset_metadata(asset_id, metadata)
+        return {"asset_id": asset_id, "dino_embedding": metadata}
+    finally:
+        try:
+            os.remove(local_path)
+        except OSError:
+            pass
+
+
+@activity.defn
+async def analyze_clip_emotion_activity(asset_id: str, storage_key: str) -> dict:
+    """Download a clip asset, compute a fused emotion profile, and persist metadata."""
+    local_path = download_asset(storage_key, _local_clip_path(asset_id, storage_key))
+    try:
+        cache_dir = Path(os.environ.get("STORAGE_ROOT", r"E:\ai-video-editor-storage")) / "clip_emotion"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_path = str(cache_dir / f"{asset_id}.json")
+        profile = compute_clip_emotion_profile(local_path, cache_path=cache_path)
+        metadata = {"emotionProfile": profile.model_dump(by_alias=True)}
+        await _patch_asset_metadata(asset_id, metadata)
+        return {"asset_id": asset_id, "emotion_profile": metadata["emotionProfile"]}
+    finally:
+        try:
+            os.remove(local_path)
+        except OSError:
+            pass
+
+
+@activity.defn
+async def compute_siglip2_embedding_activity(asset_id: str, storage_key: str) -> dict:
+    """Download a clip asset, compute SigLIP-2 video embedding, and persist metadata."""
+    local_path = download_asset(storage_key, _local_clip_path(asset_id, storage_key))
+    try:
+        siglip2_embed_video_frames(local_path, clip_id=asset_id)
+        cache_dir = Path(os.environ.get("STORAGE_ROOT", r"E:\ai-video-editor-storage")) / "siglip2_clip"
+        cache_path = str(cache_dir / f"{asset_id}.npy")
+        metadata = {"siglip2EmbeddingPath": cache_path}
+        await _patch_asset_metadata(asset_id, metadata)
+        return {"asset_id": asset_id, "siglip2_embedding": metadata}
     finally:
         try:
             os.remove(local_path)

@@ -20,15 +20,23 @@ class RankTuning:
     # Momentum re-ranking.
     MOMENTUM_WEIGHT: float = 0.3
 
-    # Score component weights in ``_score_clip``.
-    SEMANTIC_WEIGHT: float = 0.30
-    SHOT_TYPE_WEIGHT: float = 0.15
-    AESTHETIC_WEIGHT: float = 0.10
-    MOTION_WEIGHT: float = 0.10
-    DURATION_WEIGHT: float = 0.05
-    WINDOW_WEIGHT: float = 0.25
+    # Score component weights in ``_score_clip``.  Sum == 1.0.
+    SIGLIP_SEMANTIC_WEIGHT: float = 0.18
+    EMOTION_MATCH_WEIGHT: float = 0.25
+    MOOD_MOTION_WEIGHT: float = 0.12
+    HEATMAP_WEIGHT: float = 0.15
+    SHOT_TYPE_WEIGHT: float = 0.10
+    AESTHETIC_WEIGHT: float = 0.08
+    MOTION_ENERGY_WEIGHT: float = 0.05
+    DURATION_MATCH_WEIGHT: float = 0.07
+
+    # Backwards-compatible aliases for old weight names (deprecated).
+    SEMANTIC_WEIGHT: float = SIGLIP_SEMANTIC_WEIGHT
+    MOTION_WEIGHT: float = MOTION_ENERGY_WEIGHT
+    DURATION_WEIGHT: float = DURATION_MATCH_WEIGHT
+    WINDOW_WEIGHT: float = HEATMAP_WEIGHT
     DIVERSITY_WEIGHT: float = 0.40
-    EMOTION_WEIGHT: float = 0.45
+    EMOTION_WEIGHT: float = EMOTION_MATCH_WEIGHT
 
     # Repetition penalties.
     REPEAT_BASE_PENALTY: float = 0.25

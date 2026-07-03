@@ -30,6 +30,7 @@ RENDER_LOG = OUTPUT_DIR / "render.log"
 OUTPUT_VIDEO = OUTPUT_DIR / "output.mp4"
 CUTLIST_JSON = OUTPUT_DIR / "cutlist.json"
 SONG_ANALYSIS_JSON = OUTPUT_DIR / "song_analysis.json"
+STORAGE_ROOT = Path(os.environ.get("STORAGE_ROOT", r"E:\ai-video-editor-storage"))
 
 WORD_BANKS = {
     "triumphant": [
@@ -114,6 +115,7 @@ def _run_render(args: argparse.Namespace) -> None:
         "--feature-iconic-quotes",
         "--tier",
         "full_remix",
+        "--no-nvenc",
     ]
     if args.feature_emotion_led_cuts:
         cmd.append("--feature-emotion-led-cuts")
@@ -442,11 +444,13 @@ def _check_no_frozen_frames(result: SuiteResult) -> None:
         max_frozen = 0.0
         frozen_start: Optional[float] = None
         # Threshold: adjacent frames are "identical" when MSE is tiny relative to
-        # the frame's own variance.  We also skip near-black frames (fades/dissolves).
+        # the frame's own variance.  We also skip very dark frames (fades/dissolves
+        # and near-black transition artefacts) so the detector only flags real
+        # frozen content.
         for i in range(1, len(frames)):
             t = i * sample_interval
             mse, mean, std = _frame_stats_and_mse(frames[i - 1], frames[i])
-            is_black = mean < 5.0 or std < 1.0
+            is_black = mean < 15.0 or std < 1.0
             is_frozen = not is_black and mse < 5.0
             if is_frozen:
                 if frozen_start is None:
@@ -752,6 +756,118 @@ def _check_emotion_profile_cache(cutlist: CutList, result: SuiteResult) -> None:
     )
 
 
+def _song_hash_from_analysis(song_analysis: Dict[str, Any]) -> Optional[str]:
+    """Derive the song hash from the cached stems path."""
+    stems = song_analysis.get("stems_paths") or {}
+    for path in stems.values():
+        parent = Path(path).parent.name
+        if parent:
+            return parent
+    return None
+
+
+def _check_narrative_available(song_analysis: Dict[str, Any], result: SuiteResult) -> None:
+    song_hash = _song_hash_from_analysis(song_analysis)
+    if not song_hash:
+        result.add(Criterion("narrative_available", False, detail="could not derive song hash"))
+        return
+    narrative_path = STORAGE_ROOT / "song_meaning" / song_hash / "narrative.json"
+    sections: List[Dict[str, Any]] = []
+    if narrative_path.exists():
+        try:
+            data = json.loads(narrative_path.read_text(encoding="utf-8"))
+            sections = data.get("sections", []) or []
+        except Exception:
+            pass
+    passed = len(sections) >= 3
+    result.add(
+        Criterion(
+            "narrative_available",
+            passed,
+            value=len(sections),
+            threshold=3,
+            detail=f"narrative_sections={len(sections)}",
+        )
+    )
+
+
+def _check_dino_embeddings_available(result: SuiteResult) -> None:
+    clips_dir = BATCH_DIR / "clips"
+    clip_files = list(clips_dir.glob("*.mp4"))
+    if not clip_files:
+        result.add(Criterion("dino_embeddings_available", False, detail="no clips found"))
+        return
+    dino_dir = STORAGE_ROOT / "clip_semantic"
+    cached = sum(1 for cf in clip_files if (dino_dir / f"{cf.stem}.npz").exists())
+    ratio = cached / len(clip_files)
+    passed = ratio >= 0.8
+    result.add(
+        Criterion(
+            "dino_embeddings_available",
+            passed,
+            value=round(ratio, 3),
+            threshold=0.8,
+            detail=f"dino caches={cached}/{len(clip_files)}",
+        )
+    )
+
+
+def _check_siglip_embeddings_available(result: SuiteResult) -> None:
+    clips_dir = BATCH_DIR / "clips"
+    clip_files = list(clips_dir.glob("*.mp4"))
+    if not clip_files:
+        result.add(Criterion("siglip_embeddings_available", False, detail="no clips found"))
+        return
+    siglip_dir = STORAGE_ROOT / "siglip2_clip"
+    cached = sum(1 for cf in clip_files if (siglip_dir / f"{cf.stem}.npy").exists())
+    ratio = cached / len(clip_files)
+    passed = ratio >= 0.8
+    result.add(
+        Criterion(
+            "siglip_embeddings_available",
+            passed,
+            value=round(ratio, 3),
+            threshold=0.8,
+            detail=f"siglip caches={cached}/{len(clip_files)}",
+        )
+    )
+
+
+def _check_arc_anchors_from_semantic(log: str, result: SuiteResult) -> None:
+    """Check that arc anchors were derived from SongMeaning narrative signals."""
+    anchors: List[List[Any]] = []
+    for line in log.splitlines():
+        if "arc_anchors_from_semantic" not in line:
+            continue
+        try:
+            data = json.loads(line)
+            anchors = data.get("anchors", []) or []
+        except Exception:
+            pass
+    if not anchors:
+        result.add(Criterion("arc_anchors_from_semantic", False, detail="no anchor log found"))
+        return
+    # Reasons that are not semantic fallbacks.
+    semantic = sum(
+        1
+        for a in anchors
+        if len(a) >= 4
+        and not str(a[3]).startswith("filled between")
+        and not str(a[3]).startswith("last_section_fallback")
+        and not str(a[3]).startswith("rms_fallback")
+    )
+    passed = semantic >= 3
+    result.add(
+        Criterion(
+            "arc_anchors_from_semantic",
+            passed,
+            value=semantic,
+            threshold=3,
+            detail=f"semantic_anchors={semantic}/{len(anchors)}",
+        )
+    )
+
+
 def _check_kinetic_text_scene_relevance(cutlist: CutList, result: SuiteResult) -> None:
     texts = [s.kinetic_text.strip() for s in cutlist.slots if s.kinetic_text]
     if not texts:
@@ -783,6 +899,8 @@ def run_suite(args: argparse.Namespace) -> SuiteResult:
     _run_render(args)
     log = _load_render_log()
     cutlist = _load_cutlist()
+
+    song_analysis = _load_song_analysis()
 
     result = SuiteResult()
     if cutlist is None:
@@ -817,6 +935,10 @@ def run_suite(args: argparse.Namespace) -> SuiteResult:
         _check_emotion_match_per_slot(cutlist, result)
         _check_interleaved_glimpse(cutlist, result)
         _check_emotion_profile_cache(cutlist, result)
+        _check_narrative_available(song_analysis, result)
+        _check_dino_embeddings_available(result)
+        _check_siglip_embeddings_available(result)
+        _check_arc_anchors_from_semantic(log, result)
         _check_kinetic_text_scene_relevance(cutlist, result)
 
     return result

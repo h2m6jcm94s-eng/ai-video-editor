@@ -78,6 +78,27 @@ class VocalEmotionCurve(BaseModelCamel):
     silent_ratio: float = 0.0
 
 
+class SongSectionSemantics(BaseModelCamel):
+    """Narrative label for one song section produced by the LLM."""
+
+    start_s: float
+    end_s: float
+    section_label: str
+    lyric_sentiment: str
+    story_role: Literal["setup", "reveal", "climax", "resolution", "reprise"]
+    emotional_intensity: float = Field(ge=0.0, le=1.0)
+    arc_beat_hint: Optional[str] = None
+    rationale: str
+
+
+class SongNarrative(BaseModelCamel):
+    """Per-section narrative semantics for a song."""
+
+    song_hash: str
+    sections: List[SongSectionSemantics] = Field(default_factory=list)
+    skipped_sections: List[dict] = Field(default_factory=list)
+
+
 class MusicEvent(BaseModelCamel):
     """A single detected music event."""
 
@@ -149,10 +170,11 @@ class LoudnessMeasurement(BaseModelCamel):
 class SongMeaning(BaseModelCamel):
     """Unified song analysis produced by the ingest worker.
 
-    Aggregates mood tags, vocal emotion, and per-stem music events into a single
-    artifact that the reason worker can load in one lookup.
+    Aggregates mood tags, vocal emotion, per-stem music events, and narrative
+    semantics into a single artifact that the reason worker can load in one lookup.
     """
 
+    version: str = "1.1"
     song_hash: str
     genre_tags: List[Tuple[str, float]] = Field(default_factory=list)
     section_moods: List[SectionMoodTags] = Field(default_factory=list)
@@ -163,6 +185,7 @@ class SongMeaning(BaseModelCamel):
         default_factory=lambda: MusicEventGrid(song_hash="")
     )
     loudness: Optional[LoudnessMeasurement] = None
+    narrative: Optional[SongNarrative] = None
 
 
 class ClipEmotionProfile(BaseModelCamel):

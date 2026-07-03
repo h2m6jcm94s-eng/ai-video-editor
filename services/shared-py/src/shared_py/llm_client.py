@@ -38,6 +38,7 @@ class LLMTask(str, Enum):
     PROMPT_EDIT_PATCH = "prompt_edit_patch"
     OBJECT_EDIT_CLARIFY = "object_edit_clarify"
     KINETIC_TEXT_COMPOSE = "kinetic_text_compose"
+    NARRATIVE_SECTION_LABEL = "narrative_section_label"
 
 
 def _default_local_model(task: LLMTask) -> str:  # noqa: ARG001

@@ -17,6 +17,10 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+# Keep TensorFlow/DeepFace on CPU and suppress its verbose C++ logging.
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
+
 from shared_py.feature_tracer import FeatureTracer
 from shared_py.models import ClipEmotionProfile, EmotionSample, EmotionLabel
 
@@ -454,10 +458,11 @@ def _build_timeline(
 def compute_clip_emotion_profile(
     clip_path: str,
     sample_fps: float = DEFAULT_SAMPLE_FPS,
+    cache_path: Optional[str] = None,
 ) -> ClipEmotionProfile:
     """Compute (or load cached) emotion profile for a single clip."""
-    cache_path = cache_path_for_clip(clip_path)
-    cached = _load_emotion_cache(cache_path)
+    effective_cache_path = cache_path if cache_path is not None else cache_path_for_clip(clip_path)
+    cached = _load_emotion_cache(effective_cache_path)
     if cached is not None:
         return cached
 
@@ -465,14 +470,14 @@ def compute_clip_emotion_profile(
         if not _CV2 or not _NUMPY:
             ft.fallback("cv2_or_numpy_unavailable")
             profile = _neutral_profile("cv2_or_numpy_unavailable")
-            _write_emotion_cache(cache_path, profile)
+            _write_emotion_cache(effective_cache_path, profile)
             return profile
 
         frames = _sample_frames_uniform(clip_path, sample_fps=sample_fps)
         if not frames:
             ft.fallback("no_frames_sampled")
             profile = _neutral_profile("no_frames_sampled")
-            _write_emotion_cache(cache_path, profile)
+            _write_emotion_cache(effective_cache_path, profile)
             return profile
 
         face_distribution, face_confidence = _extract_face_emotion(frames)
@@ -510,7 +515,7 @@ def compute_clip_emotion_profile(
             f"primary={primary},face_conf={face_confidence:.2f},audio_conf={audio_confidence:.2f},"
             f"motion={motion_vibe:.2f},warmth={color_warmth:.2f}"
         )
-        _write_emotion_cache(cache_path, profile)
+        _write_emotion_cache(effective_cache_path, profile)
         return profile
 
 

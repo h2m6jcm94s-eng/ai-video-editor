@@ -10,10 +10,12 @@ import numpy as np
 
 from shared_py.models import Slot, ClipScore, ClipEmotionProfile
 from shared_py.tuning import RANK, FLOW, ANTICIPATION
+from shared_py.logging_config import StructuredLogger
 from reason_worker.momentum import compute_mean_flow_vector, momentum_coherence
 from reason_worker.anticipation import precompute_clip_motion_curve, compute_anticipation_offset
 
 
+logger = StructuredLogger("reason_worker.clip_rank")
 MOMENTUM_WEIGHT = RANK.MOMENTUM_WEIGHT
 
 
@@ -44,17 +46,41 @@ def _semantic_score(
     clip_id: str,
     embeddings: Dict[str, np.ndarray],
     slot_embeddings: Dict[int, np.ndarray],
+    clip_paths: Optional[Dict[str, str]] = None,
+    slot_text_cache: Optional[Dict[int, np.ndarray]] = None,
 ) -> float:
     """Return a semantic score for a clip against a slot.
 
-    Uses Marengo text-to-video cosine similarity when both slot text and clip
-    video embeddings are available; otherwise falls back to the legacy default.
-    The similarity is rescaled from [-1, 1] to [0, 1] for the weighted total.
+    Tier 1: Marengo text-to-video cosine similarity when both embeddings exist.
+    Tier 2: SigLIP-2 text-to-clip cosine when local clip paths are available.
+    Tier 3: constant fallback (logged so we know the signal dropped out).
+    All similarities are rescaled from [-1, 1] to [0, 1].
     """
+    # Tier 1: Marengo.
     slot_emb = slot_embeddings.get(slot.index)
     clip_emb = embeddings.get(clip_id)
     if slot_emb is not None and clip_emb is not None:
         return RANK.COSINE_RESCALE_OFFSET + RANK.COSINE_RESCALE_SCALE * _cosine_similarity(slot_emb, clip_emb)
+
+    # Tier 2: SigLIP-2 fallback.
+    if clip_paths and clip_id in clip_paths:
+        try:
+            from style_worker.siglip2 import embed_text, embed_video_frames
+
+            cache = slot_text_cache or {}
+            text_emb = cache.get(slot.index)
+            if text_emb is None:
+                text_emb = embed_text(_slot_query_text(slot))
+                cache[slot.index] = text_emb
+
+            clip_emb = embed_video_frames(clip_paths[clip_id])
+            cosine = _cosine_similarity(text_emb, clip_emb)
+            return RANK.COSINE_RESCALE_OFFSET + RANK.COSINE_RESCALE_SCALE * cosine
+        except Exception as e:
+            logger.warning("siglip2_fallback_failed", clip_id=clip_id, error=str(e))
+
+    # Tier 3: default.
+    logger.warning("semantic_score_default_used", clip_id=clip_id, slot_index=slot.index)
     return RANK.DEFAULT_SEMANTIC_SCORE
 
 
@@ -221,6 +247,64 @@ def _emotion_label_to_vector(label: str) -> np.ndarray:
     return vec
 
 
+_MOTION_VIBE_LABELS = ["still", "slow", "fluid", "frantic"]
+
+
+def _motion_vibe_label(motion_vibe: float) -> str:
+    """Bucket the continuous motion-vibe float into one of four canonical labels."""
+    if motion_vibe <= 0.25:
+        return "still"
+    if motion_vibe <= 0.5:
+        return "slow"
+    if motion_vibe <= 0.75:
+        return "fluid"
+    return "frantic"
+
+
+_MOOD_MOTION_TABLE = {
+    "aggressive": {"frantic": 1.0, "fluid": 0.6, "slow": 0.2, "still": 0.0},
+    "melancholic": {"still": 1.0, "slow": 0.8, "fluid": 0.3, "frantic": 0.0},
+    "uplifting": {"fluid": 1.0, "frantic": 0.7, "slow": 0.3, "still": 0.1},
+    "tense": {"frantic": 0.9, "fluid": 0.6, "slow": 0.3, "still": 0.4},
+    "romantic": {"slow": 1.0, "fluid": 0.8, "still": 0.5, "frantic": 0.1},
+    "chaotic": {"frantic": 1.0, "fluid": 0.5, "slow": 0.1, "still": 0.0},
+    "peaceful": {"slow": 1.0, "still": 0.9, "fluid": 0.4, "frantic": 0.0},
+    "dark": {"still": 0.9, "slow": 0.8, "fluid": 0.4, "frantic": 0.3},
+    "triumphant": {"fluid": 1.0, "frantic": 0.8, "slow": 0.3, "still": 0.1},
+    "hopeful": {"fluid": 0.9, "slow": 0.7, "still": 0.4, "frantic": 0.4},
+    "hollow": {"still": 1.0, "slow": 0.7, "fluid": 0.3, "frantic": 0.0},
+    "furious": {"frantic": 1.0, "fluid": 0.4, "slow": 0.0, "still": 0.0},
+    "reverent": {"slow": 1.0, "still": 0.9, "fluid": 0.3, "frantic": 0.0},
+    "playful": {"fluid": 0.9, "frantic": 0.6, "slow": 0.4, "still": 0.2},
+    "nostalgic": {"slow": 1.0, "still": 0.8, "fluid": 0.5, "frantic": 0.1},
+}
+
+
+def _mood_motion_consistency(section_mood: Optional[str], clip_motion_vibe: Optional[str]) -> float:
+    """Score how well a clip's motion vibe matches the song section's mood."""
+    if section_mood is None or clip_motion_vibe is None:
+        return 0.5
+    return _MOOD_MOTION_TABLE.get(section_mood, {}).get(clip_motion_vibe, 0.5)
+
+
+def _emotion_match_score(
+    emotion_profile: Optional[ClipEmotionProfile],
+    arc_beat_emotion_target: Optional[str],
+) -> float:
+    """Cosine between clip emotion vector and the arc beat emotion target."""
+    if arc_beat_emotion_target is None:
+        # No arc target on this slot: do not inject a neutral emotion match score.
+        return 0.0
+    if emotion_profile is None:
+        return 0.5
+    clip_vec = _emotion_label_to_vector(emotion_profile.primary_emotion)
+    clip_vec[9] = emotion_profile.arousal
+    clip_vec[10] = 0.5 + emotion_profile.valence * 0.5
+    clip_vec[11] = emotion_profile.dominance
+    target_vec = _emotion_label_to_vector(arc_beat_emotion_target)
+    return max(0.0, 0.5 + 0.5 * _cosine_similarity(clip_vec, target_vec))
+
+
 def _score_clip(
     slot: Slot,
     clip_id: str,
@@ -236,6 +320,9 @@ def _score_clip(
     emotion_profile: Optional[ClipEmotionProfile] = None,
     library_motion_floor: float = 0.0,
     library_static_threshold: float = 0.0,
+    clip_paths: Optional[Dict[str, str]] = None,
+    section_mood: Optional[str] = None,
+    slot_text_cache: Optional[Dict[int, np.ndarray]] = None,
 ) -> ClipScore:
     """Compute a single ClipScore for a slot/clip pair.
 
@@ -243,7 +330,10 @@ def _score_clip(
     slots are less likely to win again, even when no embeddings are available.
     The ``exhaust_bonus`` rewards using clips that have not been used yet.
     """
-    semantic = _semantic_score(slot, clip_id, embeddings, slot_embeddings)
+    semantic = _semantic_score(
+        slot, clip_id, embeddings, slot_embeddings,
+        clip_paths=clip_paths, slot_text_cache=slot_text_cache,
+    )
     shot_type_score = 1.0 if meta.get("shot_type") == slot.target_shot_type else 0.3
     aesthetic = meta.get("aesthetic_score", 0.5)
     motion_score = 1.0 - abs(meta.get("motion_energy", 0.5) - slot.energy_level)
@@ -302,26 +392,28 @@ def _score_clip(
     if at_usage_cap:
         repetition_penalty += RANK.USAGE_CAP_PENALTY
 
-    # Phase 2: emotion/arc matching when the slot is annotated with a story beat.
-    emotion_match_score = 0.0
-    if slot.story_beat and emotion_profile is not None and slot.arc_beat_emotion_target is not None:
-        clip_vec = np.array(emotion_profile.to_vector(), dtype=np.float32)
-        beat_vec = _emotion_label_to_vector(slot.arc_beat_emotion_target)
-        emotion_match_score = _cosine_similarity(clip_vec, beat_vec)
-        # Rescale from [-1, 1] to [0, 1].
-        emotion_match_score = 0.5 + 0.5 * emotion_match_score
+    # T.9.C.3 emotion/arc matching.
+    emotion_match_score = _emotion_match_score(
+        emotion_profile, slot.arc_beat_emotion_target
+    )
+    if emotion_match_score > 0 and slot.story_beat:
         # Stronger repetition penalty in arc mode: narrative edits need more
         # clip variety to avoid slideshow-like reuse.
         repetition_penalty += RANK.ARC_REPEAT_EXTRA_PENALTY * repeat_count
 
+    # T.9.C.3 mood-motion consistency.
+    motion_vibe = _motion_vibe_label(emotion_profile.motion_vibe) if emotion_profile else None
+    mood_motion_score = _mood_motion_consistency(section_mood, motion_vibe)
+
     total = (
-        RANK.SEMANTIC_WEIGHT * semantic
+        RANK.SIGLIP_SEMANTIC_WEIGHT * semantic
+        + RANK.EMOTION_MATCH_WEIGHT * emotion_match_score
+        + RANK.MOOD_MOTION_WEIGHT * mood_motion_score
+        + RANK.HEATMAP_WEIGHT * window_score
         + RANK.SHOT_TYPE_WEIGHT * shot_type_score
         + RANK.AESTHETIC_WEIGHT * aesthetic
-        + RANK.MOTION_WEIGHT * motion_score
-        + RANK.DURATION_WEIGHT * duration_score
-        + RANK.WINDOW_WEIGHT * window_score
-        + (RANK.EMOTION_WEIGHT * emotion_match_score if emotion_match_score > 0 else 0.0)
+        + RANK.MOTION_ENERGY_WEIGHT * motion_score
+        + RANK.DURATION_MATCH_WEIGHT * duration_score
         - RANK.DIVERSITY_WEIGHT * diversity
         - repetition_penalty
         - exhaust_bonus
@@ -471,6 +563,7 @@ def rank_clips_for_slots(
     clip_order_smart_threshold: float = 0.15,
     clip_emotion_profiles: Optional[Dict[str, ClipEmotionProfile]] = None,
     interleave_glimpses: bool = False,
+    section_moods: Optional[Dict[int, str]] = None,
 ) -> Dict[int, List[ClipScore]]:
     """Rank clips for each slot using weighted scoring.
 
@@ -514,6 +607,8 @@ def rank_clips_for_slots(
     chosen_embeddings: List[np.ndarray] = []
     chosen_clip_counts: Dict[str, int] = {}
     used_windows: Dict[str, List[float]] = {}
+    slot_text_cache: Dict[int, np.ndarray] = {}
+    section_moods = section_moods or {}
 
     num_clips = len(clip_metadata)
     num_slots = len(slots)
@@ -587,6 +682,9 @@ def rank_clips_for_slots(
                     emotion_profile=clip_emotion_profiles.get(clip_id),
                     library_motion_floor=library_motion_floor,
                     library_static_threshold=library_static_threshold,
+                    clip_paths=clip_paths,
+                    section_mood=section_moods.get(slot.index),
+                    slot_text_cache=slot_text_cache,
                 )
             )
 
@@ -652,6 +750,9 @@ def rank_clips_for_slots(
                 emotion_profile=clip_emotion_profiles.get(fallback_id),
                 library_motion_floor=library_motion_floor,
                 library_static_threshold=library_static_threshold,
+                clip_paths=clip_paths,
+                section_mood=section_moods.get(slot.index),
+                slot_text_cache=slot_text_cache,
             )
             rankings[slot.index] = [fallback_score]
 

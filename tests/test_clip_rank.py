@@ -18,6 +18,7 @@ from reason_worker.clip_rank import (
     compute_confidence,
 )
 from shared_py.models import Slot, ClipScore
+from shared_py.tuning import RANK
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -146,14 +147,19 @@ class TestRankClipsForSlots:
         rankings = rank_clips_for_slots(slots, clips, force_exhaust=False)
 
         score = rankings[0][0]
+        # When no emotion profile is available, mood-motion consistency falls back
+        # to the neutral midpoint (0.5).
+        mood_motion_score = 0.5 if score.emotion_profile is None else score.emotion_profile.motion_vibe
         expected = (
-            0.30 * score.semantic_score +
-            0.15 * score.shot_type_score +
-            0.10 * score.aesthetic_score +
-            0.10 * score.motion_score +
-            0.05 * score.duration_score +
-            0.25 * score.window_score -
-            0.40 * score.diversity_penalty -
+            RANK.SIGLIP_SEMANTIC_WEIGHT * score.semantic_score +
+            RANK.SHOT_TYPE_WEIGHT * score.shot_type_score +
+            RANK.AESTHETIC_WEIGHT * score.aesthetic_score +
+            RANK.MOTION_ENERGY_WEIGHT * score.motion_score +
+            RANK.DURATION_MATCH_WEIGHT * score.duration_score +
+            RANK.HEATMAP_WEIGHT * score.window_score +
+            RANK.MOOD_MOTION_WEIGHT * mood_motion_score +
+            RANK.EMOTION_MATCH_WEIGHT * score.emotion_match_score -
+            RANK.DIVERSITY_WEIGHT * score.diversity_penalty -
             score.repetition_penalty
         )
         assert abs(score.total_score - expected) < 0.001

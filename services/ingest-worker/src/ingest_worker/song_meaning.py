@@ -21,6 +21,7 @@ from ingest_worker.song_mood import analyze_song
 from ingest_worker.stem_events import detect_music_events
 from ingest_worker.stem_separate import separate_song_stems
 from ingest_worker.vocal_emotion import analyze_vocal_stem
+from reason_worker.song_narrative import analyze_song_narrative_sync
 
 logger = StructuredLogger("ingest_worker.song_meaning")
 
@@ -96,13 +97,23 @@ def aggregate_song_meaning(
     music_events = detect_music_events(stems_dir, words, cache_dir=cache_dir)
     loudness = analyze_loudness(song_path, cache_dir=cache_dir)
 
+    narrative = analyze_song_narrative_sync(
+        song_hash=song_hash,
+        mood_profile=mood_profile,
+        lyric_words=words,
+        vocal_curve=vocal_emotion,
+        cache_dir=cache_dir,
+    )
+
     meaning = SongMeaning(
+        version="1.1",
         song_hash=song_hash,
         genre_tags=mood_profile.genre_tags,
         section_moods=mood_profile.section_moods,
         vocal_emotion_curve=vocal_emotion,
         music_event_grid=music_events,
         loudness=loudness,
+        narrative=narrative,
     )
 
     try:

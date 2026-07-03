@@ -40,6 +40,7 @@ from ingest_worker.heatmap import compute_clip_heatmaps_batch, heatmap_to_metada
 from ingest_worker.shot_detect import detect_shot_boundaries
 from ingest_worker.clip_emotion import compute_clip_emotion_profiles
 from ingest_worker.song_lyrics import transcribe_song_lyrics
+from ingest_worker.song_meaning import aggregate_song_meaning
 from ingest_worker.stem_separate import separate_song_stems
 from reason_worker.clip_rank import rank_clips_for_slots
 from reason_worker.aspect_detect import detect_aspect_preset, ASPECT_PRESETS
@@ -215,6 +216,7 @@ def main():
 
     # 3b. Song analysis: lyrics and stems (cached).
     song_analysis: Dict[str, Any] = {}
+    song_meaning = None
     if args.skip_song_analysis:
         log_progress("song_analysis", 0.28, "Skipping lyric transcription and stem separation")
     else:
@@ -232,6 +234,14 @@ def main():
         )
         song_analysis_path = OUTPUT_DIR / "song_analysis.json"
         song_analysis_path.write_text(json.dumps(song_analysis, indent=2, default=str), encoding="utf-8")
+
+        log_progress("song_meaning", 0.29, "Aggregating SongMeaning (moods + narrative)")
+        song_meaning = aggregate_song_meaning(str(song_path))
+        if song_meaning.narrative:
+            print(
+                f"Song narrative: {len(song_meaning.narrative.sections)} labeled sections, "
+                f"{len(song_meaning.narrative.skipped_sections)} skipped"
+            )
 
     # 4. Collect clips
     log_progress("collect_clips", 0.30, "Collecting user clips")
@@ -340,6 +350,7 @@ def main():
         user_clip_count=len(clip_paths),
         behavior=behavior,
         features=features,
+        song_meaning=song_meaning,
     )
     if args.feature_save_the_cat:
         cutlist = apply_save_the_cat_beats(cutlist, target_duration)
@@ -362,15 +373,25 @@ def main():
         for clip_id, meta in clip_metadata.items()
         if meta.get("emotion_profile")
     }
+    section_moods = {}
+    if song_meaning and song_meaning.section_moods:
+        for slot in cutlist.slots:
+            for sm in song_meaning.section_moods:
+                if sm.start_s <= slot.start_s < sm.end_s and sm.top_moods:
+                    section_moods[slot.index] = sm.top_moods[0][0]
+                    break
+
     rankings = rank_clips_for_slots(
         cutlist.slots,
         clip_metadata,
         fallback_policy="best_available",
         force_exhaust=True,
+        clip_paths=clip_path_map,
         clip_order_fallback=args.clip_order,
         clip_order_smart_threshold=args.clip_order_threshold,
         clip_emotion_profiles=clip_emotion_profiles if args.feature_emotion_led_cuts else None,
         interleave_glimpses=args.feature_emotion_led_cuts,
+        section_moods=section_moods,
     )
 
     # Apply selected clip IDs and window info
