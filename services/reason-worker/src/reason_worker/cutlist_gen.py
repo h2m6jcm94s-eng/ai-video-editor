@@ -18,11 +18,12 @@ from shared_py.config import settings
 from shared_py.logging_config import StructuredLogger
 from shared_py.models import (
     CutList, CutListGlobals, Slot, Overlay, Effect, BeatGrid, BeatSegment, ShotBoundary, SectionMarker, AudioTrack,
-    ZoomPunchInParams, FocusPullParams, FilmGrainParams, VignetteParams,
+    ZoomPunchInParams, FocusPullParams, FilmGrainParams, VignetteParams, ColorPopParams,
     BehaviorVector, AdaptiveFeatures, MusicEventGrid, LoudnessMeasurement, SongMeaning,
 )
 from reason_worker.kinetic_compose import assign_kinetic_text_to_slots
 from reason_worker.speed_ramps import assign_speed_ramps_to_slots
+from reason_worker.face_safe import choose_text_z_layer
 from reason_worker.slot_generator import generate_slots_adaptive
 from reason_worker.narrative_arcs import select_arc
 from reason_worker.arc_anchor import map_arc_to_song, anchor_for_time
@@ -179,7 +180,7 @@ def _apply_slot_style(
     slot.subject_hint = f"{section} section, energy {energy:.1f}"
     slot.motion_hint = motion_hint
     slot.energy_level = energy
-    slot.effects = effects[:2]
+    slot.effects = effects
 
     # Phase 2: annotate slot with narrative arc beat when emotion-led cuts are on.
     arc_anchors = state.get("arc_anchors")
@@ -197,6 +198,30 @@ def _apply_slot_style(
                 if pool:
                     slot.target_shot_type = pool[state["shot_rotation"] % len(pool)]
                     state["shot_rotation"] = state.get("shot_rotation", 0) + 1
+
+    # Aggressive / high-energy arc beats get a warm color pop (after arc energy is known).
+    aggressive_emotions = {"anger", "triumph", "tension", "fear"}
+    if enable_effects:
+        emotion_target = getattr(slot, "arc_beat_emotion_target", None) or ""
+        if (
+            slot.energy_level >= 0.75
+            and emotion_target in aggressive_emotions
+            and not any(e.type == "color_pop" for e in slot.effects)
+        ):
+            slot.effects.append(
+                Effect(
+                    type="color_pop",
+                    start_s=beat_time,
+                    duration_s=min(1.0, duration * 0.6),
+                    params=ColorPopParams(
+                        saturation=1.6,
+                        hue_shift=10.0,
+                    ).model_dump(by_alias=True),
+                )
+            )
+
+    # Respect the two-effect cap after all mood-driven additions.
+    slot.effects = slot.effects[:2]
 
     max_energy_slot = state.get("max_energy_slot")
     if max_energy_slot is None or energy > max_energy_slot.energy_level:
@@ -284,6 +309,19 @@ CUTLIST_SCHEMA = {
                     "color": {"type": "string"},
                     "stroke": {"type": "string"},
                     "animation": {"type": "string", "enum": ["none", "fade", "slide", "typewriter", "scale", "pop", "word_by_word"]},
+                    "highlightColor": {"type": "string"},
+                    "words": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "text": {"type": "string"},
+                                "startS": {"type": "number"},
+                                "endS": {"type": "number"},
+                            },
+                            "required": ["text", "startS", "endS"],
+                        },
+                    },
                 },
                 "required": ["text", "startS", "endS", "position", "font", "fontSizePx", "color", "animation"],
             },
@@ -857,7 +895,13 @@ def generate_cutlist_programmatic(
         )
         for slot in slots:
             if slot.enable_kinetic_text:
-                slot.text_z_layer = "behind_subject"
+                slot.text_z_layer = choose_text_z_layer(slot)
+                if slot.energy_level > 0.75:
+                    slot.text_density = "high"
+                elif slot.energy_level < 0.35:
+                    slot.text_density = "low"
+                else:
+                    slot.text_density = "medium"
 
     # Assign speed ramps to high-energy / transition slots (Sprint A real path).
     if enable_effects:

@@ -23,5 +23,8 @@
   "emotion_match_per_slot": { "min": 0.6, "required": false },
   "interleaved_glimpse_present_in_rising_action": { "required": false },
   "emotion_profile_cache": { "min": 0.8, "required": false },
-  "kinetic_text_scene_relevance": { "min": 0.75, "required": false }
+  "kinetic_text_scene_relevance": { "min": 0.75, "required": false },
+  "transition_variety": { "min": 4, "required": true },
+  "match_cuts_present": { "min": 1, "required": true },
+  "no_xfade_fallback_hardcut": { "max": 0.1, "required": true }
 }

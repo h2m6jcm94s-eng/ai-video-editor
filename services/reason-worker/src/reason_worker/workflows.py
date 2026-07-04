@@ -281,10 +281,16 @@ class GenerateFromReferenceWorkflow:
                 clip_id: (input.asset_key_map.get(clip_id) or (assets_by_id.get(clip_id) or {}).get("storageKey"))
                 for clip_id in clip_asset_ids
             }
+            song_meaning_raw = meaning_result.get("song_meaning") or {}
+            music_event_grid_raw = song_meaning_raw.get("musicEventGrid")
             ranked_cutlist = await workflow.execute_activity(
                 "rank_clips_activity",
                 args=(cutlist_raw, clip_asset_ids, clip_metadata),
-                kwargs={"clip_storage_keys": clip_storage_keys},
+                kwargs={
+                    "clip_storage_keys": clip_storage_keys,
+                    "music_event_grid_raw": music_event_grid_raw,
+                    "song_meaning_raw": song_meaning_raw,
+                },
                 start_to_close_timeout=timedelta(seconds=120),
                 retry_policy=retry,
             )

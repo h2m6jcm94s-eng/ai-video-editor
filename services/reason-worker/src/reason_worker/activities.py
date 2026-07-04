@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 import httpx
 from shared_py.config import settings
 from shared_py.logging_config import StructuredLogger
-from shared_py.models import AudioTrack, BeatGrid, CutList, LoudnessMeasurement, MusicEventGrid, ShotBoundary, AdaptiveFeatures, BehaviorVector, ClipEmotionProfile, SongMeaning, SongMoodProfile
+from shared_py.models import AudioTrack, BeatGrid, CutList, LoudnessMeasurement, MusicEventGrid, ShotBoundary, AdaptiveFeatures, BehaviorVector, ClipEmotionProfile, SongMeaning, SongMoodProfile, Slot
 from shared_py.storage import download_asset
 from temporalio import activity
 
@@ -19,8 +19,10 @@ from reason_worker.behavior_corpus import ingest_render_to_corpus
 from reason_worker.behavior_engine import BehaviorEngine
 from reason_worker.clip_rank import compute_confidence, rank_clips_for_slots
 from reason_worker.cutlist_gen import generate_cutlist
+from reason_worker.face_safe import choose_text_z_layer, face_region_in_window, safe_zoom_center
+from reason_worker.kinetic_compose import assign_kinetic_text_to_slots
 from reason_worker.text_edit import apply_text_edits, parse_edit_command
-from reason_worker.transition_select import select_xfade
+from reason_worker.transition_stage import apply_semantic_transition_stage
 
 logger = StructuredLogger("reason_worker.activities")
 
@@ -295,6 +297,8 @@ async def rank_clips_activity(
     clip_order_fallback: str = "smart",
     clip_order_smart_threshold: float = 0.15,
     clip_storage_keys: Optional[Dict[str, str]] = None,
+    music_event_grid_raw: Optional[dict] = None,
+    song_meaning_raw: Optional[dict] = None,
 ) -> dict:
     """Rank user clips for each slot in the cutlist.
 
@@ -373,7 +377,6 @@ async def rank_clips_activity(
         )
 
         # First pass: select clips and copy heatmap window info.
-        selected_motions: dict = {}
         for slot in cutlist.slots:
             scores = rankings.get(slot.index, [])
             if scores:
@@ -389,17 +392,62 @@ async def rank_clips_activity(
                 if top.window_score is not None:
                     slot.heatmap_score = top.window_score
                 slot.emotion_match_score = top.emotion_match_score
-                selected_motions[slot.index] = top.dominant_motion
 
-        # Second pass: direction-aware transition selection using outgoing motion from
-        # the current slot's clip and incoming motion from the next slot's clip.
-        slots = cutlist.slots
-        for i, slot in enumerate(slots):
-            ref_archetype = ref_archetypes[i % len(ref_archetypes)] if ref_archetypes else "dissolve"
-            out_motion = selected_motions.get(slot.index, "still")
-            next_slot = slots[i + 1] if i + 1 < len(slots) else None
-            in_motion = selected_motions.get(next_slot.index, "still") if next_slot else "still"
-            slot.transition_out = select_xfade(out_motion, in_motion, ref_archetype)
+        # Second pass: Wave-7 semantic/music-aware transitions, speed ramps, and
+        # vocal anticipation offsets.
+        music_event_grid = MusicEventGrid(**music_event_grid_raw) if music_event_grid_raw else None
+        song_meaning = SongMeaning(**song_meaning_raw) if song_meaning_raw else None
+        apply_semantic_transition_stage(
+            cutlist,
+            rankings,
+            music_events=music_event_grid,
+            song_meaning=song_meaning,
+            clip_metadata=populated_metadata,
+            clip_paths=clip_paths or None,
+            ref_archetypes=ref_archetypes or None,
+        )
+
+        # Re-run kinetic text assignment with ranking-aware semantic gating.
+        source_ip_hint = style_analysis.get("source_ip_hint") if isinstance(style_analysis, dict) else None
+        assign_kinetic_text_to_slots(
+            cutlist.slots,
+            source_ip_hint=source_ip_hint,
+            use_llm=True,
+            max_text_count=max(3, int(0.1 * len(cutlist.slots))),
+            rankings=rankings,
+        )
+        for slot in cutlist.slots:
+            if slot.enable_kinetic_text:
+                slot.text_z_layer = choose_text_z_layer(slot, clip_paths or {})
+
+        # Face-safe zoom punch-ins: drop the effect when a face is too large,
+        # otherwise nudge the crop center so small faces stay inside the frame.
+        for slot in cutlist.slots:
+            clip_path = (clip_paths or {}).get(slot.selected_clip_id or "")
+            if not clip_path:
+                continue
+            window_start = slot.source_window_start_s or 0.0
+            window_end = window_start + slot.duration_s
+            region = face_region_in_window(clip_path, window_start, window_end)
+            kept_effects = []
+            for effect in slot.effects or []:
+                if effect.type != "zoom_punch_in":
+                    kept_effects.append(effect)
+                    continue
+                if region["area_ratio"] > 0.25:
+                    logger.info(
+                        "face_safe_zoom_removed",
+                        slot_index=slot.index,
+                        face_area_ratio=region["area_ratio"],
+                    )
+                    continue
+                if region["count"] > 0:
+                    cx, cy = safe_zoom_center(region)
+                    effect.params = dict(effect.params or {})
+                    effect.params["center_x"] = round(cx, 3)
+                    effect.params["center_y"] = round(cy, 3)
+                kept_effects.append(effect)
+            slot.effects = kept_effects
 
         result = cutlist.model_dump(by_alias=True)
     finally:

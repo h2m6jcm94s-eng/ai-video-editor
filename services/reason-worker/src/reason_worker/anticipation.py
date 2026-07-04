@@ -1,170 +1,175 @@
 # Copyright (c) 2025 Devayan Dewri. All rights reserved.
 # Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
-# Commercial SaaS use is prohibited without written permission.
-"""Anticipation cutting: shift clip starts so cuts land on motion peaks."""
+"""Vocal-anticipation offsets and motion-peak anticipation for cut timing."""
 
-import os
+from __future__ import annotations
+
+from typing import List, Optional, Tuple
+
 import numpy as np
-import cv2
-from scipy.signal import find_peaks
 
-from shared_py.tuning import FLOW, ANTICIPATION
+from shared_py.logging_config import StructuredLogger
+from shared_py.models import MusicEventGrid, Slot
+from shared_py.tuning import ANTICIPATION
 
+logger = StructuredLogger("reason_worker.anticipation")
 
-def _read_downscaled_frame(cap):
-    """Read and downscale the next frame from a capture."""
-    ret, frame = cap.read()
-    if not ret or frame is None:
-        return None
-    return cv2.resize(frame, FLOW.TARGET_SIZE)
+_VOCAL_WINDOW_S = 0.5
+_MAX_OFFSET_S = 0.5
 
 
-def precompute_clip_motion_curve(
+try:
+    import cv2
+except Exception:  # pragma: no cover
+    cv2 = None  # type: ignore[assignment]
+
+
+def _frame_energy(frame: np.ndarray, prev_gray: Optional[np.ndarray]) -> float:
+    if cv2 is None or prev_gray is None:
+        return 0.0
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    diff = cv2.absdiff(gray, prev_gray)
+    return float(np.mean(diff))
+
+
+def compute_motion_curve(
     clip_path: str,
-    fps_sample: float = ANTICIPATION.FPS_SAMPLE,
-) -> np.ndarray:
-    """Compute per-frame motion magnitude for a clip and cache it.
+    start_s: float,
+    duration_s: float,
+    fps: float = 24.0,
+) -> List[Tuple[float, float]]:
+    """Return a list of ``(time_rel_s, motion_energy)`` for a clip window.
 
-    The cache is written next to the source clip as ``{clip_path}.motion.npz``.
-    If a newer cache exists it is reused.
+    ``time_rel_s`` is relative to ``start_s``.  Motion energy is computed from
+    the mean absolute frame difference in the window.
     """
-    cache_path = f"{clip_path}.motion.npz"
-
-    if os.path.exists(cache_path) and os.path.exists(clip_path):
-        try:
-            cache_mtime = os.path.getmtime(cache_path)
-            src_mtime = os.path.getmtime(clip_path)
-            if cache_mtime >= src_mtime:
-                cached = np.load(cache_path)
-                curve = cached.get("motion_curve")
-                if curve is not None:
-                    return np.asarray(curve, dtype=np.float32)
-        except Exception:
-            # Ignore corrupt cache and recompute below.
-            pass
-
+    samples: List[Tuple[float, float]] = []
+    if cv2 is None:
+        return samples
     cap = cv2.VideoCapture(clip_path)
     if not cap.isOpened():
-        return np.zeros(0, dtype=np.float32)
-
+        return samples
     try:
-        src_fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
+        video_fps = cap.get(cv2.CAP_PROP_FPS) or fps
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        if total_frames <= 1:
-            return np.zeros(0, dtype=np.float32)
+        start_frame = int(start_s * video_fps)
+        end_frame = min(total_frames, int((start_s + duration_s) * video_fps) + 1)
+        if start_frame >= end_frame:
+            return samples
 
-        sample_interval = max(1, int(round(src_fps / fps_sample)))
-        magnitudes = []
-
-        ret, prev_frame = cap.read()
-        if not ret or prev_frame is None:
-            return np.zeros(0, dtype=np.float32)
-        prev_gray = cv2.cvtColor(cv2.resize(prev_frame, FLOW.TARGET_SIZE), cv2.COLOR_BGR2GRAY)
-
-        frame_idx = 0
-        while True:
+        prev_gray = None
+        for f in range(start_frame, end_frame):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, f)
             ret, frame = cap.read()
-            if not ret or frame is None:
-                break
-            frame_idx += 1
-            if frame_idx % sample_interval != 0:
+            if not ret:
                 continue
-            gray = cv2.cvtColor(cv2.resize(frame, FLOW.TARGET_SIZE), cv2.COLOR_BGR2GRAY)
-            flow = cv2.calcOpticalFlowFarneback(
-                prev_gray,
-                gray,
-                None,
-                pyr_scale=FLOW.PYR_SCALE,
-                levels=FLOW.LEVELS,
-                winsize=FLOW.WINSIZE,
-                iterations=FLOW.ITERATIONS,
-                poly_n=FLOW.POLY_N,
-                poly_sigma=FLOW.POLY_SIGMA,
-                flags=FLOW.FLAGS,
-            )
-            mag = np.mean(np.hypot(flow[..., 0], flow[..., 1]))
-            magnitudes.append(float(mag))
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            if prev_gray is not None:
+                diff = cv2.absdiff(gray, prev_gray)
+                energy = float(np.mean(diff))
+                rel_s = (f - start_frame) / video_fps
+                samples.append((rel_s, energy))
             prev_gray = gray
-
-        if not magnitudes:
-            return np.zeros(0, dtype=np.float32)
-        curve = np.asarray(magnitudes, dtype=np.float32)
     finally:
         cap.release()
-
-    try:
-        np.savez_compressed(cache_path, motion_curve=curve, fps_sample=fps_sample)
-    except Exception:
-        # Cache write is best-effort; do not fail the analysis.
-        pass
-
-    return curve
+    return samples
 
 
-def find_motion_peaks_in_window(
-    motion_curve: np.ndarray,
-    fps: float,
-    min_prominence: float = ANTICIPATION.MIN_PROMINENCE,
-) -> np.ndarray:
-    """Find indices of dominant motion peaks in ``motion_curve``.
+def precompute_clip_motion_curve(clip_path: str, fps_sample: float = 2.0) -> np.ndarray:
+    """Return a 1-D motion-energy curve sampled evenly over the whole clip.
 
-    Prominence is computed on a min-max normalized copy of the curve so the
-    threshold is independent of absolute motion scale.
+    This is the legacy API used by ``clip_rank.apply_anticipation_offsets``.
     """
-    if motion_curve is None or len(motion_curve) == 0 or fps <= 0:
-        return np.array([], dtype=int)
-
-    min_val = float(np.min(motion_curve))
-    max_val = float(np.max(motion_curve))
-    if max_val <= min_val:
-        return np.array([], dtype=int)
-
-    normalized = (motion_curve - min_val) / (max_val - min_val)
-    peaks, _ = find_peaks(normalized, prominence=min_prominence)
-    return peaks
+    if cv2 is None:
+        return np.array([])
+    cap = cv2.VideoCapture(clip_path)
+    if not cap.isOpened():
+        return np.array([])
+    try:
+        video_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total_frames <= 0:
+            return np.array([])
+        sample_step = max(1, int(video_fps / fps_sample))
+        energies: List[float] = []
+        prev_gray = None
+        for f in range(0, total_frames, sample_step):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, f)
+            ret, frame = cap.read()
+            if not ret:
+                continue
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            if prev_gray is not None:
+                diff = cv2.absdiff(gray, prev_gray)
+                energies.append(float(np.mean(diff)))
+            prev_gray = gray
+        return np.array(energies, dtype=np.float32)
+    finally:
+        cap.release()
 
 
 def compute_anticipation_offset(
     source_window_start_s: float,
     source_window_duration_s: float,
     clip_motion_curve: np.ndarray,
-    fps: float,
-    target_offset_ms: float = ANTICIPATION.TARGET_OFFSET_MS,
+    fps: float = 24.0,
+    target_offset_ms: float = 333.0,
 ) -> float:
-    """Return the seconds to shift the source window start.
+    """Return the source-window shift so the cut lands before the motion peak.
 
-    The dominant peak in the motion window is located and the start is shifted
-    so the cut lands ``target_offset_ms`` before it.  The returned offset is
-    added to ``source_window_start_s`` by the compiler, so negative values mean
-    "start earlier".
+    The dominant motion peak in ``clip_motion_curve`` is located, and the offset
+    moves the source window so that peak occurs ``target_offset_ms`` after the
+    slot start.  The result is clamped to a safe ±0.5s window.
     """
-    if (
-        clip_motion_curve is None
-        or len(clip_motion_curve) == 0
-        or fps <= 0
-        or source_window_duration_s <= 0
-    ):
+    if clip_motion_curve is None or len(clip_motion_curve) == 0:
         return 0.0
+    peak_index = int(np.argmax(clip_motion_curve))
+    peak_rel_s = peak_index / max(1.0, fps)
+    target_s = target_offset_ms / 1000.0
+    # Shift the source window so the motion peak occurs ``target_s`` after the
+    # slot start: new_start = old_start + peak_rel_s - target_s.
+    offset = peak_rel_s - target_s
+    # Clamp to the source window so we never ask FFmpeg to seek outside the clip.
+    return max(-source_window_duration_s, min(source_window_duration_s, offset))
 
-    start_frame = int(round(source_window_start_s * fps))
-    end_frame = int(round((source_window_start_s + source_window_duration_s) * fps))
-    start_frame = max(0, start_frame)
-    end_frame = max(start_frame, min(end_frame, len(clip_motion_curve) - 1))
-    if end_frame <= start_frame:
-        return 0.0
 
-    window_curve = clip_motion_curve[start_frame:end_frame]
-    peaks = find_motion_peaks_in_window(window_curve, fps, min_prominence=ANTICIPATION.MIN_PROMINENCE)
-    if len(peaks) == 0:
-        return 0.0
+def apply_vocal_anticipation(
+    slot: Slot,
+    clip_motion_curve: List[Tuple[float, float]],
+    music_events: MusicEventGrid,
+    fps: float = 24.0,
+) -> None:
+    """Shift the source window so a nearby vocal onset lands on a motion peak.
 
-    dominant_peak_rel = int(peaks[int(np.argmax(window_curve[peaks]))])
-    peak_time_s = source_window_start_s + dominant_peak_rel / fps
-    desired_start_s = peak_time_s - target_offset_ms / 1000.0
-    offset_s = desired_start_s - source_window_start_s
+    If the slot start is within 500ms of a vocal onset, find the highest motion
+    energy inside the slot window and set ``anticipation_offset_s`` so that the
+    peak aligns with the vocal onset.
+    """
+    if not music_events or not clip_motion_curve:
+        return
+    slot_start = float(slot.start_s)
+    nearest_vocal: Optional[float] = None
+    nearest_dist = float("inf")
+    for t in music_events.vocal_onset_times:
+        dist = abs(t - slot_start)
+        if dist <= _VOCAL_WINDOW_S and dist < nearest_dist:
+            nearest_dist = dist
+            nearest_vocal = t
+    if nearest_vocal is None:
+        return
 
-    # Clamp: do not start before the beginning of the clip, and do not push
-    # past the end of the source window.
-    min_offset = -source_window_start_s
-    max_offset = source_window_duration_s - ANTICIPATION.MAX_OFFSET_PAD_S
-    return float(max(min_offset, min(offset_s, max_offset)))
+    peak_rel, peak_energy = max(clip_motion_curve, key=lambda x: x[1])
+    if peak_energy <= 0.0:
+        return
+
+    offset = nearest_vocal - (slot_start + peak_rel)
+    # Clamp to a safe window so we don't seek past the source clip.
+    offset = max(-_MAX_OFFSET_S, min(_MAX_OFFSET_S, offset))
+    slot.anticipation_offset_s = offset
+    logger.info(
+        "vocal_anticipation_offset_set",
+        slot_index=slot.index,
+        vocal_onset=nearest_vocal,
+        peak_rel=peak_rel,
+        offset=offset,
+    )

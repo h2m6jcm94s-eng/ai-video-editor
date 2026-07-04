@@ -1,12 +1,15 @@
 # Copyright (c) 2025 Devayan Dewri. All rights reserved.
 # Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
-"""Direction-aware transition selection between user clips."""
+"""Direction-aware and music/semantics-aware transition selection."""
 
-from typing import List, Optional, Tuple
+from __future__ import annotations
+
+from typing import List, Optional
 
 import numpy as np
 
 from shared_py.logging_config import StructuredLogger
+from shared_py.models import MusicEventGrid, Slot
 
 logger = StructuredLogger("reason_worker.transition_select")
 
@@ -33,12 +36,8 @@ def motion_direction_around_cut(
     clip_path: str,
     cut_time_s: float,
     context_s: float = 0.3,
-) -> Tuple[str, str]:
-    """Return (outgoing_motion, incoming_motion) for a cut at ``cut_time_s``.
-
-    Computes mean optical flow in the last ``context_s`` of the outgoing side
-    and the first ``context_s`` of the incoming side.
-    """
+) -> tuple[str, str]:
+    """Return (outgoing_motion, incoming_motion) for a cut at ``cut_time_s``."""
     if cv2 is None:
         return "still", "still"
 
@@ -78,7 +77,6 @@ def motion_direction_around_cut(
 
     outgoing_flow = _mean_flow(outgoing_start, outgoing_end)
     incoming_flow = _mean_flow(incoming_start, incoming_end)
-
     cap.release()
 
     out_dir = _quantize_direction(outgoing_flow) if outgoing_flow is not None else "still"
@@ -90,10 +88,7 @@ def classify_reference_transition_archetypes(
     video_path: str,
     shot_boundaries: List[dict],
 ) -> List[str]:
-    """Classify each reference shot boundary into a transition archetype.
-
-    Archetypes: hard_cut, dissolve, fade, whip, match_cut.
-    """
+    """Classify each reference shot boundary into a transition archetype."""
     if cv2 is None:
         return ["hard_cut"] * len(shot_boundaries)
 
@@ -101,21 +96,15 @@ def classify_reference_transition_archetypes(
     for i, boundary in enumerate(shot_boundaries):
         transition_in = boundary.get("transition_in", "hard_cut")
         is_gradual = boundary.get("is_gradual", False)
-        span = boundary.get("end_frame", 0) - boundary.get("start_frame", 0)
 
         if is_gradual or transition_in in {"dissolve", "fade"}:
-            if transition_in == "fade":
-                archetypes.append("fade")
-            else:
-                archetypes.append("dissolve")
+            archetypes.append("fade" if transition_in == "fade" else "dissolve")
             continue
-
         if transition_in == "whip":
             archetypes.append("whip")
             continue
 
-        # Decide between hard_cut and match_cut based on motion continuity.
-        if i > 0 and i < len(shot_boundaries):
+        if 0 < i < len(shot_boundaries):
             prev_end = shot_boundaries[i - 1].get("end_s", 0.0)
             curr_start = boundary.get("start_s", 0.0)
             cut_time = (prev_end + curr_start) / 2
@@ -132,32 +121,153 @@ def classify_reference_transition_archetypes(
     return archetypes
 
 
+def _dino_cosine(out_dino: Optional[np.ndarray], in_dino: Optional[np.ndarray]) -> float:
+    if out_dino is None or in_dino is None:
+        return 0.0
+    x, y = out_dino, in_dino
+    nx, ny = float(np.linalg.norm(x)), float(np.linalg.norm(y))
+    if nx == 0.0 or ny == 0.0:
+        return 0.0
+    return float(np.dot(x, y) / (nx * ny))
+
+
+def _event_near(music_events: Optional[MusicEventGrid], event_list: str, t: float, window_s: float = 0.1) -> bool:
+    if not music_events:
+        return False
+    for time_s in getattr(music_events, event_list, []):
+        if abs(time_s - t) <= window_s:
+            return True
+    return False
+
+
+def _has_sustained_vocal_ahead(music_events: Optional[MusicEventGrid], t: float, ahead_s: float = 1.0) -> bool:
+    if not music_events:
+        return False
+    for time_s in music_events.vocal_onset_times:
+        if t < time_s <= t + ahead_s:
+            return True
+    for time_s in music_events.phrase_boundary_times:
+        if t < time_s <= t + ahead_s:
+            return True
+    return False
+
+
+def _direction_slice(out_motion: str, in_motion: str) -> str:
+    """Return a directional slice transition when motions align horizontally."""
+    lefts = {"left", "up_left", "down_left"}
+    rights = {"right", "up_right", "down_right"}
+    if out_motion in lefts and in_motion in lefts:
+        return "hlslice"
+    if out_motion in rights and in_motion in rights:
+        return "hrslice"
+    return ""
+
+
 def select_xfade(
     out_motion: str,
     in_motion: str,
     ref_archetype: str,
+    slot: Optional[Slot] = None,
+    music_events: Optional[MusicEventGrid] = None,
+    section_mood: Optional[str] = None,
+    out_dino: Optional[np.ndarray] = None,
+    in_dino: Optional[np.ndarray] = None,
+    extra: Optional[dict] = None,
 ) -> str:
-    """Pick an xfade preset name based on outgoing/incoming motion and reference intent.
+    """Pick an xfade preset name based on motion, reference intent, music, and semantics.
 
-    Returned strings are keys in the compiler's XFADE_MAP.
+    When ``slot`` is provided the function runs the full Wave-7 decision table
+    (match cuts, music-event triggers, mood forcing).  When only the three
+    legacy arguments are supplied it falls back to the previous motion-aware
+    logic so existing tests stay valid.
+
+    ``extra`` is an optional mutable dict the caller can inspect for side-band
+    signals such as ``flash_frame`` or ``match_cut_bonus``.
     """
-    if ref_archetype == "hard_cut":
-        return "fade" if (out_motion == "still" and in_motion == "still") else "hard_cut"
+    extra = extra if extra is not None else {}
 
-    if ref_archetype == "whip":
-        if out_motion in {"left", "up_left", "down_left"} and in_motion in {"left", "up_left", "down_left"}:
-            return "hlslice"
-        if out_motion in {"right", "up_right", "down_right"} and in_motion in {"right", "up_right", "down_right"}:
-            return "hrslice"
+    # Legacy path: no semantic / music context available.
+    if slot is None:
+        if ref_archetype == "hard_cut":
+            return "fade" if (out_motion == "still" and in_motion == "still") else "hard_cut"
+        if ref_archetype == "whip":
+            if out_motion in {"left", "up_left", "down_left"} and in_motion in {"left", "up_left", "down_left"}:
+                return "hlslice"
+            if out_motion in {"right", "up_right", "down_right"} and in_motion in {"right", "up_right", "down_right"}:
+                return "hrslice"
+            return "whip"
+        if ref_archetype == "match_cut" and out_motion == in_motion and out_motion != "still":
+            return "dissolve"
+        if ref_archetype == "fade":
+            return "fade"
+        if ref_archetype == "dissolve":
+            return "dissolve"
+        return "hard_cut"
+
+    cut_time = float(slot.start_s + slot.duration_s)
+    energy = float(slot.energy_level or 0.5)
+    mood = (section_mood or "").lower()
+
+    # 1. Match cut (strong semantic continuity).
+    dino_sim = _dino_cosine(out_dino, in_dino)
+    if dino_sim > 0.85:
+        extra["match_cut_bonus"] = True
+        logger.info("match_cut_bonus", slot_index=slot.index, cosine=round(dino_sim, 3))
+        return "hard_cut"
+    if dino_sim > 0.7:
+        extra["match_cut"] = True
+        logger.info("match_cut_lite", slot_index=slot.index, cosine=round(dino_sim, 3))
+        return "hard_cut"
+
+    # 2. Drum / music event triggers.
+    if _event_near(music_events, "kick_times", cut_time, 0.1):
+        return "hard_cut"
+
+    if _event_near(music_events, "snare_times", cut_time, 0.1):
+        directional = _direction_slice(out_motion, in_motion)
+        if directional:
+            return directional
         return "whip"
 
+    if _event_near(music_events, "vocal_onset_times", cut_time, 0.1):
+        if _has_sustained_vocal_ahead(music_events, cut_time, ahead_s=1.0):
+            return "dissolve"
+
+    if _event_near(music_events, "sweep_peak_times", cut_time, 0.1):
+        return "radial" if energy > 0.6 else "zoomblur"
+
+    if _event_near(music_events, "bass_drop_times", cut_time, 0.1):
+        extra["flash_frame"] = True
+        return "hard_cut"
+
+    # 3. Mood forcing.
+    if "melancholic" in mood and energy < 0.4:
+        return "dissolve"
+    if "aggressive" in mood and energy > 0.7:
+        return "hard_cut"
+
+    # 4. Motion-aligned reference fallback.
+    if ref_archetype == "hard_cut":
+        return "fade" if (out_motion == "still" and in_motion == "still") else "hard_cut"
+    if ref_archetype == "whip":
+        directional = _direction_slice(out_motion, in_motion)
+        if directional:
+            return directional
+        return "whip"
     if ref_archetype == "match_cut" and out_motion == in_motion and out_motion != "still":
         return "dissolve"
-
     if ref_archetype == "fade":
         return "fade"
-
     if ref_archetype == "dissolve":
         return "dissolve"
 
-    return "dissolve"
+    # 5. Absolute fallback — never dissolve by default.
+    extra["fallback_hardcut"] = True
+    logger.warning(
+        "xfade_fallback_hardcut",
+        slot_index=slot.index,
+        ref_archetype=ref_archetype,
+        out_motion=out_motion,
+        in_motion=in_motion,
+    )
+    return "hard_cut"

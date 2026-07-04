@@ -25,7 +25,7 @@ _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 from shared_py.feature_tracer import FeatureTracer
 from shared_py.llm_client import LLMClient, LLMTask
 from shared_py.logging_config import StructuredLogger
-from shared_py.models import Slot
+from shared_py.models import Slot, ClipScore
 
 logger = StructuredLogger("reason_worker.kinetic_compose")
 
@@ -107,6 +107,9 @@ def _build_kt3_prompt(
             f"Required emotion: {emotion}\n"
         )
 
+    emotion_target = slot.arc_beat_emotion_target or "intense"
+    archetype_hint = f"- Archetype / IP: {source_ip_hint or 'generic'}\n"
+
     return (
         "You compose short on-screen text for music-video moments.\n\n"
         "Rules:\n"
@@ -121,8 +124,9 @@ def _build_kt3_prompt(
         f"Context:\n"
         f"- Section: {slot.section}\n"
         f"- Energy: {slot.energy_level:.2f} (0.0 calm — 1.0 climax)\n"
+        f"- Required emotion: {emotion_target}\n"
         f"{beat_context}"
-        f"- Source IP: {source_ip_hint or 'generic'}\n"
+        f"{archetype_hint}"
         f"- Previous texts (avoid repeating): {', '.join(previous_texts[-5:]) or 'none'}"
     )
 
@@ -255,6 +259,8 @@ def assign_kinetic_text_to_slots(
     source_ip_hint: Optional[str] = None,
     use_llm: bool = True,
     max_text_count: Optional[int] = None,
+    iconic_texts: Optional[Dict[str, str]] = None,
+    rankings: Optional[Dict[int, List[ClipScore]]] = None,
 ) -> List[Slot]:
     """Assign kinetic text to a subset of slots, respecting density caps.
 
@@ -277,10 +283,21 @@ def assign_kinetic_text_to_slots(
             if slot.index - last_text_index < 3:
                 continue
 
+            # Semantic relevance gate: skip slots whose best clip is a poor match.
+            if rankings is not None:
+                scores = rankings.get(slot.index, [])
+                if not scores or scores[0].semantic_score < 0.45:
+                    continue
+
+            iconic_text = None
+            if iconic_texts and slot.selected_clip_id:
+                iconic_text = iconic_texts.get(slot.selected_clip_id)
+
             kt = compose_kinetic_text_for_slot(
                 slot,
                 source_ip_hint=source_ip_hint,
                 previous_texts=previous_texts,
+                iconic_text=iconic_text,
                 use_llm=use_llm,
             )
             if kt is None:

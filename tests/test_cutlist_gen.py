@@ -15,10 +15,12 @@ from reason_worker.cutlist_gen import (
     generate_cutlist_programmatic,
     generate_cutlist,
     CUTLIST_SCHEMA,
+    _apply_slot_style,
 )
+from reason_worker.arc_anchor import ArcBeatAnchor
 from shared_py.models import (
     CutList, CutListGlobals, Slot, SectionMarker,
-    BeatGrid, BeatSegment, ShotBoundary,
+    BeatGrid, BeatSegment, ShotBoundary, AdaptiveFeatures,
 )
 
 
@@ -386,6 +388,60 @@ class TestEffectsAndOverlays:
 
         for slot in cutlist.slots:
             assert len(slot.effects) <= 2
+
+    def test_aggressive_arc_slot_gets_color_pop(self):
+        """A high-energy triumph arc beat should receive a color_pop effect."""
+        beats = make_beat_grid(
+            bpm=60,
+            beats=[0.5, 2.0],
+            downbeats=[0.5],
+            segments=[BeatSegment(start=0.0, end=2.0, label="drop")],
+        )
+        slot = Slot(
+            index=0,
+            start_s=0.5,
+            duration_s=1.5,
+            beat_index=0,
+            section="drop",
+            transition_in="hard_cut",
+            transition_out="hard_cut",
+            target_shot_type="close_up",
+            subject_hint="",
+            motion_hint="static",
+            energy_level=0.95,
+            required_tags=[],
+            avoid_tags=[],
+            effects=[],
+        )
+        state = {
+            "content_end": 2.0,
+            "arc_anchors": [
+                ArcBeatAnchor(
+                    name="CLIMAX",
+                    start_s=0.0,
+                    end_s=2.0,
+                    energy_target=0.9,
+                    emotion_target="triumph",
+                    preferred_shots=["close_up"],
+                    text_archetype="the peak",
+                )
+            ],
+            "slot_count": 0,
+            "shot_rotation": 0,
+        }
+        _apply_slot_style(
+            slot,
+            beats,
+            beats.segments,
+            beats.downbeats,
+            ["close_up"],
+            [0.95],
+            {},
+            enable_effects=True,
+            enable_text=False,
+            state=state,
+        )
+        assert any(e.type == "color_pop" for e in slot.effects)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

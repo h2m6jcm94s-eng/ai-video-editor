@@ -29,6 +29,8 @@ from reason_worker.audio_scoring import (
     score_clip_dialogue,
 )
 from reason_worker.captions import generate_caption_overlays_from_segments
+from reason_worker.face_safe import choose_text_z_layer
+from reason_worker.kinetic_compose import STYLE_PRESETS
 from reason_worker.clip_audio_filter import (
     AudioSegment as ClipAudioSegment,
     filter_clip_audio_for_inclusion,
@@ -278,6 +280,49 @@ def _dialogue_segments_for_slot(
             )
         )
     return shifted
+
+
+def _apply_iconic_quotes_as_kinetic_text(
+    cutlist: CutList,
+    slot_dialogue_segments: List[tuple[int, str, float, float, List[DialogueSegment]]],
+    clip_paths: Optional[Dict[str, str]] = None,
+    score_threshold: float = 0.45,
+) -> None:
+    """Promote the strongest iconic quote in each slot to kinetic text (KT2).
+
+    Dialogue segments already carry ``phrase_match_score`` from the iconic-quote
+    detector run inside ``_dialogue_segments_for_slot``. We reuse that score so
+    no additional LLM calls are needed here.
+    """
+    slot_map = {slot.index: slot for slot in cutlist.slots}
+    style = STYLE_PRESETS.get("trailer_block", {"color": "#FFFFFF", "outline": True, "size_pct": 0.5})
+
+    for slot_index, clip_id, _window_start, _slot_start, segments in slot_dialogue_segments:
+        slot = slot_map.get(slot_index)
+        if not slot:
+            continue
+        if not segments:
+            continue
+        best = max(segments, key=lambda s: getattr(s, "phrase_match_score", 0.0))
+        score = getattr(best, "phrase_match_score", 0.0)
+        if score < score_threshold:
+            continue
+        text = (best.text or "").strip()
+        if not text:
+            continue
+        words = text.split()
+        if len(words) > 4:
+            # Keep the strongest punch-phrase form so the on-screen text stays
+            # cinematic and passes the 1-4 word golden gate.
+            words = words[:4]
+        kt_text = " ".join(words).upper()
+        if not kt_text:
+            continue
+        slot.kinetic_text = kt_text
+        slot.enable_kinetic_text = True
+        slot.kinetic_text_style = "trailer_block"
+        slot.kinetic_text_color = style["color"]
+        slot.text_z_layer = choose_text_z_layer(slot, clip_paths)
 
 
 def _split_music_by_sections(
@@ -540,12 +585,25 @@ def _build_audio_tracks(
 
     tracks.extend(merged)
 
+    # Promote iconic dialogue lines to kinetic text (KT2) before burning captions.
+    _apply_iconic_quotes_as_kinetic_text(cutlist, slot_dialogue_segments, clip_paths)
+
     # AC1 captions: burn word-level dialogue captions into the output.
     if slot_dialogue_segments:
+        slot_indices = {idx for idx, *_rest in slot_dialogue_segments}
+        energies = [
+            slot.energy_level
+            for slot in cutlist.slots
+            if slot.index in slot_indices
+        ]
+        avg_energy = sum(energies) / max(1, len(energies))
+        mood = song_meaning.mood if song_meaning is not None else None
         caption_overlays = generate_caption_overlays_from_segments(
             slot_dialogue_segments,
             style="tiktok_white_pop",
             clip_paths=clip_paths,
+            mood=mood,
+            energy=avg_energy,
         )
         if caption_overlays:
             cutlist.overlays = list(cutlist.overlays or []) + caption_overlays

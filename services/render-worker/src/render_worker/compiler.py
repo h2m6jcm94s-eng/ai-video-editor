@@ -12,9 +12,10 @@ import threading
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional, Dict, NamedTuple
-from shared_py.models import CutList, Slot, RenderConfig, AudioTrack, Overlay
+from shared_py.models import CutList, Slot, RenderConfig, AudioTrack, Overlay, WordTiming
 from shared_py.tuning import COMPILER
 from shared_py.logging_config import StructuredLogger
+from render_worker.edits.flash_frame import flash_frame_filter
 from render_worker.reframe import reframe_filter
 from render_worker.stabilize import stabilization_filter
 
@@ -593,6 +594,7 @@ def _safe_path(p: str, must_exist: bool = False) -> str:
 
 
 # Map transition types to xfade names
+XFADE_OVERLAP = 0.3  # seconds of overlap material needed per xfade boundary
 XFADE_MAP = {
     "fade": "fade",
     "dissolve": "fade",
@@ -609,6 +611,8 @@ XFADE_MAP = {
     "hlslice": "hlslice",
     "flash": "fade",
     "whip": "hlslice",
+    "zoomblur": "zoomin",
+    "radial": "radial",
 }
 
 
@@ -758,6 +762,185 @@ def _drawtext_filter(
     )
 
 
+def _canonical_font_family(font_name: str) -> str:
+    """Return the bundled font family name for ASS styles."""
+    return _FONT_NAME_ALIASES.get(font_name or "", font_name or "Montserrat")
+
+
+def _ass_color(hex_color: str) -> str:
+    """Convert #RRGGBB to ASS BGR format ``&HBBGGRR&``."""
+    hex_color = (hex_color or "#FFFFFF").lstrip("#")
+    if len(hex_color) != 6:
+        hex_color = "FFFFFF"
+    r, g, b = hex_color[0:2], hex_color[2:4], hex_color[4:6]
+    return f"&H{b}{g}{r}&"
+
+
+def _ass_alpha_color(hex_color: str, alpha_hex: str = "00") -> str:
+    """Convert #RRGGBB with alpha to ASS ABGR format ``&HBBGGRRAA&``."""
+    hex_color = (hex_color or "#FFFFFF").lstrip("#")
+    if len(hex_color) != 6:
+        hex_color = "FFFFFF"
+    r, g, b = hex_color[0:2], hex_color[2:4], hex_color[4:6]
+    return f"&H{b}{g}{r}{alpha_hex}&"
+
+
+def _ass_alignment(position: str) -> int:
+    """Map Overlay.position to ASS Alignment value."""
+    return {
+        "bottom_left": 1,
+        "bottom": 2,
+        "bottom_right": 3,
+        "left": 4,
+        "center": 5,
+        "right": 6,
+        "top_left": 7,
+        "top": 8,
+        "top_right": 9,
+    }.get((position or "center").lower(), 5)
+
+
+def _ass_escape(text: str) -> str:
+    """Escape literal characters that are special in ASS Dialogue text."""
+    text = text.replace("\\", "\\\\")
+    text = text.replace("{", "\\{")
+    text = text.replace("}", "\\}")
+    text = text.replace(",", "\\,")
+    return text
+
+
+def _ass_time(seconds: float) -> str:
+    """Format seconds as ASS ``H:MM:SS.cc``."""
+    seconds = max(0.0, seconds)
+    cs = int(round((seconds % 1) * 100))
+    if cs >= 100:
+        cs = 99
+    total_s = int(seconds)
+    mm, ss = divmod(total_s, 60)
+    h, mm = divmod(mm, 60)
+    return f"{h}:{mm:02d}:{ss:02d}.{cs:02d}"
+
+
+def _build_ass_for_overlay(
+    overlay: Overlay,
+    width: int,
+    height: int,
+    font_family: str,
+) -> str:
+    """Build an ASS subtitle file for word-by-word/typewriter text overlays.
+
+    The output can be burned with FFmpeg's ``subtitles`` filter using the render
+    temp directory as ``fontsdir`` so bundled fonts are found without installing
+    them on the host OS.
+    """
+    font_family = _canonical_font_family(font_family)
+    primary = _ass_color(overlay.color)
+    secondary = _ass_color(overlay.highlight_color or overlay.color)
+    outline = _ass_color(overlay.stroke or "#000000")
+    back = "&H000000&"
+    alignment = _ass_alignment(overlay.position)
+
+    style_line = (
+        f"Style: Default,{font_family},{overlay.font_size_px},"
+        f"{primary},{secondary},{outline},{back},"
+        f"0,0,0,0,100,100,0,0,1,3,2,{alignment},0,0,0,1"
+    )
+
+    header = (
+        "[Script Info]\n"
+        "Title: AVE Overlay\n"
+        "ScriptType: v4.00+\n"
+        f"PlayResX: {width}\n"
+        f"PlayResY: {height}\n"
+        "WrapStyle: 0\n"
+        "ScaledBorderAndShadow: yes\n"
+        "\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+        "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
+        "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+        "Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        f"{style_line}\n"
+        "\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+    )
+
+    animation = (overlay.animation or "none").lower()
+    words = overlay.words or []
+
+    if animation == "word_by_word" and words:
+        # Karaoke: highlight each word as it is spoken.
+        line_text_parts = []
+        for i, word in enumerate(words):
+            next_start = words[i + 1].start_s if i + 1 < len(words) else overlay.end_s
+            duration_s = max(0.0, next_start - word.start_s)
+            cs = max(1, int(round(duration_s * 100)))
+            line_text_parts.append(f"{{\\k{cs}}}{_ass_escape(word.text)}")
+        line_text = " ".join(line_text_parts)
+    elif animation == "typewriter":
+        # Per-character reveal over the overlay duration.
+        text = overlay.text or ""
+        duration_s = max(0.001, overlay.end_s - overlay.start_s)
+        n_chars = max(1, len(text))
+        stagger_ms = max(30, int(round((duration_s / n_chars) * 1000)))
+        parts = []
+        for i, ch in enumerate(text):
+            start_ms = i * stagger_ms
+            end_ms = (i + 1) * stagger_ms
+            parts.append(
+                f"{{\\alpha&HFF\\t({start_ms},{end_ms},\\alpha&H0)}}{_ass_escape(ch)}"
+            )
+        line_text = "".join(parts)
+    else:
+        # Fallback to a simple fade-in if animation is not recognised.
+        line_text = (
+            f"{{\\fad(300,300)}}{_ass_escape(overlay.text or '')}"
+        )
+
+    dialogue = (
+        f"Dialogue: 0,{_ass_time(overlay.start_s)},{_ass_time(overlay.end_s)},"
+        f"Default,,0,0,0,,{line_text}"
+    )
+    return header + dialogue + "\n"
+
+
+def _write_ass_for_overlay(
+    overlay: Overlay,
+    temp_dir: str,
+    width: int,
+    height: int,
+    font_map: Dict[str, str],
+) -> str:
+    """Write an ASS file for ``overlay`` and return its basename."""
+    font_key = overlay.font or ""
+    font_family = font_map.get(font_key, font_map.get("", ""))
+    if not font_family:
+        # Last-resort copy the requested font into the temp dir.
+        font_family = _copy_font_to_temp(temp_dir, font_key) or ""
+    ass_content = _build_ass_for_overlay(overlay, width, height, font_key)
+    basename = f"overlay_{int(round(overlay.start_s * 1000))}.ass"
+    path = os.path.join(temp_dir, basename)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(ass_content)
+    return basename
+
+
+def _ass_filter_clause(
+    overlay: Overlay,
+    temp_dir: str,
+    width: int,
+    height: int,
+    font_map: Dict[str, str],
+) -> str:
+    """Return an unlabeled FFmpeg filter clause that burns an ASS overlay.
+
+    Useful inside per-slot filter chains where labels are implicit.
+    """
+    basename = _write_ass_for_overlay(overlay, temp_dir, width, height, font_map)
+    return f"subtitles=filename={basename}"
+
+
 def _speed_ramp_factor(slot: Slot) -> float:
     """Return average playback speed factor from a speed_ramp effect, or 1.0."""
     for effect in slot.effects or []:
@@ -817,9 +1000,16 @@ def _apply_video_effects(
         if rel_end <= rel_start:
             continue
 
-        if etype == "zoom_punch_in":
+        if etype == "flash_frame":
+            filters.append(
+                flash_frame_filter(rel_start, rel_end - rel_start, fps=config.fps or 30.0)
+            )
+
+        elif etype == "zoom_punch_in":
             scale = _get_param(params, "target_scale", 1.3)
             dur = min(_get_param(params, "duration_ms", 300) / 1000.0, rel_end - rel_start)
+            center_x = _get_param(params, "center_x", 0.5)
+            center_y = _get_param(params, "center_y", 0.5)
             # Use a time-varying crop window to simulate a zoom/punch-in.
             # ``n`` is the frame index relative to the start of the segment.
             fps = config.fps or 30
@@ -829,7 +1019,7 @@ def _apply_video_effects(
             filters.append(
                 f"crop='iw/(1+({scale}-1)*{ramp_expr})':"
                 f"'ih/(1+({scale}-1)*{ramp_expr})':"
-                f"(iw-ow)/2:(ih-oh)/2"
+                f"(iw-ow)*{center_x}:(ih-oh)*{center_y}"
             )
 
         elif etype == "vignette":
@@ -907,6 +1097,32 @@ def _apply_video_effects(
             stroke = _get_param(params, "stroke", "#000000")
             animation = _get_param(params, "animation", "pop")
             font_key = _get_param(params, "font", "")
+            animation_l = (animation or "pop").lower()
+
+            if animation_l in ("word_by_word", "typewriter"):
+                # Use ASS for true per-character / per-word reveals inside a slot.
+                text_overlay = Overlay(
+                    text=text,
+                    start_s=rel_start,
+                    end_s=rel_end,
+                    position=position,
+                    font=font_key or "Montserrat",
+                    font_size_px=font_size_px,
+                    color=color,
+                    stroke=stroke,
+                    animation=animation_l,
+                )
+                filters.append(
+                    _ass_filter_clause(
+                        text_overlay,
+                        temp_dir,
+                        config.width,
+                        config.height,
+                        font_map,
+                    )
+                )
+                continue
+
             fontfile = font_map.get(font_key, font_map.get("", ""))
             if not fontfile:
                 # Last-resort fallback to any available bundled/system font.
@@ -1703,10 +1919,10 @@ def _render_layered_text(
 class _MergeNode(NamedTuple):
     """A node in the binary video-merge tree.
 
-    ``timeline_duration`` is the node's length in the final output (sum of slot
-    durations minus transition overlaps). ``media_duration`` is the actual video
-    file length; for leaf nodes this is the extracted segment duration, which is
-    intentionally longer than the slot to provide overlap frames for xfade.
+    ``timeline_duration`` is the intended raw content length of the node (sum of
+    the underlying slot durations). ``media_duration`` is the actual video file
+    length, which may be longer because it carries overlap tails needed by
+    downstream xfade transitions.
     """
 
     path: str
@@ -1758,28 +1974,42 @@ def _merge_two_video_nodes(
 
     def _build_filter_complex(transition: str) -> str:
         if transition == "hard_cut":
+            # Trim the left input to its intended timeline so overlap tails
+            # from the previous xfade are not shown again at a hard cut. The
+            # right input is kept full so its own trailing overlaps remain
+            # available for subsequent xfades.
             return (
-                f"[0:v]{norm},setpts=PTS-STARTPTS[a];"
+                f"[0:v]{norm},setpts=PTS-STARTPTS,trim=start=0:duration={left.timeline_duration:.3f}[a];"
                 f"[1:v]{norm},setpts=PTS-STARTPTS[b];"
                 "[a][b]concat=n=2:v=1:a=0[outv]"
             )
         # xfade duration is limited by the actual media lengths of the two
-        # inputs. The transition is anchored to the end of the left node's
-        # timeline so that merged subtrees do not have their tails cut off.
-        xfade_duration = min(0.3, left.media_duration * 0.5, right.media_duration * 0.5)
-        offset = max(0.0, left.timeline_duration - xfade_duration)
+        # inputs. Anchor the transition to the end of the left *media* so the
+        # overlap tail carried by the left node is consumed by the blend.
+        offset = max(0.0, left.media_duration - xfade_duration)
         return (
             f"[0:v]{norm},setpts=PTS-STARTPTS[a];"
             f"[1:v]{norm},setpts=PTS-STARTPTS[b];"
             f"[a][b]xfade=transition={transition}:duration={xfade_duration:.3f}:offset={offset:.3f}[outv]"
         )
 
-    # If either bordering slot is shorter than its timeline (source underflow),
-    # xfade can seek past the end of the input and kill the video track. Fall
-    # back to a hard cut for this boundary and log it.
-    left_underflow = left.media_duration < left.timeline_duration - 0.2
-    right_underflow = right.media_duration < right.timeline_duration - 0.2
-    if requested_transition != "hard_cut" and (left_underflow or right_underflow):
+    # Compute the actual xfade duration up front so the rest of the merge
+    # (offset, underflow checks, and duration estimates) stays consistent.
+    if requested_transition == "hard_cut":
+        xfade_duration = 0.0
+    else:
+        xfade_duration = min(
+            XFADE_OVERLAP,
+            left.media_duration * 0.5,
+            right.media_duration * 0.5,
+        )
+
+    # If either input is too short to provide the required overlap, fall back
+    # to a hard cut for this boundary.
+    if requested_transition != "hard_cut" and (
+        left.media_duration < xfade_duration + 0.05
+        or right.media_duration < xfade_duration + 0.05
+    ):
         logger.warning(
             "merge_underflow_hard_cut",
             merge_index=merge_index,
@@ -1792,10 +2022,10 @@ def _merge_two_video_nodes(
             right_media=right.media_duration,
         )
         transition = "hard_cut"
+        xfade_duration = 0.0
     else:
         transition = requested_transition
 
-    xfade_duration = 0.0
     filter_complex = _build_filter_complex(transition)
 
     cmd = [
@@ -1836,12 +2066,17 @@ def _merge_two_video_nodes(
             raise
 
     # The merged output's actual length is what matters for downstream merges.
-    # Using the probed media duration as the timeline duration keeps the binary
-    # merge tree honest when source underflow has shortened one of the inputs.
-    merged_media_duration = _probe_duration(out_path) or (
-        left.timeline_duration + right.timeline_duration - xfade_duration
-    )
-    merged_timeline_duration = merged_media_duration
+    # When probing fails, estimate from the inputs and the transition.
+    if transition == "hard_cut":
+        merged_media_duration = _probe_duration(out_path) or (
+            left.timeline_duration + right.media_duration
+        )
+    else:
+        merged_media_duration = _probe_duration(out_path) or (
+            left.media_duration - xfade_duration + right.media_duration
+        )
+    # Timeline is the intended raw content length; overlaps are not double counted.
+    merged_timeline_duration = left.timeline_duration + right.timeline_duration
     return _MergeNode(
         path=out_path_rel,
         timeline_duration=merged_timeline_duration,
@@ -1860,8 +2095,11 @@ def _build_overlay_filter_parts(
     enable_text: bool,
     enable_color_grade: bool,
     fps: float = 30.0,
-) -> List[str]:
-    """Build drawtext/LUT filter strings on a single input label."""
+    width: int = 1080,
+    height: int = 1920,
+    temp_dir: str = "",
+) -> tuple[List[str], str]:
+    """Build drawtext/ASS/LUT filter strings on a single input label."""
     filter_parts: List[str] = []
 
     if relative_lut and enable_color_grade:
@@ -1879,19 +2117,33 @@ def _build_overlay_filter_parts(
 
         text_label = f"text_{start_s}"
         relative_font = font_map.get(overlay.font or "")
-        drawtext = _drawtext_filter(
-            text=overlay.text,
-            start_s=start_s,
-            end_s=end_s,
-            position=overlay.position or "center",
-            font_size_px=overlay.font_size_px or 48,
-            color=overlay.color or "#FFFFFF",
-            stroke=overlay.stroke or "#000000",
-            fontfile=relative_font or "",
-            animation=overlay.animation or "none",
-            fps=fps,
+        animation = (overlay.animation or "none").lower()
+        use_ass = (
+            animation in ("word_by_word", "typewriter")
+            or overlay.words
         )
-        filter_parts.append(f"[{current_label}]{drawtext}[{text_label}]")
+
+        if use_ass:
+            ass_basename = _write_ass_for_overlay(
+                overlay, temp_dir, width, height, font_map
+            )
+            filter_parts.append(
+                f"[{current_label}]subtitles=filename={ass_basename}[{text_label}]"
+            )
+        else:
+            drawtext = _drawtext_filter(
+                text=overlay.text,
+                start_s=start_s,
+                end_s=end_s,
+                position=overlay.position or "center",
+                font_size_px=overlay.font_size_px or 48,
+                color=overlay.color or "#FFFFFF",
+                stroke=overlay.stroke or "#000000",
+                fontfile=relative_font or "",
+                animation=overlay.animation or "none",
+                fps=fps,
+            )
+            filter_parts.append(f"[{current_label}]{drawtext}[{text_label}]")
         current_label = text_label
 
     for subtitle in (cutlist.subtitles if enable_text else []):
@@ -1959,17 +2211,19 @@ def compile_timeline(
     slot_segments = []
     temp_dir = tempfile.mkdtemp(prefix="ave_render_")
 
-    # Scale slot durations to compensate for xfade transition overlap. The
-    # compiler overlaps adjacent slots by ~0.3s per transition, so we need
-    # extra source content to end up at the target duration.
+    # Per-slot extraction durations. A slot that is the left side of a
+    # non-hardcut transition needs extra tail material (overlap) so the xfade
+    # has frames to blend without shortening the video track. Hard-cut
+    # boundaries do not consume overlap, so they receive none.
     target_duration = cutlist.globals.total_duration_s
-    raw_slot_sum = sum(s.duration_s for s in cutlist.slots)
-    estimated_overlap = (len(cutlist.slots) - 1) * 0.3
-    desired_slot_sum = target_duration + estimated_overlap
-    duration_scale = desired_slot_sum / raw_slot_sum if raw_slot_sum > 0 else 1.0
-    scaled_durations = {
-        s.index: s.duration_s * duration_scale for s in cutlist.slots
-    }
+    scaled_durations: Dict[int, float] = {}
+    for idx, slot in enumerate(cutlist.slots):
+        overlap = 0.0
+        if idx + 1 < len(cutlist.slots):
+            next_slot = cutlist.slots[idx + 1]
+            if _transition_name_for_pair(slot, next_slot, enable_effects) != "hard_cut":
+                overlap = XFADE_OVERLAP
+        scaled_durations[slot.index] = slot.duration_s + overlap
 
     try:
         # Copy all referenced fonts into the render temp dir up-front so both
@@ -2075,6 +2329,9 @@ def compile_timeline(
             enable_text,
             enable_color_grade,
             fps=config.fps or 30.0,
+            width=config.width,
+            height=config.height,
+            temp_dir=temp_dir,
         )
 
         if filter_parts:

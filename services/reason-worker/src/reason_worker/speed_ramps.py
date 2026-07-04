@@ -1,13 +1,6 @@
 # Copyright (c) 2025 Devayan Dewri. All rights reserved.
 # Licensed under the Elastic License 2.0 - see LICENSE in the repo root.
-# Commercial SaaS use is prohibited without written permission.
-"""Deterministic speed-ramp assignment for cinematic pacing.
-
-Speed ramps compress or stretch source time to match the musical energy of a
-slot.  For Sprint A only average-speed remapping is rendered (via FFmpeg
-``setpts``); variable curves are accepted at the cutlist level so the feature
-tracer can report a real path as soon as two or more ramps are emitted.
-"""
+"""Speed-ramp decisions for cinematic pacing and hit landing."""
 
 from __future__ import annotations
 
@@ -15,7 +8,7 @@ from typing import List, Optional
 
 from shared_py.feature_tracer import FeatureTracer
 from shared_py.logging_config import StructuredLogger
-from shared_py.models import Effect, Slot, SpeedRampParams
+from shared_py.models import Effect, MusicEventGrid, Slot, SpeedRampParams
 
 logger = StructuredLogger("reason_worker.speed_ramps")
 
@@ -29,6 +22,10 @@ _RAMP_PRESETS = {
     "build": {"start_speed": 1.0, "end_speed": 1.6, "curve": "ramp_up"},
     "breather": {"start_speed": 1.6, "end_speed": 1.0, "curve": "ramp_down"},
 }
+
+_HIT_ARC_BEATS = {"CRISIS", "VICTORY", "CONFLICT"}
+_HIT_RAMP_DURATION_S = 0.3
+_HIT_END_SPEED = 0.5
 
 
 def _pick_ramp_for_slot(slot: Slot, used_indices: set) -> Optional[Effect]:
@@ -103,3 +100,55 @@ def assign_speed_ramps_to_slots(
             logger.warning("speed_ramps_fallback", n_ramps=len(ramps), min_required=min_ramps)
 
     return slots
+
+
+def _normalize_arc(name: Optional[str]) -> str:
+    return (name or "").upper()
+
+
+def apply_speed_ramp_into_hit(
+    slot: Slot,
+    music_events: MusicEventGrid,
+    arc_beat: Optional[str] = None,
+) -> None:
+    """Slow the last 300ms of a high-impact slot so the hit lands harder.
+
+    Only fires on crisis/victory/conflict arc beats when a kick or snare sits
+    within ±100ms of the slot's end.
+    """
+    if not music_events:
+        return
+    if _normalize_arc(arc_beat or slot.story_beat) not in _HIT_ARC_BEATS:
+        return
+    if any(e.type == "speed_ramp" for e in (slot.effects or [])):
+        return
+
+    cut_time = float(slot.start_s + slot.duration_s)
+    hit = False
+    for t in music_events.kick_times + music_events.snare_times:
+        if abs(t - cut_time) <= 0.1:
+            hit = True
+            break
+    if not hit:
+        return
+
+    ramp_start = max(0.0, cut_time - _HIT_RAMP_DURATION_S)
+    slot.effects = list(slot.effects or [])
+    slot.effects.append(
+        Effect(
+            type="speed_ramp",
+            start_s=ramp_start,
+            duration_s=_HIT_RAMP_DURATION_S,
+            params=SpeedRampParams(
+                start_speed=1.0,
+                end_speed=_HIT_END_SPEED,
+                curve="ramp_down",
+            ).model_dump(by_alias=True),
+        )
+    )
+    logger.info(
+        "speed_ramp_into_hit_added",
+        slot_index=slot.index,
+        arc_beat=arc_beat or slot.story_beat,
+        cut_time=cut_time,
+    )

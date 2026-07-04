@@ -15,25 +15,27 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from shared_py.feature_tracer import FeatureTracer
 from shared_py.logging_config import StructuredLogger
-from shared_py.models import CutList, Overlay
+from shared_py.models import CutList, Overlay, WordTiming
 
 from reason_worker.audio_scoring import DialogueSegment
+from reason_worker.font_select import select_font_for_mood
 
 logger = StructuredLogger("reason_worker.captions")
 
 # AC1 single-speaker default style: TikTok-style white pop.
 DEFAULT_CAPTION_STYLE = {
     "position": "bottom",
-    "font": "Inter",
+    "font": "Montserrat",
     "font_size_px": 72,
     "color": "#FFFFFF",
     "stroke": "#000000",
-    "animation": "pop",
+    "animation": "word_by_word",
+    "highlight_color": "#FFE600",
 }
 
 # Minimum face area (as a fraction of the frame) to count as "visible speaker".
@@ -47,6 +49,7 @@ class CaptionWord:
     end_s: float
     slot_index: int
     slot_start_s: float
+    words: Optional[List["CaptionWord"]] = None
 
 
 def _load_face_detections(clip_path: str) -> List[dict]:
@@ -160,6 +163,7 @@ def _group_words_into_phrases(
                     end_s=current[-1].end_s,
                     slot_index=current[0].slot_index,
                     slot_start_s=current[0].slot_start_s,
+                    words=list(current),
                 )
             )
             current = [w]
@@ -172,6 +176,7 @@ def _group_words_into_phrases(
                 end_s=current[-1].end_s,
                 slot_index=current[0].slot_index,
                 slot_start_s=current[0].slot_start_s,
+                words=list(current),
             )
         )
 
@@ -183,13 +188,15 @@ def generate_caption_overlays_from_segments(
     style: str = "tiktok_white_pop",
     max_captions: Optional[int] = None,
     clip_paths: Optional[Dict[str, str]] = None,
+    mood: Optional[str] = None,
+    energy: float = 0.5,
 ) -> List[Overlay]:
     """Generate caption Overlay objects from per-slot dialogue segments.
 
     Each ``slot_segments`` tuple is ``(slot_index, clip_id, source_window_start_s,
-    slot_start_s, segments)``. AC1 is single-speaker, tiktok_white_pop style,
-    phrase-grouped for readability. Phrases are dropped when no speaker face is
-    visible in the source window.
+    slot_start_s, segments)``. AC1 is single-speaker, phrase-grouped for
+    readability, with optional word-by-word karaoke highlighting. Phrases are
+    dropped when no speaker face is visible in the source window.
     """
     with FeatureTracer("captions", gated_in=True) as ft:
         all_words: List[CaptionWord] = []
@@ -241,19 +248,26 @@ def generate_caption_overlays_from_segments(
             filtered_phrases = filtered_phrases[:max_captions]
 
         style_cfg = DEFAULT_CAPTION_STYLE
+        font = select_font_for_mood(mood, energy)
         overlays: List[Overlay] = []
         for phrase in filtered_phrases:
+            words = [
+                WordTiming(text=w.text, start_s=w.start_s, end_s=w.end_s)
+                for w in (phrase.words or [])
+            ]
             overlays.append(
                 Overlay(
                     text=phrase.text.upper(),
                     start_s=phrase.start_s,
                     end_s=phrase.end_s,
                     position=style_cfg["position"],
-                    font=style_cfg["font"],
+                    font=font,
                     font_size_px=style_cfg["font_size_px"],
                     color=style_cfg["color"],
                     stroke=style_cfg["stroke"],
                     animation=style_cfg["animation"],
+                    highlight_color=style_cfg["highlight_color"],
+                    words=words or None,
                 )
             )
 

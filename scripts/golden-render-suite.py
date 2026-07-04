@@ -868,6 +868,66 @@ def _check_arc_anchors_from_semantic(log: str, result: SuiteResult) -> None:
     )
 
 
+def _check_transition_variety(cutlist: CutList, result: SuiteResult) -> None:
+    transitions = [
+        s.transition_out
+        for s in cutlist.slots[:-1]
+        if s.transition_out and s.transition_out != "hard_cut"
+    ]
+    unique = set(transitions)
+    variety = len(unique)
+    passed = variety >= 4
+    result.add(
+        Criterion(
+            "transition_variety",
+            passed,
+            value=variety,
+            threshold=4,
+            detail=f"distinct_archetypes={variety} ({', '.join(sorted(unique))})",
+        )
+    )
+
+
+def _check_match_cuts_present(cutlist: CutList, result: SuiteResult) -> None:
+    count = sum(
+        1
+        for report in cutlist.feature_runtime_report
+        if report.feature == "match_cut_bonus"
+    )
+    passed = count >= 1
+    result.add(
+        Criterion(
+            "match_cuts_present",
+            passed,
+            value=count,
+            threshold=1,
+            detail=f"match_cut_bonus_reports={count}",
+        )
+    )
+
+
+def _check_no_xfade_fallback_hardcut(log: str, cutlist: CutList, result: SuiteResult) -> None:
+    slot_count = max(1, len(cutlist.slots) - 1)
+    report_count = sum(
+        1
+        for report in cutlist.feature_runtime_report
+        if report.feature == "xfade_fallback_hardcut"
+    )
+    log_count = log.count("xfade_fallback_hardcut")
+    count = max(report_count, log_count)
+    ratio = count / slot_count
+    passed = ratio < 0.10
+    result.add(
+        Criterion(
+            "no_xfade_fallback_hardcut",
+            passed,
+            value=round(ratio, 3),
+            threshold=0.10,
+            detail=f"fallback_count={count} slots={slot_count} ratio={ratio:.3f}",
+        )
+    )
+
+
 def _check_kinetic_text_scene_relevance(cutlist: CutList, result: SuiteResult) -> None:
     texts = [s.kinetic_text.strip() for s in cutlist.slots if s.kinetic_text]
     if not texts:
@@ -940,6 +1000,9 @@ def run_suite(args: argparse.Namespace) -> SuiteResult:
         _check_siglip_embeddings_available(result)
         _check_arc_anchors_from_semantic(log, result)
         _check_kinetic_text_scene_relevance(cutlist, result)
+        _check_transition_variety(cutlist, result)
+        _check_match_cuts_present(cutlist, result)
+        _check_no_xfade_fallback_hardcut(log, cutlist, result)
 
     return result
 

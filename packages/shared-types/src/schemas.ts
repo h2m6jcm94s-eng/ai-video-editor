@@ -102,6 +102,12 @@ export const slotSchema = z
   })
   .strict();
 
+export const wordTimingSchema = z.object({
+  text: z.string().min(1),
+  startS: z.number().min(0),
+  endS: z.number().min(0),
+});
+
 export const overlaySchema = z
   .object({
     text: z.string().min(1),
@@ -113,6 +119,8 @@ export const overlaySchema = z
     color: z.string().default("#FFFFFF"),
     stroke: z.string().optional(),
     animation: z.string().default("none"),
+    highlightColor: z.string().optional(),
+    words: z.array(wordTimingSchema).optional(),
   })
   .strict();
 

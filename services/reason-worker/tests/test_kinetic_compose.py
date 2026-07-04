@@ -99,3 +99,57 @@ def test_assign_kinetic_text_with_llm_disabled_marks_no_text():
     slots = [make_slot(index=i, story_beat="CLIMAX") for i in range(3)]
     assign_kinetic_text_to_slots(slots, use_llm=False)
     assert not any(s.enable_kinetic_text for s in slots)
+
+
+from shared_py.models import ClipScore
+
+
+def test_assign_kinetic_text_uses_iconic_text_dict():
+    slots = [
+        make_slot(index=0, story_beat="CLIMAX", selected_clip_id="clip_a"),
+        make_slot(index=3, story_beat="CLIMAX", selected_clip_id="clip_b"),
+    ]
+    iconic_texts = {"clip_a": "Stay alive", "clip_b": "No way back"}
+    assign_kinetic_text_to_slots(slots, iconic_texts=iconic_texts, use_llm=False)
+    assert slots[0].kinetic_text == "STAY ALIVE"
+    assert slots[0].enable_kinetic_text
+    assert slots[1].kinetic_text == "NO WAY BACK"
+
+
+def test_assign_kinetic_text_skips_low_semantic_score():
+    slots = [make_slot(index=i, story_beat="CLIMAX") for i in range(3)]
+    rankings = {
+        i: [ClipScore(clip_id=f"clip_{i}", semantic_score=0.3, total_score=0.5)]
+        for i in range(3)
+    }
+    assign_kinetic_text_to_slots(slots, rankings=rankings, use_llm=False)
+    assert not any(s.enable_kinetic_text for s in slots)
+
+
+def test_assign_kinetic_text_allows_high_semantic_score():
+    slots = [make_slot(index=i, story_beat="CLIMAX") for i in (0, 3, 6)]
+    rankings = {
+        i: [ClipScore(clip_id=f"clip_{i}", semantic_score=0.8, total_score=0.9)]
+        for i in (0, 3, 6)
+    }
+
+    def fake_compose(slot, **kwargs):
+        from reason_worker.kinetic_compose import KineticText
+        return KineticText(
+            text=f"TEXT{slot.index}",
+            tier="KT3",
+            style_preset="anime_impact",
+            color_hex="#FFFFFF",
+            outline=True,
+            size_pct=0.5,
+            animation="pop",
+        )
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(kt_mod, "compose_kinetic_text_for_slot", fake_compose)
+    try:
+        assign_kinetic_text_to_slots(slots, rankings=rankings, max_text_count=2)
+        enabled = [s for s in slots if s.enable_kinetic_text]
+        assert len(enabled) == 2
+    finally:
+        monkeypatch.undo()

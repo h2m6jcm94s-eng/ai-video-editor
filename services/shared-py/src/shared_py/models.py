@@ -390,6 +390,14 @@ class Slot(BaseModelCamel):
     emotion_match_score: float = 0.0
 
 
+class WordTiming(BaseModelCamel):
+    """A single word with absolute timeline timing for karaoke/lyric rendering."""
+
+    text: str
+    start_s: float
+    end_s: float
+
+
 class Overlay(BaseModelCamel):
     text: str
     start_s: float
@@ -400,6 +408,8 @@ class Overlay(BaseModelCamel):
     color: str = "#FFFFFF"
     stroke: Optional[str] = "#000000"
     animation: str = "none"
+    highlight_color: Optional[str] = None
+    words: Optional[List[WordTiming]] = None
 
 
 class Subtitle(BaseModelCamel):

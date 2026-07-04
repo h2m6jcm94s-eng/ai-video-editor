@@ -45,7 +45,7 @@ from ingest_worker.stem_separate import separate_song_stems
 from reason_worker.clip_rank import rank_clips_for_slots
 from reason_worker.aspect_detect import detect_aspect_preset, ASPECT_PRESETS
 from reason_worker.cutlist_gen import generate_cutlist_programmatic, _behavior_from_style_analysis
-from reason_worker.transition_select import select_xfade
+from reason_worker.transition_stage import apply_semantic_transition_stage
 from reason_worker.audio_mix import build_audio_tracks
 from reason_worker.audio_scoring import ScoringConfig
 from reason_worker.save_the_cat import apply_save_the_cat_beats
@@ -406,19 +406,17 @@ def main():
             slot.heatmap_score = top.window_score
             slot.emotion_match_score = top.emotion_match_score
 
-    # 8. Direction-aware transitions
-    log_progress("transitions", 0.75, "Selecting direction-aware transitions")
-    for i, slot in enumerate(cutlist.slots):
-        if i < len(cutlist.slots) - 1:
-            next_slot = cutlist.slots[i + 1]
-            out_motion = "still"
-            in_motion = "still"
-            if slot.selected_clip_id and rankings.get(slot.index):
-                out_motion = rankings[slot.index][0].dominant_motion or "still"
-            if next_slot.selected_clip_id and rankings.get(next_slot.index):
-                in_motion = rankings[next_slot.index][0].dominant_motion or "still"
-            ref_archetype = archetypes[i % len(archetypes)] if archetypes else "hard_cut"
-            slot.transition_out = select_xfade(out_motion, in_motion, ref_archetype)
+    # 8. Semantic / music-aware transitions, speed ramps, and vocal anticipation
+    log_progress("transitions", 0.75, "Selecting semantic transitions")
+    apply_semantic_transition_stage(
+        cutlist,
+        rankings,
+        music_events=song_meaning.music_event_grid if song_meaning else None,
+        song_meaning=song_meaning,
+        clip_metadata=clip_metadata,
+        clip_paths=clip_path_map,
+        ref_archetypes=archetypes,
+    )
 
     # 9. Build adaptive audio mix (music bed + dialogue tracks)
     log_progress("audio_mix", 0.78, "Building adaptive audio mix")

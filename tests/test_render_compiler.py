@@ -28,7 +28,7 @@ from render_worker.compiler import (
     _video_encode_args,
     _segment_video_args,
 )
-from shared_py.models import CutList, CutListGlobals, Slot, Overlay, RenderConfig, Effect, Subtitle, AudioTrack
+from shared_py.models import CutList, CutListGlobals, Slot, Overlay, RenderConfig, Effect, Subtitle, AudioTrack, WordTiming
 
 
 def create_test_video(path: str, duration: float = 5.0, fps: int = 30,
@@ -951,3 +951,91 @@ class TestAudioFilterV2:
         filt = _build_audio_filter_v2(slots, 1, [], mixes, str(tmp_path))
         assert "asendcmd=f=volume_sendcmd.txt" in filt
         assert (tmp_path / "volume_sendcmd.txt").exists()
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="FFmpeg not available")
+class TestAssTextRendering:
+    """Verify ASS-based karaoke/typewriter overlays burn correctly."""
+
+    def _base_cutlist_with_overlay(self, overlay):
+        return CutList(
+            globals=CutListGlobals(
+                total_duration_s=3.0, tempo_bpm=120, time_signature="4/4",
+                energy_curve=[0.5], section_markers=[], aspect_ratio="16:9",
+            ),
+            slots=[Slot(
+                index=0, start_s=0.0, duration_s=3.0, beat_index=0,
+                section="intro", target_shot_type="wide",
+                subject_hint="test", motion_hint="static",
+                energy_level=0.5, required_tags=[], avoid_tags=[],
+                selected_clip_id="clip_0",
+            )],
+            overlays=[overlay],
+        )
+
+    def test_word_by_word_overlay_renders(self):
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as v:
+            video_path = v.name
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as o:
+            output_path = o.name
+        try:
+            create_test_video(video_path, duration=5.0)
+            overlay = Overlay(
+                text="hello world",
+                start_s=0.5,
+                end_s=2.0,
+                position="bottom",
+                font="Montserrat",
+                font_size_px=48,
+                color="#FFFFFF",
+                stroke="#000000",
+                animation="word_by_word",
+                highlight_color="#FFE600",
+                words=[
+                    WordTiming(text="hello", start_s=0.5, end_s=1.0),
+                    WordTiming(text="world", start_s=1.0, end_s=1.8),
+                ],
+            )
+            cutlist = self._base_cutlist_with_overlay(overlay)
+            config = RenderConfig(
+                output_path=output_path, width=640, height=480,
+                video_preset="ultrafast", video_crf=28,
+            )
+            result = compile_timeline(cutlist, {"clip_0": video_path}, output_path, config)
+            assert os.path.exists(result)
+            assert os.path.getsize(result) > 0
+        finally:
+            for p in [video_path, output_path]:
+                if os.path.exists(p):
+                    os.unlink(p)
+
+    def test_typewriter_overlay_renders(self):
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as v:
+            video_path = v.name
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as o:
+            output_path = o.name
+        try:
+            create_test_video(video_path, duration=5.0)
+            overlay = Overlay(
+                text="TYPE",
+                start_s=0.5,
+                end_s=2.0,
+                position="center",
+                font="Anton",
+                font_size_px=72,
+                color="#FFFFFF",
+                stroke="#000000",
+                animation="typewriter",
+            )
+            cutlist = self._base_cutlist_with_overlay(overlay)
+            config = RenderConfig(
+                output_path=output_path, width=640, height=480,
+                video_preset="ultrafast", video_crf=28,
+            )
+            result = compile_timeline(cutlist, {"clip_0": video_path}, output_path, config)
+            assert os.path.exists(result)
+            assert os.path.getsize(result) > 0
+        finally:
+            for p in [video_path, output_path]:
+                if os.path.exists(p):
+                    os.unlink(p)
