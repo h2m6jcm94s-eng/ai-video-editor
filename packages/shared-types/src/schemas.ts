@@ -109,6 +109,7 @@ export const wordTimingSchema = z.object({
   text: z.string().min(1),
   startS: z.number().min(0),
   endS: z.number().min(0),
+  isEmphasis: z.boolean().default(false),
 });
 
 export const overlaySchema = z
@@ -124,6 +125,7 @@ export const overlaySchema = z
     animation: z.string().default("none"),
     highlightColor: z.string().optional(),
     words: z.array(wordTimingSchema).optional(),
+    emphasisWords: z.array(z.string()).default([]),
   })
   .strict();
 

@@ -1034,6 +1034,22 @@ def _check_no_word_bank_calls(log: str, result: SuiteResult) -> None:
     )
 
 
+def _check_emphasis_words_present(cutlist: CutList, result: SuiteResult) -> None:
+    total = 0
+    for overlay in cutlist.overlays:
+        total += len(getattr(overlay, "emphasis_words", []) or [])
+    passed = total >= 3
+    result.add(
+        Criterion(
+            "emphasis_words_present",
+            passed,
+            value=total,
+            threshold=3,
+            detail=f"emphasis_words={total}",
+        )
+    )
+
+
 def run_suite(args: argparse.Namespace) -> SuiteResult:
     _run_render(args)
     log = _load_render_log()
@@ -1090,6 +1106,7 @@ def run_suite(args: argparse.Namespace) -> SuiteResult:
 
     if args.feature_wave_9:
         _check_no_word_bank_calls(log, result)
+        _check_emphasis_words_present(cutlist, result)
 
     if args.feature_wave_10:
         pass  # criteria added in Phase 3

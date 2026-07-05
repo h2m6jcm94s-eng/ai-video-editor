@@ -25,10 +25,11 @@ _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 from shared_py.feature_tracer import FeatureTracer
 from shared_py.llm_client import LLMClient, LLMTask
 from shared_py.logging_config import StructuredLogger
-from shared_py.models import Slot, ClipScore
+from shared_py.models import Slot, ClipScore, SongMeaning, WordTiming
 
 from reason_worker.animation_select import choose_kinetic_animation
 from reason_worker.face_safe import face_region_in_window
+from reason_worker.section_mood import section_mood_for_slot
 
 logger = StructuredLogger("reason_worker.kinetic_compose")
 
@@ -43,6 +44,44 @@ STYLE_PRESETS = {
     "handwritten_pen": {"color": "#000000", "outline": False, "size_pct": 0.35, "animation": "type_on"},
     "shake_emphasis": {"color": "#FFFFFF", "outline": True, "size_pct": 0.50, "animation": "shake_3f"},
 }
+
+
+def _style_preset_for_context(mood: Optional[str], energy: float) -> str:
+    """Map a section mood/energy to a kinetic-text style preset."""
+    mood_lower = (mood or "").lower()
+    aggressive = {"aggressive", "anger", "intense", "power", "triumph", "tension"}
+    melancholic = {"melancholic", "sad", "nostalgic", "lonely", "grief", "calm"}
+    if any(m in mood_lower for m in aggressive) or energy >= 0.8:
+        return "shake_emphasis" if energy >= 0.85 else "anime_impact"
+    if any(m in mood_lower for m in melancholic) or energy < 0.35:
+        return "cinematic_serif" if energy < 0.25 else "lowercase_intimate"
+    if "cyber" in mood_lower or "glitch" in mood_lower:
+        return "neon_glitch"
+    if energy >= 0.55:
+        return "trailer_block"
+    return "handwritten_pen"
+
+
+def _lyric_stamp_for_slot(
+    slot: Slot,
+    lyrics: List[WordTiming],
+) -> Optional[str]:
+    """Return a short lyric phrase inside the slot window, or None."""
+    window_start = slot.start_s
+    window_end = slot.start_s + slot.duration_s
+    in_window = [
+        w for w in lyrics
+        if window_start <= w.start_s < window_end
+    ]
+    if not in_window:
+        return None
+    # Pick the 1-4 most central words.
+    centre = (window_start + window_end) / 2
+    in_window.sort(key=lambda w: abs((w.start_s + w.end_s) / 2 - centre))
+    chosen = in_window[:4]
+    chosen.sort(key=lambda w: w.start_s)
+    return " ".join(w.text.upper() for w in chosen).strip()
+
 
 KT3_PEAK_BEATS = {
     "HOOK", "VICTORY", "CLIMAX", "RESOLUTION",
@@ -100,6 +139,8 @@ def _build_kt3_prompt(
     slot: Slot,
     source_ip_hint: Optional[str],
     previous_texts: List[str],
+    section_mood: Optional[str] = None,
+    narrative_role: Optional[str] = None,
 ) -> str:
     """Build the arc-beat-aware KT3 prompt."""
     beat_context = ""
@@ -112,22 +153,28 @@ def _build_kt3_prompt(
 
     emotion_target = slot.arc_beat_emotion_target or "intense"
     archetype_hint = f"- Archetype / IP: {source_ip_hint or 'generic'}\n"
+    mood_hint = f"- Section mood: {section_mood or 'unknown'}\n"
+    role_hint = ""
+    if narrative_role:
+        role_hint = f"- Narrative role of this section: {narrative_role}\n"
 
     return (
         "You compose short on-screen text for music-video moments.\n\n"
         "Rules:\n"
         "- 1 to 4 words, UPPERCASE\n"
         "- The text must name the moment, not decorate it. Avoid generic hype words like EPIC, AWESOME, WOW.\n"
-        "- Match the required emotion of the narrative beat.\n"
+        "- Match the required emotion of the narrative beat and section mood.\n"
         "- Avoid IP-specific named characters or places.\n\n"
         "Respond ONLY with this exact JSON format (no markdown fences, no explanation):\n"
         '{"text": "YOUR WORDS", "style_preset": "anime_impact", "rationale": "one sentence"}\n\n'
         "Pick style_preset from: anime_impact, cinematic_serif, trailer_block, "
-        "lowercase_intimate, neon_glitch, stamp_white, handwritten_pen.\n\n"
+        "lowercase_intimate, neon_glitch, stamp_white, handwritten_pen, shake_emphasis.\n\n"
         f"Context:\n"
         f"- Section: {slot.section}\n"
         f"- Energy: {slot.energy_level:.2f} (0.0 calm — 1.0 climax)\n"
         f"- Required emotion: {emotion_target}\n"
+        f"{mood_hint}"
+        f"{role_hint}"
         f"{beat_context}"
         f"{archetype_hint}"
         f"- Previous texts (avoid repeating): {', '.join(previous_texts[-5:]) or 'none'}"
@@ -171,12 +218,14 @@ def _compose_kt3_with_llm(
     slot: Slot,
     source_ip_hint: Optional[str],
     previous_texts: List[str],
+    section_mood: Optional[str] = None,
+    narrative_role: Optional[str] = None,
 ) -> Optional[KineticText]:
     """Ask the local LLM to compose an arc-beat-aware cinematic phrase.
 
     Returns ``None`` if the LLM fails or returns invalid JSON after one retry.
     """
-    prompt = _build_kt3_prompt(slot, source_ip_hint, previous_texts)
+    prompt = _build_kt3_prompt(slot, source_ip_hint, previous_texts, section_mood=section_mood, narrative_role=narrative_role)
     client = LLMClient(local_model="gemma4:12b")
 
     for attempt in range(2):
@@ -218,23 +267,34 @@ def compose_kinetic_text_for_slot(
     previous_texts: Optional[List[str]] = None,
     iconic_text: Optional[str] = None,
     use_llm: bool = True,
+    song_meaning: Optional[SongMeaning] = None,
+    lyrics: Optional[List[WordTiming]] = None,
 ) -> Optional[KineticText]:
     """Compose a single kinetic text moment for ``slot``.
 
-    Prefers KT2 (iconic quote) when available, otherwise KT3 for peak beats.
+    Prefers KT2 (iconic quote) when available, otherwise KT1 lyric stamps or
+    KT3 for peak narrative beats.
     Returns ``None`` when no text should appear on this slot or the LLM fails.
     """
     previous_texts = previous_texts or []
+    section_mood = section_mood_for_slot(slot, song_meaning)
+    narrative_role = None
+    if song_meaning and song_meaning.narrative:
+        for section in song_meaning.narrative:
+            if section.start_s <= slot.start_s < section.end_s:
+                narrative_role = section.role
+                break
 
     # KT2 — iconic dialogue line surfaced by iconic_quotes.
     if iconic_text:
         text = iconic_text.strip().upper()
         if text and text not in previous_texts:
-            style = _style_for_preset("trailer_block", 0.8)
+            preset = _style_preset_for_context(section_mood, slot.energy_level)
+            style = _style_for_preset(preset, slot.energy_level)
             return KineticText(
                 text=text,
                 tier="KT2",
-                style_preset="trailer_block",
+                style_preset=preset,
                 color_hex=style["color"],
                 outline=style["outline"],
                 size_pct=style["size_pct"],
@@ -242,10 +302,27 @@ def compose_kinetic_text_for_slot(
                 rationale="iconic_quote_surface",
             )
 
-    # KT3 — generated phrase for peak narrative beats.
+    # KT1 — lyric stamp from Whisper word timings when lyrics align with a peak.
     story_beat = getattr(slot, "story_beat", None)
     is_peak = story_beat in KT3_PEAK_BEATS
     is_high_energy = slot.energy_level >= 0.75 and slot.section in ("chorus", "drop", "bridge")
+    if lyrics and (is_peak or is_high_energy):
+        stamp = _lyric_stamp_for_slot(slot, lyrics)
+        if stamp and stamp not in previous_texts:
+            preset = _style_preset_for_context(section_mood, slot.energy_level)
+            style = _style_for_preset(preset, slot.energy_level)
+            return KineticText(
+                text=stamp,
+                tier="KT1",
+                style_preset=preset,
+                color_hex=style["color"],
+                outline=style["outline"],
+                size_pct=style["size_pct"],
+                animation=style["animation"],
+                rationale="lyric_stamp",
+            )
+
+    # KT3 — generated phrase for peak narrative beats.
     if not (is_peak or is_high_energy):
         return None
 
@@ -254,7 +331,7 @@ def compose_kinetic_text_for_slot(
         logger.info("kinetic_text_skipped", slot_index=slot.index, fallback_reason="llm_disabled")
         return None
 
-    return _compose_kt3_with_llm(slot, source_ip_hint, previous_texts)
+    return _compose_kt3_with_llm(slot, source_ip_hint, previous_texts, section_mood=section_mood, narrative_role=narrative_role)
 
 
 def assign_kinetic_text_to_slots(
@@ -265,6 +342,8 @@ def assign_kinetic_text_to_slots(
     iconic_texts: Optional[Dict[str, str]] = None,
     rankings: Optional[Dict[int, List[ClipScore]]] = None,
     clip_paths: Optional[Dict[str, str]] = None,
+    song_meaning: Optional[SongMeaning] = None,
+    lyrics: Optional[List[WordTiming]] = None,
 ) -> List[Slot]:
     """Assign kinetic text to a subset of slots, respecting density caps.
 
@@ -303,6 +382,8 @@ def assign_kinetic_text_to_slots(
                 previous_texts=previous_texts,
                 iconic_text=iconic_text,
                 use_llm=use_llm,
+                song_meaning=song_meaning,
+                lyrics=lyrics,
             )
             if kt is None:
                 if slot.story_beat and not slot.enable_kinetic_text:

@@ -878,7 +878,14 @@ def _build_ass_for_overlay(
             next_start = words[i + 1].start_s if i + 1 < len(words) else overlay.end_s
             duration_s = max(0.0, next_start - word.start_s)
             cs = max(1, int(round(duration_s * 100)))
-            line_text_parts.append(f"{{\\k{cs}}}{_ass_escape(word.text)}")
+            emphasis_open = ""
+            emphasis_close = ""
+            if getattr(word, "is_emphasis", False):
+                emphasis_open = "{\\fscx130\\fscy130}"
+                emphasis_close = "{\\fscx100\\fscy100}"
+            line_text_parts.append(
+                f"{emphasis_open}{{\\k{cs}}}{_ass_escape(word.text)}{emphasis_close}"
+            )
         line_text = " ".join(line_text_parts)
     elif animation == "karaoke_reveal" and words:
         # Stylized karaoke: ghost line with active words scaling up and swapping
@@ -893,9 +900,10 @@ def _build_ass_for_overlay(
             t1 = max(0, int(round(word.start_s * 1000)) - base_ms)
             t2 = max(t1 + 30, int(round(word.end_s * 1000)) - base_ms)
             t3 = min(t2 + 80, end_ms)
+            active_scale = 150 if getattr(word, "is_emphasis", False) else 120
             tags = (
                 f"{{\\alpha&H{ghost_alpha}&\\c{ghost_color}"
-                f"\\t({t1},{t2},\\alpha&H00&\\c{active_color}\\fscx120\\fscy120)"
+                f"\\t({t1},{t2},\\alpha&H00&\\c{active_color}\\fscx{active_scale}\\fscy{active_scale})"
                 f"\\t({t2},{t3},\\alpha&H{ghost_alpha}&\\c{ghost_color}\\fscx100\\fscy100)}}"
             )
             line_text_parts.append(tags + _ass_escape(word.text))

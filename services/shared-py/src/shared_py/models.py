@@ -397,6 +397,7 @@ class WordTiming(BaseModelCamel):
     text: str
     start_s: float
     end_s: float
+    is_emphasis: bool = False
 
 
 class Overlay(BaseModelCamel):
@@ -411,6 +412,7 @@ class Overlay(BaseModelCamel):
     animation: str = "none"
     highlight_color: Optional[str] = None
     words: Optional[List[WordTiming]] = None
+    emphasis_words: List[str] = Field(default_factory=list)
 
 
 class Subtitle(BaseModelCamel):

@@ -23,6 +23,7 @@ from shared_py.logging_config import StructuredLogger
 from shared_py.models import CutList, Overlay, WordTiming
 
 from reason_worker.audio_scoring import DialogueSegment
+from reason_worker.emphasis_text import mark_emphasis_in_words
 from reason_worker.font_select import select_font_for_mood
 
 logger = StructuredLogger("reason_worker.captions")
@@ -253,13 +254,20 @@ def generate_caption_overlays_from_segments(
         overlays: List[Overlay] = []
         slot_energy = slot_energy or {}
         for phrase in filtered_phrases:
-            words = [
-                WordTiming(text=w.text, start_s=w.start_s, end_s=w.end_s)
-                for w in (phrase.words or [])
-            ]
+            raw_words = phrase.words or []
+            phrase_energy = slot_energy.get(phrase.slot_index, energy)
+            # Wave 9: mark the most important words in the phrase for visual pop.
+            words = mark_emphasis_in_words(
+                [
+                    WordTiming(text=w.text, start_s=w.start_s, end_s=w.end_s)
+                    for w in raw_words
+                ],
+                energy=phrase_energy,
+                max_emphasis=3,
+            )
+            emphasis_words = [w.text.upper() for w in words if w.is_emphasis]
             # Wave 8: use the stylized karaoke reveal on high-energy phrases that
             # have more than one word. Fall back to plain word-by-word elsewhere.
-            phrase_energy = slot_energy.get(phrase.slot_index, energy)
             animation = style_cfg["animation"]
             if phrase_energy >= 0.75 and len(words) > 1:
                 animation = "karaoke_reveal"
@@ -276,6 +284,7 @@ def generate_caption_overlays_from_segments(
                     animation=animation,
                     highlight_color=style_cfg["highlight_color"],
                     words=words or None,
+                    emphasis_words=emphasis_words,
                 )
             )
 

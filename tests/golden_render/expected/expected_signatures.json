@@ -30,5 +30,6 @@
   "text_animations_used": { "min": 4, "required": false },
   "karaoke_reveal_present": { "min": 1, "required": false },
   "font_smoke_pass": { "required": false },
-  "no_word_bank_calls": { "required": false }
+  "no_word_bank_calls": { "required": false },
+  "emphasis_words_present": { "min": 3, "required": false }
 }
