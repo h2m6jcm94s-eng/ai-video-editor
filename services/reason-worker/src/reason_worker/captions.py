@@ -190,6 +190,7 @@ def generate_caption_overlays_from_segments(
     clip_paths: Optional[Dict[str, str]] = None,
     mood: Optional[str] = None,
     energy: float = 0.5,
+    slot_energy: Optional[Dict[int, float]] = None,
 ) -> List[Overlay]:
     """Generate caption Overlay objects from per-slot dialogue segments.
 
@@ -250,11 +251,18 @@ def generate_caption_overlays_from_segments(
         style_cfg = DEFAULT_CAPTION_STYLE
         font = select_font_for_mood(mood, energy)
         overlays: List[Overlay] = []
+        slot_energy = slot_energy or {}
         for phrase in filtered_phrases:
             words = [
                 WordTiming(text=w.text, start_s=w.start_s, end_s=w.end_s)
                 for w in (phrase.words or [])
             ]
+            # Wave 8: use the stylized karaoke reveal on high-energy phrases that
+            # have more than one word. Fall back to plain word-by-word elsewhere.
+            phrase_energy = slot_energy.get(phrase.slot_index, energy)
+            animation = style_cfg["animation"]
+            if phrase_energy >= 0.75 and len(words) > 1:
+                animation = "karaoke_reveal"
             overlays.append(
                 Overlay(
                     text=phrase.text.upper(),
@@ -265,7 +273,7 @@ def generate_caption_overlays_from_segments(
                     font_size_px=style_cfg["font_size_px"],
                     color=style_cfg["color"],
                     stroke=style_cfg["stroke"],
-                    animation=style_cfg["animation"],
+                    animation=animation,
                     highlight_color=style_cfg["highlight_color"],
                     words=words or None,
                 )

@@ -26,5 +26,9 @@
   "kinetic_text_scene_relevance": { "min": 0.75, "required": false },
   "transition_variety": { "min": 4, "required": true },
   "match_cuts_present": { "min": 1, "required": true },
-  "no_xfade_fallback_hardcut": { "max": 0.1, "required": true }
+  "no_xfade_fallback_hardcut": { "max": 0.1, "required": true },
+  "text_animations_used": { "min": 4, "required": false },
+  "karaoke_reveal_present": { "min": 1, "required": false },
+  "font_smoke_pass": { "required": false },
+  "no_word_bank_calls": { "required": false }
 }

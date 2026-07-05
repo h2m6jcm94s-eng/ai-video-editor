@@ -28,10 +28,19 @@ def _load_expected() -> Dict[str, Any]:
 def _run_suite(
     feature_emotion_led_cuts: bool = False,
     skip_render: bool = False,
+    feature_wave_8: bool = False,
+    feature_wave_9: bool = False,
+    feature_wave_10: bool = False,
 ) -> Dict[str, Any]:
     cmd = [sys.executable, str(SUITE), "--json"]
     if feature_emotion_led_cuts:
         cmd.append("--feature-emotion-led-cuts")
+    if feature_wave_8:
+        cmd.append("--feature-wave-8")
+    if feature_wave_9:
+        cmd.append("--feature-wave-9")
+    if feature_wave_10:
+        cmd.append("--feature-wave-10")
     if skip_render:
         cmd.append("--skip-render")
     env = os.environ.copy()
@@ -110,12 +119,33 @@ def main(argv: List[str] | None = None) -> int:
         action="store_true",
         help="Reuse the existing output from a previous run.",
     )
+    parser.add_argument(
+        "--feature-wave-8",
+        action="store_true",
+        help="Apply Wave 8 criteria.",
+    )
+    parser.add_argument(
+        "--feature-wave-9",
+        action="store_true",
+        help="Apply Wave 9 criteria.",
+    )
+    parser.add_argument(
+        "--feature-wave-10",
+        action="store_true",
+        help="Apply Wave 10 criteria.",
+    )
     args = parser.parse_args(argv)
 
     expected = _load_expected()
     suite_cmd = [sys.executable, str(SUITE), "--json"]
     if args.feature_emotion_led_cuts:
         suite_cmd.append("--feature-emotion-led-cuts")
+    if args.feature_wave_8:
+        suite_cmd.append("--feature-wave-8")
+    if args.feature_wave_9:
+        suite_cmd.append("--feature-wave-9")
+    if args.feature_wave_10:
+        suite_cmd.append("--feature-wave-10")
     if args.skip_render:
         suite_cmd.append("--skip-render")
 
@@ -123,6 +153,9 @@ def main(argv: List[str] | None = None) -> int:
     data = _run_suite(
         feature_emotion_led_cuts=args.feature_emotion_led_cuts,
         skip_render=args.skip_render,
+        feature_wave_8=args.feature_wave_8,
+        feature_wave_9=args.feature_wave_9,
+        feature_wave_10=args.feature_wave_10,
     )
 
     criteria = {c["name"]: c for c in data.get("criteria", [])}

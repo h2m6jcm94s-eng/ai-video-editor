@@ -27,6 +27,11 @@ from render_worker.compiler import (
     _build_audio_filter_v2,
     _video_encode_args,
     _segment_video_args,
+    _BUNDLED_FONT_DIR,
+    _FONT_FILES,
+    _FONT_NAME_ALIASES,
+    _STYLE_PRESET_FONTS,
+    _find_font,
 )
 from shared_py.models import CutList, CutListGlobals, Slot, Overlay, RenderConfig, Effect, Subtitle, AudioTrack, WordTiming
 
@@ -65,6 +70,31 @@ class TestFontconfig:
         existing = "/path/to/existing/fonts.conf"
         monkeypatch.setenv("FONTCONFIG_FILE", existing)
         assert _get_fontconfig_file() == existing
+
+
+class TestBundledFonts:
+    def test_all_registered_font_files_exist(self):
+        for family, filename in _FONT_FILES.items():
+            path = os.path.join(_BUNDLED_FONT_DIR, filename)
+            assert os.path.exists(path), f"bundled font missing: {family} ({filename})"
+
+    def test_style_preset_fonts_resolve_to_bundled_files(self):
+        for preset, families in _STYLE_PRESET_FONTS.items():
+            for family in families:
+                assert family in _FONT_FILES, f"preset {preset} references unknown font {family}"
+                path = os.path.join(_BUNDLED_FONT_DIR, _FONT_FILES[family])
+                assert os.path.exists(path), f"preset {preset} font missing: {family}"
+
+    def test_font_aliases_resolve_to_bundled_files(self):
+        for alias, target in _FONT_NAME_ALIASES.items():
+            assert target in _FONT_FILES, f"alias {alias} points to unknown font {target}"
+            path = os.path.join(_BUNDLED_FONT_DIR, _FONT_FILES[target])
+            assert os.path.exists(path), f"alias {alias} target font missing: {target}"
+
+    def test_find_font_returns_bundled_path_for_preset(self):
+        for preset in _STYLE_PRESET_FONTS:
+            path = _find_font(preset)
+            assert path and os.path.exists(path), f"_find_font returned nothing for preset {preset}"
 
 
 class TestXfadeMap:

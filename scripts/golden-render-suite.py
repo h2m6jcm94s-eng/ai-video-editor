@@ -955,6 +955,85 @@ def _check_kinetic_text_scene_relevance(cutlist: CutList, result: SuiteResult) -
     )
 
 
+def _check_text_animations_used(cutlist: CutList, result: SuiteResult) -> None:
+    animations = set()
+    for slot in cutlist.slots:
+        if getattr(slot, "kinetic_text_animation", None):
+            animations.add(slot.kinetic_text_animation)
+    for overlay in cutlist.overlays:
+        if getattr(overlay, "animation", None):
+            animations.add(overlay.animation)
+    passed = len(animations) >= 4
+    result.add(
+        Criterion(
+            "text_animations_used",
+            passed,
+            value=len(animations),
+            threshold=4,
+            detail=f"distinct_animations={sorted(animations)}",
+        )
+    )
+
+
+def _check_karaoke_reveal_present(cutlist: CutList, result: SuiteResult) -> None:
+    count = sum(
+        1 for o in cutlist.overlays if getattr(o, "animation", "") == "karaoke_reveal"
+    )
+    passed = count >= 1
+    result.add(
+        Criterion(
+            "karaoke_reveal_present",
+            passed,
+            value=count,
+            threshold=1,
+            detail=f"karaoke_reveal_overlays={count}",
+        )
+    )
+
+
+def _check_font_smoke_pass(result: SuiteResult) -> None:
+    script = REPO_ROOT / "scripts" / "font_smoke_test.py"
+    passed = False
+    detail = "font_smoke_test not run"
+    if script.exists():
+        try:
+            r = subprocess.run(
+                [sys.executable, str(script)],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            passed = r.returncode == 0
+            detail = f"exit={r.returncode}"
+        except Exception as exc:
+            detail = f"error={exc}"
+    result.add(
+        Criterion(
+            "font_smoke_pass",
+            passed,
+            value=passed,
+            detail=detail,
+        )
+    )
+
+
+def _check_no_word_bank_calls(log: str, result: SuiteResult) -> None:
+    count = sum(
+        1 for line in log.splitlines()
+        if re.search(r"WORD_BANKS?", line)
+    )
+    passed = count == 0
+    result.add(
+        Criterion(
+            "no_word_bank_calls",
+            passed,
+            value=count,
+            threshold=0,
+            detail=f"word_bank_refs={count}",
+        )
+    )
+
+
 def run_suite(args: argparse.Namespace) -> SuiteResult:
     _run_render(args)
     log = _load_render_log()
@@ -1004,6 +1083,17 @@ def run_suite(args: argparse.Namespace) -> SuiteResult:
         _check_match_cuts_present(cutlist, result)
         _check_no_xfade_fallback_hardcut(log, cutlist, result)
 
+    if args.feature_wave_8:
+        _check_text_animations_used(cutlist, result)
+        _check_karaoke_reveal_present(cutlist, result)
+        _check_font_smoke_pass(result)
+
+    if args.feature_wave_9:
+        _check_no_word_bank_calls(log, result)
+
+    if args.feature_wave_10:
+        pass  # criteria added in Phase 3
+
     return result
 
 
@@ -1023,6 +1113,21 @@ def main() -> int:
         "--feature-emotion-led-cuts",
         action="store_true",
         help="Run the narrative/emotion-led cut path and apply Phase 2 criteria.",
+    )
+    parser.add_argument(
+        "--feature-wave-8",
+        action="store_true",
+        help="Apply Wave 8 criteria (fonts, kinetic animations, karaoke reveal).",
+    )
+    parser.add_argument(
+        "--feature-wave-9",
+        action="store_true",
+        help="Apply Wave 9 criteria (emphasis words, no word banks).",
+    )
+    parser.add_argument(
+        "--feature-wave-10",
+        action="store_true",
+        help="Apply Wave 10 criteria (dedicated effect modules).",
     )
     args = parser.parse_args()
 

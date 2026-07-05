@@ -379,6 +379,7 @@ class Slot(BaseModelCamel):
     kinetic_text: Optional[str] = None
     kinetic_text_style: Optional[str] = None
     kinetic_text_color: Optional[str] = None
+    kinetic_text_animation: Optional[str] = None
     effects: List[Effect] = Field(default_factory=list)
     source_window_start_s: Optional[float] = None
     anticipation_offset_s: float = 0.0

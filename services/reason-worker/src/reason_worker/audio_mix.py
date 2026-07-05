@@ -597,6 +597,7 @@ def _build_audio_tracks(
             if slot.index in slot_indices
         ]
         avg_energy = sum(energies) / max(1, len(energies))
+        slot_energy = {slot.index: slot.energy_level for slot in cutlist.slots}
         mood = song_meaning.mood if song_meaning is not None else None
         caption_overlays = generate_caption_overlays_from_segments(
             slot_dialogue_segments,
@@ -604,6 +605,7 @@ def _build_audio_tracks(
             clip_paths=clip_paths,
             mood=mood,
             energy=avg_energy,
+            slot_energy=slot_energy,
         )
         if caption_overlays:
             cutlist.overlays = list(cutlist.overlays or []) + caption_overlays

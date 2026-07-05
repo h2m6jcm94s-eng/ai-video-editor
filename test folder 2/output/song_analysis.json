@@ -1,0 +1,15 @@
+{
+  "lyric_word_count": 528,
+  "stems_present": {
+    "drums": true,
+    "bass": true,
+    "vocals": true,
+    "other": true
+  },
+  "stems_paths": {
+    "drums": "E:\\ai-video-editor-storage\\stems\\87fe772bb658cdafe60e1f5ac082d66f\\drums.wav",
+    "bass": "E:\\ai-video-editor-storage\\stems\\87fe772bb658cdafe60e1f5ac082d66f\\bass.wav",
+    "vocals": "E:\\ai-video-editor-storage\\stems\\87fe772bb658cdafe60e1f5ac082d66f\\vocals.wav",
+    "other": "E:\\ai-video-editor-storage\\stems\\87fe772bb658cdafe60e1f5ac082d66f\\other.wav"
+  }
+}

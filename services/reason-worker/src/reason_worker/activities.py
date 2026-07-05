@@ -415,6 +415,7 @@ async def rank_clips_activity(
             use_llm=True,
             max_text_count=max(3, int(0.1 * len(cutlist.slots))),
             rankings=rankings,
+            clip_paths=clip_paths or None,
         )
         for slot in cutlist.slots:
             if slot.enable_kinetic_text:

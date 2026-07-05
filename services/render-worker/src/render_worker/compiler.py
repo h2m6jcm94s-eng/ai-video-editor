@@ -16,6 +16,7 @@ from shared_py.models import CutList, Slot, RenderConfig, AudioTrack, Overlay, W
 from shared_py.tuning import COMPILER
 from shared_py.logging_config import StructuredLogger
 from render_worker.edits.flash_frame import flash_frame_filter
+from render_worker.kinetic_animations import default_for_style, preset as _kinetic_preset
 from render_worker.reframe import reframe_filter
 from render_worker.stabilize import stabilization_filter
 
@@ -66,6 +67,7 @@ _STYLE_PRESET_FONTS = {
     "lowercase_intimate": ["Playfair Display", "Cinzel"],
     "neon_glitch": ["Rajdhani", "Teko", "League Spartan"],
     "handwritten_pen": ["League Spartan", "Rajdhani"],
+    "shake_emphasis": ["Anton", "Bebas Neue", "Russo One"],
 }
 
 # Map common Overlay.font names to bundled families.
@@ -877,6 +879,26 @@ def _build_ass_for_overlay(
             duration_s = max(0.0, next_start - word.start_s)
             cs = max(1, int(round(duration_s * 100)))
             line_text_parts.append(f"{{\\k{cs}}}{_ass_escape(word.text)}")
+        line_text = " ".join(line_text_parts)
+    elif animation == "karaoke_reveal" and words:
+        # Stylized karaoke: ghost line with active words scaling up and swapping
+        # to the highlight colour during their timing window.
+        line_text_parts = []
+        base_ms = int(round(overlay.start_s * 1000))
+        end_ms = int(round(overlay.end_s * 1000))
+        ghost_alpha = "99"
+        active_color = _ass_color(overlay.highlight_color or overlay.color or "#FFFFFF")
+        ghost_color = _ass_color(overlay.color or "#FFFFFF")
+        for word in words:
+            t1 = max(0, int(round(word.start_s * 1000)) - base_ms)
+            t2 = max(t1 + 30, int(round(word.end_s * 1000)) - base_ms)
+            t3 = min(t2 + 80, end_ms)
+            tags = (
+                f"{{\\alpha&H{ghost_alpha}&\\c{ghost_color}"
+                f"\\t({t1},{t2},\\alpha&H00&\\c{active_color}\\fscx120\\fscy120)"
+                f"\\t({t2},{t3},\\alpha&H{ghost_alpha}&\\c{ghost_color}\\fscx100\\fscy100)}}"
+            )
+            line_text_parts.append(tags + _ass_escape(word.text))
         line_text = " ".join(line_text_parts)
     elif animation == "typewriter":
         # Per-character reveal over the overlay duration.
@@ -1791,15 +1813,9 @@ def _extract_segment(args) -> Optional[dict]:
         elif kinetic_overlays is not None:
             color = getattr(slot, "kinetic_text_color", None) or "#FFFFFF"
             style = getattr(slot, "kinetic_text_style", None) or "anime_impact"
-            animation = "pop"
-            if style in ("anime_impact", "stamp_white"):
-                animation = "scale"
-            elif style in ("neon_glitch",):
-                animation = "glitch"
-            elif style in ("cinematic_serif", "lowercase_intimate"):
-                animation = "fade"
-            elif style in ("trailer_block", "handwritten_pen"):
-                animation = "typewriter"
+            animation = getattr(slot, "kinetic_text_animation", None)
+            if not animation:
+                animation = default_for_style(style, energy=float(getattr(slot, "energy_level", 0.5) or 0.5))
             kinetic_overlays.append(Overlay(
                 text=slot.kinetic_text,
                 start_s=slot.start_s,
@@ -1880,6 +1896,14 @@ def _render_layered_text(
     style = getattr(slot, "kinetic_text_style", None) or "anime_impact"
     fontfile = font_map.get(style, font_map.get("", ""))
     color = getattr(slot, "kinetic_text_color", None) or "#FFFFFF"
+
+    # Prefer the animation chosen by the reason worker, but keep the default
+    # behind-subject animation if the selected one jumps too much.
+    chosen = getattr(slot, "kinetic_text_animation", None)
+    if chosen:
+        p = _kinetic_preset(chosen)
+        if p and p.safe_behind_subject:
+            animation = chosen
     text_filter = _drawtext_filter(
         text=slot.kinetic_text or "",
         start_s=0.0,
@@ -2119,7 +2143,7 @@ def _build_overlay_filter_parts(
         relative_font = font_map.get(overlay.font or "")
         animation = (overlay.animation or "none").lower()
         use_ass = (
-            animation in ("word_by_word", "typewriter")
+            animation in ("word_by_word", "typewriter", "karaoke_reveal")
             or overlay.words
         )
 

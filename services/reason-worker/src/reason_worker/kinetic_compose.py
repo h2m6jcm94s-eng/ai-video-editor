@@ -27,6 +27,9 @@ from shared_py.llm_client import LLMClient, LLMTask
 from shared_py.logging_config import StructuredLogger
 from shared_py.models import Slot, ClipScore
 
+from reason_worker.animation_select import choose_kinetic_animation
+from reason_worker.face_safe import face_region_in_window
+
 logger = StructuredLogger("reason_worker.kinetic_compose")
 
 # Style presets mapped to a simple visual bundle.
@@ -261,6 +264,7 @@ def assign_kinetic_text_to_slots(
     max_text_count: Optional[int] = None,
     iconic_texts: Optional[Dict[str, str]] = None,
     rankings: Optional[Dict[int, List[ClipScore]]] = None,
+    clip_paths: Optional[Dict[str, str]] = None,
 ) -> List[Slot]:
     """Assign kinetic text to a subset of slots, respecting density caps.
 
@@ -305,10 +309,23 @@ def assign_kinetic_text_to_slots(
                     failed_count += 1
                 continue
 
+            # Wave 8: pick a context-aware animation for the style and placement.
+            face_present = False
+            if clip_paths and slot.selected_clip_id:
+                clip_path = clip_paths.get(slot.selected_clip_id)
+                if clip_path:
+                    window_start = slot.source_window_start_s or 0.0
+                    window_end = window_start + max(0.1, slot.duration_s)
+                    region = face_region_in_window(clip_path, window_start, window_end)
+                    face_present = region["area_ratio"] >= 0.02
+
+            animation = choose_kinetic_animation(slot, kt.style_preset, face_present=face_present)
+            kt.animation = animation
             slot.kinetic_text = kt.text
             slot.enable_kinetic_text = True
             slot.kinetic_text_style = kt.style_preset  # type: ignore[attr-defined]
             slot.kinetic_text_color = kt.color_hex  # type: ignore[attr-defined]
+            slot.kinetic_text_animation = animation  # type: ignore[attr-defined]
             previous_texts.append(kt.text)
             last_text_index = slot.index
             produced_tiers.append(kt.tier)

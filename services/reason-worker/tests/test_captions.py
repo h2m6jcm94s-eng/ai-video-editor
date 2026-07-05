@@ -104,3 +104,23 @@ def test_generate_caption_overlays_mood_aware_font():
 
 def test_generate_caption_overlays_empty_segments():
     assert generate_caption_overlays_from_segments([]) == []
+
+
+def test_high_energy_phrase_uses_karaoke_reveal():
+    segments = [
+        DialogueSegment(
+            start_s=0.0,
+            end_s=1.0,
+            text="hello world",
+            words=[
+                WordTimestamp("hello", 0.0, 0.4),
+                WordTimestamp("world", 0.5, 0.9),
+            ],
+        )
+    ]
+    overlays = generate_caption_overlays_from_segments(
+        [(0, "clip_0", 0.0, 10.0, segments)],
+        slot_energy={0: 0.9},
+    )
+    assert len(overlays) == 1
+    assert overlays[0].animation == "karaoke_reveal"
