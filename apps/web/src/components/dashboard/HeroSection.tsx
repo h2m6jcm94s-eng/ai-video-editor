@@ -6,27 +6,28 @@ import { motion } from "framer-motion";
 
 export function HeroSection({ projectCount }: { projectCount: number }) {
   return (
-    <section className="relative py-10 sm:py-14">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, ease: "easeOut" }}
-        className="max-w-3xl"
-      >
-        <h1 className="text-4xl sm:text-5xl font-bold tracking-tight">
-          <span className="text-gradient">Create videos</span>
-          <span className="text-white"> that feel like magic.</span>
-        </h1>
-        <p className="mt-4 text-lg text-glass-subtle leading-relaxed max-w-2xl">
-          Upload a reference, drop your clips, pick a song, and let AI match the style, cuts, and energy —
-          automatically.
+    <motion.section
+      initial={{ opacity: 0, y: 18 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.6, ease: "easeOut" }}
+      className="dash-hero"
+    >
+      <span className="dash-eyebrow">
+        <span className="dot" />
+        Reference-driven editing
+      </span>
+      <h1>
+        Create videos <em>that feel like magic.</em>
+      </h1>
+      <p>
+        Upload a reference, drop your clips, pick a song, and let AI match the style, cuts, and energy —
+        automatically.
+      </p>
+      {projectCount > 0 && (
+        <p className="note">
+          You have <b>{projectCount}</b> project{projectCount === 1 ? "" : "s"} ready to edit.
         </p>
-        {projectCount > 0 && (
-          <p className="mt-3 text-sm text-glass-faint">
-            You have {projectCount} project{projectCount === 1 ? "" : "s"} ready to edit.
-          </p>
-        )}
-      </motion.div>
-    </section>
+      )}
+    </motion.section>
   );
 }

@@ -4,7 +4,6 @@
 
 import { Check, CreditCard, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
 import { useApi } from "@/lib/api/client";
 import type { Invoice, Subscription } from "@/types/api";
 
@@ -44,67 +43,78 @@ export default function BillingPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-48">
-        <Loader2 className="w-5 h-5 animate-spin text-zinc-500" />
+      <div style={{ display: "flex", justifyContent: "center", padding: "48px 0" }}>
+        <Loader2 className="dash-spin" style={{ width: 20, height: 20, color: "var(--fg-muted)" }} />
       </div>
     );
   }
 
+  const active = subscription?.status === "active";
+
   return (
-    <div className="space-y-8">
-      <div>
-        <h2 className="text-xl font-semibold text-white">Billing</h2>
-        <p className="text-sm text-zinc-500 mt-1">Manage your plan and payment history.</p>
+    <div className="dash-panel">
+      <div className="dash-panel-head">
+        <h2>
+          Billing<em>.</em>
+        </h2>
+        <p>Manage your plan and payment history.</p>
       </div>
 
-      <div className="glass-card p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-              <CreditCard className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <p className="text-sm text-zinc-400">Current plan</p>
-              <p className="text-2xl font-bold text-white capitalize">{subscription?.plan || "Free"}</p>
-              <p className="text-xs text-zinc-500">
-                {subscription?.status === "active"
-                  ? `Renews on ${new Date(subscription?.currentPeriodEnd || Date.now()).toLocaleDateString()}`
-                  : "No active subscription"}
-              </p>
-            </div>
+      <div className="dash-card dash-sub">
+        <div className="dash-sub-left">
+          <span className="dash-sub-icon">
+            <CreditCard />
+          </span>
+          <div>
+            <p className="dash-sub-k">Current plan</p>
+            <p className="dash-sub-plan">{subscription?.plan || "Free"}</p>
+            <p className="dash-sub-desc">
+              {active
+                ? `Renews on ${new Date(subscription?.currentPeriodEnd || 0).toLocaleDateString()}`
+                : "No active subscription"}
+            </p>
           </div>
-          <Button onClick={handleManage} disabled={redirecting} className="shrink-0">
-            {redirecting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Manage billing"}
-          </Button>
         </div>
+        <button
+          type="button"
+          onClick={handleManage}
+          disabled={redirecting}
+          className="dash-btn dash-btn--primary"
+        >
+          {redirecting ? <Loader2 className="dash-spin" /> : "Manage billing"}
+        </button>
+      </div>
 
-        {subscription && (
-          <div className="mt-6 pt-6 border-t border-zinc-800 grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {subscription && subscription.features.length > 0 && (
+        <div className="dash-card" style={{ padding: "20px 22px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
             {subscription.features.map((feature) => (
-              <div key={feature} className="flex items-center gap-2 text-sm text-zinc-300">
-                <Check className="w-4 h-4 text-emerald-400" />
+              <span key={feature} className="dash-feature">
+                <Check />
                 {feature}
-              </div>
+              </span>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      <div className="glass-card p-6">
-        <h3 className="text-sm font-medium text-white mb-4">Invoice history</h3>
+      <div>
+        <p className="dash-sub-k" style={{ marginBottom: 12 }}>
+          Invoice history
+        </p>
         {invoices.length === 0 ? (
-          <p className="text-sm text-zinc-500">No invoices yet.</p>
+          <p className="dash-plan-desc">No invoices yet.</p>
         ) : (
-          <div className="divide-y divide-zinc-800">
+          <div className="dash-list">
             {invoices.map((invoice) => (
-              <div key={invoice.id} className="py-3 flex items-center justify-between text-sm">
-                <div>
-                  <p className="text-zinc-300">{new Date(invoice.createdAt).toLocaleDateString()}</p>
-                  <p className="text-xs text-zinc-500 uppercase">{invoice.status}</p>
-                </div>
-                <p className="font-medium text-white">
+              <div key={invoice.id} className="dash-list-row">
+                <span className="k">
+                  {new Date(invoice.createdAt).toLocaleDateString()}
+                  <span className="status">{invoice.status}</span>
+                </span>
+                <span className="v">
                   ${(invoice.amount / 100).toFixed(2)} {invoice.currency.toUpperCase()}
-                </p>
+                </span>
               </div>
             ))}
           </div>

@@ -2,8 +2,9 @@
 // Licensed under the Elastic License 2.0 — see LICENSE in the repo root.
 export const dynamic = "force-dynamic";
 
+import { AlertTriangle } from "lucide-react";
 import { redirect } from "next/navigation";
-import { DashboardHeader } from "@/components/dashboard/DashboardHeader";
+import { AppShell } from "@/components/dashboard/AppShell";
 import { HeroSection } from "@/components/dashboard/HeroSection";
 import { ProjectList } from "@/components/dashboard/ProjectList";
 import { StatsSection } from "@/components/dashboard/StatsSection";
@@ -26,25 +27,20 @@ export default async function DashboardPage() {
   }
 
   return (
-    <main className="min-h-screen text-foreground">
-      <DashboardHeader />
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16">
-        {loadError && (
-          <div className="mt-6 rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-red-200">
-            <p className="font-medium">Failed to load projects</p>
-            <p className="text-sm opacity-90">Please refresh the page or try again later.</p>
+    <AppShell section="Overview">
+      {loadError && (
+        <div className="dash-error" role="alert">
+          <AlertTriangle />
+          <div>
+            <p className="t">Failed to load projects</p>
+            <p className="d">Please refresh the page or try again later.</p>
           </div>
-        )}
-        <HeroSection projectCount={projects.length} />
-        <div className="mt-6">
-          <SubscriptionCard />
         </div>
-        <StatsSection projects={projects} />
-        <div className="mt-10">
-          <ProjectList projects={projects} />
-        </div>
-      </div>
-    </main>
+      )}
+      <HeroSection projectCount={projects.length} />
+      <SubscriptionCard />
+      <StatsSection projects={projects} />
+      <ProjectList projects={projects} />
+    </AppShell>
   );
 }

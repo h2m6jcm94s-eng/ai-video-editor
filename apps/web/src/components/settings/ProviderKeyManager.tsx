@@ -7,8 +7,6 @@ import { useCallback, useState } from "react";
 import { type SubmitHandler, useForm } from "react-hook-form";
 import { toast } from "sonner";
 import type { z } from "zod";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -27,6 +25,9 @@ const PROVIDER_LABELS: Record<(typeof PROVIDER_KEY_OPTIONS)[number], string> = {
 };
 
 const PROVIDERS = PROVIDER_KEY_OPTIONS.map((value) => ({ value, label: PROVIDER_LABELS[value] }));
+
+const FIELD_CLASS =
+  "bg-[#0a0908] border-[#2a2520] text-[#f5f1e8] focus-visible:border-[#ff4d1f]/60 focus-visible:ring-[#ff4d1f]/20";
 
 type FormValues = z.infer<typeof providerKeySchema>;
 
@@ -115,159 +116,161 @@ export function ProviderKeyManager({ initialKeys }: { initialKeys: KeyInfo[] }) 
   );
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold tracking-tight">API Keys</h2>
-          <p className="text-sm text-zinc-400 mt-1">
-            Connect your own provider keys for AI editing. Keys are encrypted at rest.
-          </p>
+    <div className="dash-panel">
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
+        <div className="dash-panel-head">
+          <h2>
+            API <em>keys</em>
+          </h2>
+          <p>Connect your own provider keys for AI editing. Keys are encrypted at rest.</p>
         </div>
-        <Button onClick={() => setShowForm((s) => !s)} size="sm">
-          <Plus className="h-4 w-4 mr-1.5" />
+        <button type="button" onClick={() => setShowForm((s) => !s)} className="dash-btn dash-btn--sm">
+          <Plus />
           {showForm ? "Cancel" : "Add Key"}
-        </Button>
+        </button>
       </div>
 
       {showForm && (
-        <Card className="border-zinc-800 bg-zinc-950/50">
-          <CardHeader>
-            <CardTitle className="text-base">Add Provider Key</CardTitle>
-            <CardDescription className="text-zinc-400">
-              Your key is encrypted before storage. We never share it.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                <FormField
-                  control={form.control}
-                  name="provider"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Provider</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl>
-                          <SelectTrigger className="bg-zinc-950 border-zinc-800">
-                            <SelectValue placeholder="Select a provider" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent className="bg-zinc-950 border-zinc-800">
-                          {PROVIDERS.map((p) => (
-                            <SelectItem key={p.value} value={p.value}>
-                              {p.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="key"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>API Key</FormLabel>
+        <div className="dash-card" style={{ padding: "22px 24px" }}>
+          <p className="dash-sub-k" style={{ marginBottom: 4 }}>
+            Add provider key
+          </p>
+          <p className="dash-plan-desc" style={{ marginBottom: 18 }}>
+            Your key is encrypted before storage. We never share it.
+          </p>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+              <FormField
+                control={form.control}
+                name="provider"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="dash-sub-k">Provider</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
                       <FormControl>
-                        <Input
-                          type="password"
-                          placeholder="sk-ant-api03-..."
-                          className="bg-zinc-950 border-zinc-800 font-mono text-sm"
-                          {...field}
-                        />
+                        <SelectTrigger className={FIELD_CLASS}>
+                          <SelectValue placeholder="Select a provider" />
+                        </SelectTrigger>
                       </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <div className="flex justify-end gap-3 pt-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => {
-                      setShowForm(false);
-                      form.reset();
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button type="submit" disabled={!form.formState.isValid || form.formState.isSubmitting}>
-                    {form.formState.isSubmitting && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
-                    Save Key
-                  </Button>
-                </div>
-              </form>
-            </Form>
-          </CardContent>
-        </Card>
+                      <SelectContent className="bg-[#15110d] border-[#2a2520] text-[#f5f1e8]">
+                        {PROVIDERS.map((p) => (
+                          <SelectItem key={p.value} value={p.value}>
+                            {p.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="key"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="dash-sub-k">API Key</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="password"
+                        placeholder="sk-ant-api03-..."
+                        className={`${FIELD_CLASS} font-mono text-sm`}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  className="dash-btn dash-btn--sm"
+                  onClick={() => {
+                    setShowForm(false);
+                    form.reset();
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="dash-btn dash-btn--primary dash-btn--sm"
+                  disabled={!form.formState.isValid || form.formState.isSubmitting}
+                >
+                  {form.formState.isSubmitting && <Loader2 className="dash-spin" />}
+                  Save Key
+                </button>
+              </div>
+            </form>
+          </Form>
+        </div>
       )}
 
       {keys.length === 0 && !showForm && (
-        <Card className="border-zinc-800 bg-zinc-950/50 border-dashed">
-          <CardContent className="py-12 flex flex-col items-center text-center">
-            <KeyRound className="h-10 w-10 text-zinc-600 mb-4" />
-            <p className="text-zinc-300 font-medium">No API keys connected</p>
-            <p className="text-sm text-zinc-500 mt-1 max-w-sm">
-              Add your Anthropic or OpenAI key to unlock AI-powered editing features.
-            </p>
-            <Button onClick={() => setShowForm(true)} variant="outline" size="sm" className="mt-4">
-              <Plus className="h-4 w-4 mr-1.5" />
-              Add Key
-            </Button>
-          </CardContent>
-        </Card>
+        <div className="dash-empty">
+          <span className="dash-empty-icon">
+            <KeyRound />
+          </span>
+          <h3>No API keys connected</h3>
+          <p>Add your Anthropic or OpenAI key to unlock AI-powered editing features.</p>
+          <button type="button" onClick={() => setShowForm(true)} className="dash-btn">
+            <Plus />
+            Add Key
+          </button>
+        </div>
       )}
 
       {keys.length > 0 && (
-        <div className="space-y-3">
+        <div className="dash-list">
           {keys.map((key) => {
             const provider = PROVIDERS.find((p) => p.value === key.provider);
             return (
-              <Card key={key.provider} className="border-zinc-800 bg-zinc-950/50">
-                <CardContent className="py-4 px-5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <KeyRound className="h-5 w-5 text-zinc-500" />
-                      <div>
-                        <p className="font-medium text-sm">{provider?.label || key.provider}</p>
-                        <p className="text-xs text-zinc-500 font-mono mt-0.5">{key.masked}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleTest(key.provider)}
-                        disabled={testing[key.provider]}
-                      >
-                        {testing[key.provider] ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <>
-                            <TestTube className="h-4 w-4 mr-1.5" />
-                            Test
-                          </>
-                        )}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-red-400 hover:text-red-300 hover:bg-red-950/30"
-                        onClick={() => handleDelete(key.provider)}
-                        disabled={deleting[key.provider]}
-                      >
-                        {deleting[key.provider] ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </div>
+              <div key={key.provider} className="dash-list-row">
+                <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+                  <KeyRound style={{ width: 18, height: 18, color: "var(--fg-muted)", flexShrink: 0 }} />
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ color: "var(--fg)", fontSize: 15 }}>{provider?.label || key.provider}</p>
+                    <p
+                      style={{
+                        fontFamily: "var(--mono)",
+                        fontSize: "0.72rem",
+                        color: "var(--fg-muted)",
+                        marginTop: 2,
+                      }}
+                    >
+                      {key.masked}
+                    </p>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                  <button
+                    type="button"
+                    className="dash-btn dash-btn--sm"
+                    onClick={() => handleTest(key.provider)}
+                    disabled={testing[key.provider]}
+                  >
+                    {testing[key.provider] ? (
+                      <Loader2 className="dash-spin" />
+                    ) : (
+                      <>
+                        <TestTube />
+                        Test
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="dash-btn dash-btn--sm"
+                    style={{ color: "#ff7a5c" }}
+                    onClick={() => handleDelete(key.provider)}
+                    disabled={deleting[key.provider]}
+                    aria-label="Remove key"
+                  >
+                    {deleting[key.provider] ? <Loader2 className="dash-spin" /> : <Trash2 />}
+                  </button>
+                </div>
+              </div>
             );
           })}
         </div>
