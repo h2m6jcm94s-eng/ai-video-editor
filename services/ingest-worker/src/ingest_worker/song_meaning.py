@@ -53,7 +53,13 @@ def load_song_meaning(
     if cache_file.exists():
         try:
             data = json.loads(cache_file.read_text(encoding="utf-8"))
-            return SongMeaning(**data)
+            meaning = SongMeaning(**data)
+            # B5: cached meanings predate mood-aware labels; refine on load.
+            from ingest_worker.song_mood import mood_aware_section_label
+
+            for sm in meaning.section_moods:
+                sm.section_label = mood_aware_section_label(sm.section_label, sm.top_moods)
+            return meaning
         except Exception as e:
             logger.warning("song meaning cache corrupt; recomputing", error=str(e))
     return None

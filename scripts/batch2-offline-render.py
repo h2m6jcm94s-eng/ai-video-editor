@@ -24,6 +24,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict
 
+import numpy as np
+
 # Windows consoles often default to cp1252; force UTF-8 for progress JSON and filenames.
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -331,15 +333,32 @@ def main():
 
     for idx, cp in enumerate(valid_clip_paths):
         info = probe_video(str(cp))
+        window_meta = heatmap_to_metadata(heatmaps.get(str(cp), [])) if not args.skip_heatmap else []
+        # B4 anti-decoration: derive real per-clip signals from the heatmap
+        # windows instead of fabricating constant medium values.  When no
+        # heatmap exists the keys are omitted so the ranker treats the signal
+        # as honestly missing rather than pretending an average clip.
+        window_motions = [
+            float(w["components"]["motion"])
+            for w in window_meta
+            if w.get("components", {}).get("motion") is not None
+        ]
+        window_aesthetics = [
+            float(w["components"]["aesthetic"])
+            for w in window_meta
+            if w.get("components", {}).get("aesthetic") is not None
+        ]
         meta = {
             "shot_type": "medium",
-            "motion_energy": 0.5,
-            "aesthetic_score": 0.5,
             "duration_sec": info.duration_sec,
             "filename": cp.name,
             "uploaded_at": 0,
-            "heatmap": heatmap_to_metadata(heatmaps.get(str(cp), [])) if not args.skip_heatmap else [],
+            "heatmap": window_meta,
         }
+        if window_motions:
+            meta["motion_energy"] = float(np.mean(window_motions))
+        if window_aesthetics:
+            meta["aesthetic_score"] = float(np.mean(window_aesthetics))
         clip_id = f"clip_{idx:03d}"
         clip_metadata[clip_id] = meta
         clip_path_map[clip_id] = str(cp)

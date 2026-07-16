@@ -67,8 +67,15 @@ def _load_lyrics_for_song_hash(song_hash: str) -> Optional[List[WordTiming]]:
         return None
     try:
         data = json.loads(cache_file.read_text(encoding="utf-8"))
+        # The cache stores LyricWord fields (start_s/end_s); tolerate the raw
+        # whisperx naming (start/end) as well.  Reading the wrong names used to
+        # silently zero every word timing, which killed all KT1 lyric stamps.
         words = [
-            WordTiming(text=str(w.get("text", "")), start_s=float(w.get("start", 0)), end_s=float(w.get("end", 0)))
+            WordTiming(
+                text=str(w.get("text", "")),
+                start_s=float(w.get("start_s", w.get("start", 0))),
+                end_s=float(w.get("end_s", w.get("end", 0))),
+            )
             for w in data.get("words", [])
             if w.get("text", "").strip()
         ]

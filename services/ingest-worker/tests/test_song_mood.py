@@ -141,3 +141,69 @@ class TestAnalyzeSong:
         # If CLAP were called it would fail; cache prevents that.
         loaded = analyze_song(song_path, beat_grid, cache_dir=cache_dir)
         assert loaded.genre_tags == [("rock", 0.99)]
+
+
+class TestMoodAwareSectionLabels:
+    """B5: structural labels are refined by the dominant CLAP mood."""
+
+    def test_drop_with_uplifting_mood_becomes_chorus(self):
+        from ingest_worker.song_mood import mood_aware_section_label
+
+        assert mood_aware_section_label("drop", [("triumphant", 0.9), ("aggressive", 0.1)]) == "chorus"
+
+    def test_drop_with_calm_mood_becomes_chorus(self):
+        from ingest_worker.song_mood import mood_aware_section_label
+
+        assert mood_aware_section_label("drop", [("melancholic", 0.8)]) == "chorus"
+
+    def test_drop_with_aggressive_mood_stays_drop(self):
+        from ingest_worker.song_mood import mood_aware_section_label
+
+        assert mood_aware_section_label("drop", [("aggressive", 0.9)]) == "drop"
+
+    def test_other_labels_pass_through(self):
+        from ingest_worker.song_mood import mood_aware_section_label
+
+        assert mood_aware_section_label("verse", [("triumphant", 0.9)]) == "verse"
+        assert mood_aware_section_label("chorus", [("melancholic", 0.9)]) == "chorus"
+
+    def test_no_moods_keeps_structural_label(self):
+        from ingest_worker.song_mood import mood_aware_section_label
+
+        assert mood_aware_section_label("drop", []) == "drop"
+
+    def test_analyze_song_applies_mood_aware_labels(self, tmp_path):
+        """End-to-end: a 'drop' segment tagged uplifting is stored as chorus."""
+        segments = [BeatSegment(start=0.0, end=10.0, label="drop")]
+        beat_grid = BeatGrid(
+            bpm=120.0, beats=[0.0, 0.5], downbeats=[0.0], beat_positions=[1, 2],
+            segments=segments, tempo_curve=[], energy_curve=[],
+        )
+        import numpy as np
+
+        fake_audio = np.zeros(48_000, dtype=np.float32)
+        classifier = _fake_classifier({"triumphant": 0.95, "aggressive": 0.05})
+        with patch.object(song_mood_module, "_load_audio_segment", return_value=fake_audio), \
+             patch.object(song_mood_module, "_load_clap_pipeline", return_value=classifier):
+            profile = analyze_song("fake_song.mp3", beat_grid, cache_dir=tmp_path)
+        assert profile.section_moods[0].section_label == "chorus"
+
+    def test_cache_load_refines_legacy_labels(self, tmp_path):
+        """A cached profile with a legacy 'drop' label is refined on load."""
+        from shared_py.models import SongMoodProfile as _SMP
+
+        song_hash = song_mood_module._song_hash("fake_song.mp3")
+        cache_dir = tmp_path / song_hash
+        cache_dir.mkdir(parents=True)
+        legacy = _SMP(
+            song_hash=song_hash,
+            section_moods=[
+                SectionMoodTags(start_s=0.0, end_s=10.0, section_label="drop", top_moods=[("hopeful", 0.9)])
+            ],
+        )
+        (cache_dir / "mood_tags.json").write_text(legacy.model_dump_json(), encoding="utf-8")
+
+        profile = analyze_song("fake_song.mp3", BeatGrid(
+            bpm=120.0, beats=[], downbeats=[], beat_positions=[], segments=[], tempo_curve=[], energy_curve=[],
+        ), cache_dir=tmp_path)
+        assert profile.section_moods[0].section_label == "chorus"

@@ -105,3 +105,4 @@ T13_*.md
 reference_library/
 tech0_spike/
 test folder 2/output/
+*.emotion.json

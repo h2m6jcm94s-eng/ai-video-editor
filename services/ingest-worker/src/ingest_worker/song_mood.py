@@ -53,6 +53,27 @@ GENRE_TAGS = [
 _CLAP_SR = 48_000
 _CLAP_MAX_SEGMENT_S = 10.0
 
+# B5: mood groups used to refine energy-only structural section labels.
+_CALM_MOODS = {"melancholic", "peaceful", "nostalgic", "romantic", "reverent", "hollow"}
+_UPLIFTING_MOODS = {"uplifting", "triumphant", "hopeful", "playful"}
+
+
+def mood_aware_section_label(structural_label: str, top_moods: List[Tuple[str, float]]) -> str:
+    """Refine an energy-only structural label with the dominant CLAP mood.
+
+    The structural heuristic labels every energy peak ``drop`` unless the whole
+    song reads as a calm ballad.  A peak section whose dominant mood is calm
+    or uplifting is emotionally a chorus, not an EDM drop, so relabel it.
+    All other labels pass through unchanged so exact-match consumers
+    (``slot.section == "chorus"`` checks etc.) keep working.
+    """
+    if not top_moods:
+        return structural_label
+    dominant = top_moods[0][0]
+    if structural_label == "drop" and dominant in (_CALM_MOODS | _UPLIFTING_MOODS):
+        return "chorus"
+    return structural_label
+
 _clap_pipeline: Optional[object] = None
 
 
@@ -217,6 +238,10 @@ def analyze_song(
         try:
             data = json.loads(cache_file.read_text(encoding="utf-8"))
             profile = SongMoodProfile(**data)
+            # B5: cached profiles predate mood-aware labels; refine on load so
+            # the narrative labeler always sees mood-aware section labels.
+            for sm in profile.section_moods:
+                sm.section_label = mood_aware_section_label(sm.section_label, sm.top_moods)
             logger.info("mood profile loaded from cache", song_hash=song_hash)
             return profile
         except Exception as e:
@@ -242,7 +267,7 @@ def analyze_song(
             SectionMoodTags(
                 start_s=start_s,
                 end_s=end_s,
-                section_label=seg.label,
+                section_label=mood_aware_section_label(seg.label, top_moods),
                 top_moods=top_moods,
             )
         )

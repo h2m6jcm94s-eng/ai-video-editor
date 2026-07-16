@@ -127,6 +127,11 @@ class LLMClient:
             return None
 
     def _save_cache(self, path: Path, task: LLMTask, prompt: str, model: str, response: str) -> None:
+        # Never cache empty responses: an empty body is a failure mode (e.g.
+        # thinking-model token exhaustion), and caching it poisons every
+        # future call with the same prompt.
+        if not response or not response.strip():
+            return
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             payload = {
@@ -175,6 +180,11 @@ class LLMClient:
             "messages": [{"role": "user", "content": full_prompt}],
             "stream": False,
             "keep_alive": -1,
+            # Disable chain-of-thought "thinking": with small num_predict budgets
+            # the thinking tokens consume the entire budget and content comes
+            # back empty (done_reason="length").  Ignored by models without
+            # thinking support.
+            "think": False,
             "options": {
                 "temperature": temperature,
                 "num_predict": max_tokens,

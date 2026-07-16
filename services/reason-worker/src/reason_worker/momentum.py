@@ -3,11 +3,63 @@
 # Commercial SaaS use is prohibited without written permission.
 """Conservation-of-momentum scoring for clip transitions."""
 
-from typing import Tuple
+import hashlib
+import json
+import os
+from pathlib import Path
+from typing import Dict, Tuple
 import numpy as np
 import cv2
 
 from shared_py.tuning import FLOW, MOMENTUM
+
+# In-process memo so repeated lookups within one render never re-decode video.
+_FLOW_MEMO: Dict[str, Tuple[float, float]] = {}
+# Loaded per-clip disk caches, keyed by cache file path.
+_DISK_TABLES: Dict[Path, Dict[str, Tuple[float, float]]] = {}
+
+
+def _flow_cache_dir() -> Path:
+    root = os.environ.get("STORAGE_ROOT", r"E:\ai-video-editor-storage")
+    return Path(root) / "flow_vectors"
+
+
+def _memo_key(clip_path: str, start_s: float, n_frames: int) -> str:
+    return f"{os.path.abspath(clip_path)}|{start_s:.3f}|{n_frames}"
+
+
+def _disk_cache_file(clip_path: str) -> Path:
+    digest = hashlib.sha1(os.path.abspath(clip_path).encode("utf-8")).hexdigest()
+    return _flow_cache_dir() / f"{digest}.json"
+
+
+def _load_disk_table(cache_file: Path) -> Dict[str, Tuple[float, float]]:
+    if cache_file in _DISK_TABLES:
+        return _DISK_TABLES[cache_file]
+    table: Dict[str, Tuple[float, float]] = {}
+    try:
+        if cache_file.exists():
+            raw = json.loads(cache_file.read_text(encoding="utf-8"))
+            for key, value in raw.get("vectors", {}).items():
+                table[key] = (float(value[0]), float(value[1]))
+    except Exception:
+        table = {}
+    _DISK_TABLES[cache_file] = table
+    return table
+
+
+def _store_disk_vector(cache_file: Path, entry_key: str, vector: Tuple[float, float]) -> None:
+    table = _load_disk_table(cache_file)
+    table[entry_key] = vector
+    try:
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"vectors": {k: [v[0], v[1]] for k, v in table.items()}}
+        tmp = cache_file.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(tmp, cache_file)
+    except Exception:
+        # Cache writes are best-effort; a failed write must never break ranking.
+        pass
 
 
 def _read_downscaled_frame(cap) -> np.ndarray | None:
@@ -18,20 +70,20 @@ def _read_downscaled_frame(cap) -> np.ndarray | None:
     return cv2.resize(frame, FLOW.TARGET_SIZE)
 
 
-def compute_mean_flow_vector(
+def _compute_mean_flow_vector_uncached(
     clip_path: str,
     start_s: float,
     n_frames: int = FLOW.N_FRAMES,
-) -> Tuple[float, float]:
+) -> Tuple[float, float] | None:
     """Compute the mean optical-flow vector starting at ``start_s``.
 
     Uses OpenCV Farneback optical flow on 256x144 downscaled frames.  Returns
-    ``(dx, dy)`` in downscaled pixel units; a zero vector is returned when the
-    clip cannot be read or has too few frames.
+    ``(dx, dy)`` in downscaled pixel units, or ``None`` when the clip cannot
+    be read or has too few frames (so failures are never cached).
     """
     cap = cv2.VideoCapture(clip_path)
     if not cap.isOpened():
-        return (0.0, 0.0)
+        return None
 
     try:
         fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
@@ -43,7 +95,7 @@ def compute_mean_flow_vector(
 
         prev = _read_downscaled_frame(cap)
         if prev is None:
-            return (0.0, 0.0)
+            return None
         prev_gray = cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY)
 
         flow_accum = np.zeros((2,), dtype=np.float64)
@@ -71,11 +123,44 @@ def compute_mean_flow_vector(
             prev_gray = curr_gray
 
         if flow_count == 0:
-            return (0.0, 0.0)
+            return None
         mean = flow_accum / flow_count
         return (float(mean[0]), float(mean[1]))
     finally:
         cap.release()
+
+
+def compute_mean_flow_vector(
+    clip_path: str,
+    start_s: float,
+    n_frames: int = FLOW.N_FRAMES,
+) -> Tuple[float, float]:
+    """Cached wrapper around ``_compute_mean_flow_vector_uncached``.
+
+    Flow vectors are deterministic per (clip path, start time, frame count),
+    so they are memoized in-process and persisted to disk under
+    ``$STORAGE_ROOT/flow_vectors/``.  Without this cache the momentum re-rank
+    re-decodes video for every candidate of every slot, which dominates total
+    render time.  Failed reads are never cached so transient errors retry.
+    """
+    memo_key = _memo_key(clip_path, start_s, n_frames)
+    if memo_key in _FLOW_MEMO:
+        return _FLOW_MEMO[memo_key]
+
+    cache_file = _disk_cache_file(clip_path)
+    entry_key = f"{start_s:.3f}|{n_frames}"
+    table = _load_disk_table(cache_file)
+    if entry_key in table:
+        _FLOW_MEMO[memo_key] = table[entry_key]
+        return table[entry_key]
+
+    vector = _compute_mean_flow_vector_uncached(clip_path, start_s, n_frames)
+    if vector is None:
+        # Unreadable clip: do not cache, so transient failures retry.
+        return (0.0, 0.0)
+    _FLOW_MEMO[memo_key] = vector
+    _store_disk_vector(cache_file, entry_key, vector)
+    return vector
 
 
 def momentum_coherence(v_out: Tuple[float, float], v_in: Tuple[float, float]) -> float:

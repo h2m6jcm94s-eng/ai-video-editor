@@ -63,6 +63,23 @@ def test_text_emotional_intensity_boosts_intense_words():
     assert legend > mumble
 
 
+def test_text_emotional_intensity_language_agnostic_non_latin():
+    """B6: non-Latin text should score for expressive punctuation/endings."""
+    # Japanese exclamatory ending + repeated emphasis.
+    jp_intense = _text_emotional_intensity("絶対に負けないよ！！")
+    # Neutral Japanese sentence.
+    jp_neutral = _text_emotional_intensity("今日はいい天気です")
+    assert jp_intense > 0.3
+    assert jp_intense > jp_neutral
+
+
+def test_text_emotional_intensity_uses_full_width_marks():
+    """B6: full-width exclamation/question marks count."""
+    ascii_exclaim = _text_emotional_intensity("Run")
+    fullwidth_exclaim = _text_emotional_intensity("走れ！")
+    assert fullwidth_exclaim > ascii_exclaim
+
+
 def test_llm_cache_key_stable():
     k1 = _llm_cache_key("I want to be a legend", "Cyberpunk")
     k2 = _llm_cache_key("I want to be a legend", "Cyberpunk")

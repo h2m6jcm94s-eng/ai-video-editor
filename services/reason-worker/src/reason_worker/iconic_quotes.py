@@ -243,23 +243,46 @@ class ScoredQuote:
 # ---------------------------------------------------------------------------
 
 def _text_emotional_intensity(text: str) -> float:
-    """Fast text-only emotional salience heuristic."""
+    """Fast text-only emotional salience heuristic.
+
+    B6: language-agnostic.  Punctuation signals use both ASCII and full-width
+    CJK marks.  The English intensity lexicon only applies to Latin-script
+    text; other scripts use expressive endings and character repetition, so a
+    Japanese scream scores as high as an English one instead of falling back
+    to the flat base score.
+    """
     text = text.strip()
     if not text:
         return 0.0
 
-    # Punctuation markers.
-    exclamations = text.count("!")
-    questions = text.count("?")
-    caps_ratio = sum(1 for c in text if c.isupper()) / max(1, len(text))
+    # Punctuation markers (ASCII + full-width CJK).
+    exclamations = text.count("!") + text.count("！")
+    questions = text.count("?") + text.count("？")
 
-    # Lexical intensity.
-    intense_words = {
-        "legend", "dream", "never", "always", "love", "hate", "die", "alive",
-        "world", "burn", "rise", "fall", "fight", "freedom", "forever",
-    }
-    words = set(re.sub(r"[^\w\s]", "", text.lower()).split())
-    intensity = len(words & intense_words) / max(1, len(words))
+    if _is_latin_script(text):
+        caps_ratio = sum(1 for c in text if c.isupper()) / max(1, len(text))
+
+        # Lexical intensity (English lexicon — only meaningful for Latin text).
+        intense_words = {
+            "legend", "dream", "never", "always", "love", "hate", "die", "alive",
+            "world", "burn", "rise", "fall", "fight", "freedom", "forever",
+        }
+        words = set(re.sub(r"[^\w\s]", "", text.lower()).split())
+        intensity = len(words & intense_words) / max(1, len(words))
+    else:
+        # No letter case and no space-separated lexicon: expressive sentence
+        # endings and repeated characters carry the emphasis signal instead.
+        caps_ratio = 0.0
+        stripped = text.rstrip("!！?？。、…〜~ ")
+        particle_endings = (
+            "よ", "ぞ", "ぜ", "な", "わ", "さ", "のだ", "んだ",
+            "了", "吧", "啊", "呢", "嘛", "呀",
+        )
+        ends_expressive = any(stripped.endswith(e) for e in particle_endings) or text.endswith(
+            ("!", "！", "?", "？")
+        )
+        has_repeat = any(text[i] == text[i + 1] for i in range(len(text) - 1))
+        intensity = (0.6 if ends_expressive else 0.0) + (0.4 if has_repeat else 0.0)
 
     score = 0.3 + 0.2 * exclamations + 0.1 * questions + 0.2 * caps_ratio + 0.4 * intensity
     return min(1.0, score)

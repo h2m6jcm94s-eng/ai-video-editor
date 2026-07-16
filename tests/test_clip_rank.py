@@ -735,6 +735,43 @@ class TestExhaustAndRepetition:
         assert all(c <= 2 for c in counts.values()), counts
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# B4: honest missing signals (no fabricated medium constants)
+# ──────────────────────────────────────────────────────────────────────────────
+
+class TestHonestMissingSignals:
+    def test_missing_aesthetic_scores_zero_not_medium(self):
+        """A clip without aesthetic_score must not get a fabricated 0.5."""
+        from reason_worker.clip_rank import _score_clip
+
+        slot = make_slot(index=0)
+        meta = make_clip_meta()
+        del meta["aesthetic_score"]
+        score = _score_clip(slot, "C01", meta, {}, {}, [])
+        assert score.aesthetic_score == 0.0
+
+    def test_missing_motion_energy_scores_zero_not_medium(self):
+        """A clip without motion_energy must not get a fabricated 0.5 match."""
+        from reason_worker.clip_rank import _score_clip
+
+        slot = make_slot(index=0, energy=0.8)
+        meta = make_clip_meta()
+        del meta["motion_energy"]
+        score = _score_clip(slot, "C01", meta, {}, {}, [])
+        assert score.motion_score == 0.0
+
+    def test_measured_zero_motion_is_respected(self):
+        """A legitimately measured 0.0 motion must survive (not 'or 0.5')."""
+        from reason_worker.clip_rank import _score_clip
+
+        slot = make_slot(index=0, energy=0.0)
+        meta = make_clip_meta(motion_energy=0.0, aesthetic=0.0)
+        score = _score_clip(slot, "C01", meta, {}, {}, [])
+        # motion match for a still slot + still clip is perfect.
+        assert score.motion_score == pytest.approx(1.0)
+        assert score.aesthetic_score == 0.0
+
+
 class TestMomentumFixes:
     def test_same_clip_continuation_gets_zero_momentum_bonus(self):
         """Continuing the same clip should not be rewarded by momentum."""
@@ -767,6 +804,34 @@ class TestMomentumFixes:
         # More importantly: the bonus applied to C01 in slot 1 is zero.
         slot1_scores = {s.clip_id: s.total_score for s in new_rankings[1]}
         assert slot1_scores["C01"] == 1.0
+
+    def test_recent_clip_window_gets_zero_momentum_bonus(self):
+        """A clip reappearing within 3 slots must not get momentum bonus."""
+        from unittest.mock import patch
+        from reason_worker.clip_rank import rerank_with_momentum
+
+        slots = [make_slot(index=i) for i in range(4)]
+        scores = [
+            ClipScore(clip_id="C01", total_score=1.0),
+            ClipScore(clip_id="C02", total_score=1.0),
+            ClipScore(clip_id="C03", total_score=1.0),
+        ]
+        rankings = {i: list(scores) for i in range(4)}
+        clip_paths = {f"C{i:02d}": f"fake_c{i:02d}.mp4" for i in range(1, 4)}
+
+        with patch("reason_worker.clip_rank.compute_mean_flow_vector", return_value=(1.0, 0.0)):
+            with patch("reason_worker.clip_rank.momentum_coherence", return_value=1.0):
+                new_rankings, chosen = rerank_with_momentum(
+                    rankings, slots, {}, clip_paths=clip_paths
+                )
+
+        # With identical scores, the first slot picks C01.  Without the recent-
+        # window guard, momentum would keep dragging C01 back for several slots.
+        # It should only be allowed again at slot 3 (outside the 3-slot window).
+        assert chosen[0] == "C01"
+        assert chosen[1] != "C01"
+        assert chosen[2] != "C01"
+        assert chosen[3] == "C01"
 
 
 # ──────────────────────────────────────────────────────────────────────────────

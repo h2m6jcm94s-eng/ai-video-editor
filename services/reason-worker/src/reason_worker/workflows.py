@@ -35,8 +35,15 @@ def _extract_content_signals(
     aesthetic_scores = []
     for meta in [a.get("metadata") or {} for a in clip_assets]:
         if isinstance(meta, dict):
-            motion_scores.append(meta.get("motion_energy") or meta.get("motionEnergy") or 0.5)
-            aesthetic_scores.append(meta.get("aesthetic_score") or meta.get("aestheticScore") or 0.5)
+            # B4 anti-decoration: only average real values.  The old ``or 0.5``
+            # chain both fabricated medium scores for missing metadata and
+            # swallowed legitimately-measured 0.0 values.
+            motion_val = meta.get("motion_energy", meta.get("motionEnergy"))
+            aesthetic_val = meta.get("aesthetic_score", meta.get("aestheticScore"))
+            if motion_val is not None:
+                motion_scores.append(float(motion_val))
+            if aesthetic_val is not None:
+                aesthetic_scores.append(float(aesthetic_val))
 
     return {
         "speech_ratio": 0.0,

@@ -73,6 +73,7 @@ _STYLE_PRESET_FONTS = {
     "neon_glitch": ["Rajdhani", "Teko", "League Spartan"],
     "handwritten_pen": ["League Spartan", "Rajdhani"],
     "shake_emphasis": ["Anton", "Bebas Neue", "Russo One"],
+    "lyric_karaoke": ["Montserrat", "Oswald", "Anton"],
 }
 
 # Map common Overlay.font names to bundled families.

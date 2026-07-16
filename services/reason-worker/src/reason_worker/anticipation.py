@@ -4,6 +4,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -13,6 +16,16 @@ from shared_py.models import MusicEventGrid, Slot
 from shared_py.tuning import ANTICIPATION
 
 logger = StructuredLogger("reason_worker.anticipation")
+
+# In-process memo for whole-clip motion curves (whole-clip decodes are one of
+# the dominant render costs, so curves are also persisted to disk).
+_CURVE_MEMO: dict[str, np.ndarray] = {}
+
+
+def _motion_curve_cache_file(clip_path: str, fps_sample: float) -> Path:
+    root = os.environ.get("STORAGE_ROOT", r"E:\ai-video-editor-storage")
+    digest = hashlib.sha1(f"{os.path.abspath(clip_path)}|{fps_sample:.3f}".encode("utf-8")).hexdigest()
+    return Path(root) / "motion_curves" / f"{digest}.npy"
 
 _VOCAL_WINDOW_S = 0.5
 _MAX_OFFSET_S = 0.5
@@ -75,13 +88,8 @@ def compute_motion_curve(
     return samples
 
 
-def precompute_clip_motion_curve(clip_path: str, fps_sample: float = 2.0) -> np.ndarray:
-    """Return a 1-D motion-energy curve sampled evenly over the whole clip.
-
-    This is the legacy API used by ``clip_rank.apply_anticipation_offsets``.
-    """
-    if cv2 is None:
-        return np.array([])
+def _compute_clip_motion_curve_uncached(clip_path: str, fps_sample: float) -> np.ndarray:
+    """Decode the whole clip and build the motion-energy curve."""
     cap = cv2.VideoCapture(clip_path)
     if not cap.isOpened():
         return np.array([])
@@ -106,6 +114,42 @@ def precompute_clip_motion_curve(clip_path: str, fps_sample: float = 2.0) -> np.
         return np.array(energies, dtype=np.float32)
     finally:
         cap.release()
+
+
+def precompute_clip_motion_curve(clip_path: str, fps_sample: float = 2.0) -> np.ndarray:
+    """Return a 1-D motion-energy curve sampled evenly over the whole clip.
+
+    This is the legacy API used by ``clip_rank.apply_anticipation_offsets``.
+    Curves are deterministic per (clip path, sample rate) so they are memoized
+    in-process and persisted under ``$STORAGE_ROOT/motion_curves/``; without
+    the cache every render re-decodes every chosen clip end-to-end.
+    """
+    if cv2 is None:
+        return np.array([])
+    memo_key = f"{os.path.abspath(clip_path)}|{fps_sample:.3f}"
+    if memo_key in _CURVE_MEMO:
+        return _CURVE_MEMO[memo_key]
+    cache_file = _motion_curve_cache_file(clip_path, fps_sample)
+    try:
+        if cache_file.exists():
+            curve = np.load(cache_file)
+            _CURVE_MEMO[memo_key] = curve
+            return curve
+    except Exception:
+        pass
+    curve = _compute_clip_motion_curve_uncached(clip_path, fps_sample)
+    if curve.size:
+        _CURVE_MEMO[memo_key] = curve
+        try:
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = cache_file.with_suffix(".npy.tmp")
+            with open(tmp, "wb") as fh:
+                np.save(fh, curve)
+            os.replace(tmp, cache_file)
+        except Exception:
+            # Cache writes are best-effort; a failed write must not break ranking.
+            pass
+    return curve
 
 
 def compute_anticipation_offset(

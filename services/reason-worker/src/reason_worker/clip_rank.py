@@ -5,11 +5,12 @@
 
 import math
 import random
+from collections import deque
 from typing import List, Dict, Optional, Tuple
 import numpy as np
 
 from shared_py.models import Slot, ClipScore, ClipEmotionProfile
-from shared_py.tuning import RANK, FLOW, ANTICIPATION
+from shared_py.tuning import RANK, FLOW, ANTICIPATION, MOMENTUM
 from shared_py.logging_config import StructuredLogger
 from reason_worker.momentum import compute_mean_flow_vector, momentum_coherence
 from reason_worker.anticipation import precompute_clip_motion_curve, compute_anticipation_offset
@@ -365,8 +366,21 @@ def _score_clip(
         clip_paths=clip_paths, slot_text_cache=slot_text_cache,
     )
     shot_type_score = 1.0 if meta.get("shot_type") == slot.target_shot_type else 0.3
-    aesthetic = meta.get("aesthetic_score", 0.5)
-    motion_score = 1.0 - abs(meta.get("motion_energy", 0.5) - slot.energy_level)
+    # B4 anti-decoration: never fabricate a medium score for missing signals.
+    # A missing aesthetic/motion value scores 0.0 (logged at debug to avoid one
+    # warning per candidate), matching the Tier-3 semantic-score policy.
+    aesthetic_raw = meta.get("aesthetic_score")
+    if aesthetic_raw is None:
+        logger.debug("aesthetic_score_missing", clip_id=clip_id, slot_index=slot.index)
+        aesthetic = 0.0
+    else:
+        aesthetic = float(aesthetic_raw)
+    motion_raw = meta.get("motion_energy")
+    if motion_raw is None:
+        logger.debug("motion_energy_missing", clip_id=clip_id, slot_index=slot.index)
+        motion_score = 0.0
+    else:
+        motion_score = 1.0 - abs(float(motion_raw) - slot.energy_level)
     clip_dur = meta.get("duration_sec", 5.0)
     duration_diff = abs(clip_dur - slot.duration_s)
     duration_score = np.exp(-(duration_diff / max(slot.duration_s, 0.1)) ** 2 / RANK.DURATION_SCORE_DIVISOR)
@@ -505,6 +519,10 @@ def rerank_with_momentum(
     chosen_clip_ids: Dict[int, str] = {}
     prev_end_motion: Optional[Tuple[float, float]] = None
     prev_chosen_clip_id: Optional[str] = None
+    # Rolling window of recently chosen clips; momentum should not drag the
+    # edit back to any of them within a few slots (otherwise we get jarring
+    # repeats that the golden suite flags).
+    recent_chosen: deque[str] = deque(maxlen=3)
 
     for slot in slots:
         scores = rankings.get(slot.index, [])
@@ -517,11 +535,17 @@ def rerank_with_momentum(
             top = scores[0]
         else:
             reranked: List[Tuple[ClipScore, float]] = []
-            for score in scores:
-                # Do not reward a clip for continuing itself; that causes
-                # repeats. Momentum should only smooth transitions between
-                # different clips.
-                if score.clip_id == prev_chosen_clip_id:
+            # Only the top-K candidates get a flow-based momentum bonus;
+            # computing flow vectors for every candidate is O(slots x clips)
+            # video decodes and dominates render time.  Candidates past the
+            # cap keep their base score (bonus 0).
+            head = scores[: MOMENTUM.MAX_CANDIDATES]
+            tail = scores[MOMENTUM.MAX_CANDIDATES :]
+            for score in head:
+                # Do not reward a clip for continuing itself or for reappearing
+                # within the recent window; that causes jarring repeats.  Momentum
+                # should only smooth transitions between different clips.
+                if score.clip_id == prev_chosen_clip_id or score.clip_id in recent_chosen:
                     bonus = 0.0
                 else:
                     path = clip_paths.get(score.clip_id)
@@ -534,6 +558,7 @@ def rerank_with_momentum(
                             prev_end_motion, candidate_start_motion
                         )
                 reranked.append((score, score.total_score + bonus))
+            reranked.extend((score, score.total_score) for score in tail)
             reranked.sort(key=lambda x: x[1], reverse=True)
             new_scores = [
                 item[0].model_copy(update={"total_score": item[1]})
@@ -543,6 +568,8 @@ def rerank_with_momentum(
             top = new_scores[0]
 
         chosen_clip_ids[slot.index] = top.clip_id
+        if prev_chosen_clip_id is not None:
+            recent_chosen.append(prev_chosen_clip_id)
         prev_chosen_clip_id = top.clip_id
         end_path = clip_paths.get(top.clip_id)
         if end_path is not None:

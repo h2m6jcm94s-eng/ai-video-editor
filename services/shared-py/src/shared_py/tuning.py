@@ -101,6 +101,12 @@ class MomentumTuning:
     COHERENCE_NEUTRAL: float = 0.5
     COHERENCE_SCALE: float = 0.5
 
+    # Only the top-K candidates per slot receive an optical-flow momentum
+    # bonus.  Computing flow vectors for every candidate of every slot is
+    # O(slots x clips) video decodes and dominates render time; candidates
+    # outside the top-K keep their base score (bonus 0).
+    MAX_CANDIDATES: int = 25
+
 
 @dataclass(frozen=True)
 class AnticipationTuning:
