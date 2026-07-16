@@ -1986,12 +1986,30 @@ class _MergeNode(NamedTuple):
 
 
 def _transition_name_for_pair(left_slot: Slot, right_slot: Slot, enable_effects: bool) -> str:
-    """Return the xfade transition name, or 'hard_cut' for no transition."""
+    """Return the xfade transition name, or 'hard_cut' for no transition.
+
+    Fade-out followed by fade-in (or dissolve-in) is collapsed into a single
+    dissolve crossfade that blends the two clips directly. This avoids a
+    fade-through-black when the compiler previously applied the fade-in
+    independently, and it avoids an abrupt hard cut when the right slot asks
+    for a fade-in after a hard-cut left slot.
+    """
     if not enable_effects:
         return "hard_cut"
-    if getattr(left_slot, "transition_out", None) == "hard_cut":
+    left_out = getattr(left_slot, "transition_out", None) or "hard_cut"
+    right_in = getattr(right_slot, "transition_in", None) or "hard_cut"
+    is_fade = {"fade", "dissolve"}
+
+    # Collapse adjacent fade-out + fade-in into one direct dissolve.
+    if left_out in is_fade and right_in in is_fade:
+        return "fade"
+    # Honour a fade-in on the right even when the left is a hard cut so we
+    # never fade up from black between two clips.
+    if left_out == "hard_cut" and right_in in is_fade:
+        return "fade"
+    if left_out == "hard_cut":
         return "hard_cut"
-    return XFADE_MAP.get(getattr(left_slot, "transition_out", None), "fade")
+    return XFADE_MAP.get(left_out, "fade")
 
 
 def _merge_two_video_nodes(

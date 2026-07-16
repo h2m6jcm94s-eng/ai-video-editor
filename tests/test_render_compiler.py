@@ -1069,3 +1069,59 @@ class TestAssTextRendering:
             for p in [video_path, output_path]:
                 if os.path.exists(p):
                     os.unlink(p)
+
+
+class TestTransitionNameForPair:
+    """Unit tests for _transition_name_for_pair collapse logic."""
+
+    @pytest.fixture
+    def _fn(self):
+        # Import the private helper locally to avoid exposing it in the
+        # module-level import list.
+        from render_worker.compiler import _transition_name_for_pair
+        return _transition_name_for_pair
+
+    def _slot(self, transition_out="hard_cut", transition_in="hard_cut"):
+        return Slot(
+            index=0,
+            start_s=0.0,
+            duration_s=1.0,
+            beat_index=0,
+            section="verse",
+            target_shot_type="medium",
+            subject_hint="subject",
+            motion_hint="static",
+            energy_level=0.5,
+            transition_out=transition_out,
+            transition_in=transition_in,
+        )
+
+    def test_effects_disabled_returns_hard_cut(self, _fn):
+        left = self._slot("fade", "fade")
+        right = self._slot("fade", "fade")
+        assert _fn(left, right, enable_effects=False) == "hard_cut"
+
+    def test_adjacent_fade_out_fade_in_collapses_to_dissolve(self, _fn):
+        left = self._slot(transition_out="fade", transition_in="fade")
+        right = self._slot(transition_out="fade", transition_in="fade")
+        assert _fn(left, right, enable_effects=True) == "fade"
+
+    def test_adjacent_dissolve_out_fade_in_collapses_to_dissolve(self, _fn):
+        left = self._slot(transition_out="dissolve", transition_in="hard_cut")
+        right = self._slot(transition_out="hard_cut", transition_in="fade")
+        assert _fn(left, right, enable_effects=True) == "fade"
+
+    def test_hard_cut_out_with_fade_in_uses_dissolve_not_black(self, _fn):
+        left = self._slot(transition_out="hard_cut", transition_in="hard_cut")
+        right = self._slot(transition_out="hard_cut", transition_in="fade")
+        assert _fn(left, right, enable_effects=True) == "fade"
+
+    def test_hard_cut_pair_stays_hard_cut(self, _fn):
+        left = self._slot(transition_out="hard_cut", transition_in="hard_cut")
+        right = self._slot(transition_out="hard_cut", transition_in="hard_cut")
+        assert _fn(left, right, enable_effects=True) == "hard_cut"
+
+    def test_left_whip_right_fade_keeps_left_transition(self, _fn):
+        left = self._slot(transition_out="whip", transition_in="hard_cut")
+        right = self._slot(transition_out="hard_cut", transition_in="fade")
+        assert _fn(left, right, enable_effects=True) == "hlslice"
