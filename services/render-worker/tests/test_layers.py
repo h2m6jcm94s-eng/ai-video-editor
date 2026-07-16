@@ -57,6 +57,27 @@ class TestBuildLayerFilterComplex:
         assert "if(t<2.0" in overlay
         assert r"\," in overlay
 
+    def test_text_layer_defaults_to_spring_easing(self):
+        layers = [
+            Layer(
+                id="t1",
+                type="text",
+                source="HELLO",
+                z_index=1,
+                out_s=2.0,
+                keyframes={
+                    "opacity": [Keyframe(t_s=0.0, value=0.0), Keyframe(t_s=2.0, value=1.0)],
+                },
+            )
+        ]
+        inputs, lines, label = _build_layer_filter_complex(layers, 2.0, 1080, 1920, 30.0)
+        # The text layer should be rendered on a transparent canvas.
+        assert any("color=c=0x00000000" in line for line in lines)
+        assert any("drawtext=" in line for line in lines)
+        # The opacity track should use the spring expression.
+        opacity_line = next(line for line in lines if "geq(a=" in line)
+        assert "exp" in opacity_line and "sin" in opacity_line
+
 
 class TestCompositeLayers:
     def test_no_layers_returns_base_path(self):

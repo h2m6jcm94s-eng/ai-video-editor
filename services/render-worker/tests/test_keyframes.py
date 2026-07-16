@@ -64,6 +64,33 @@ class TestFFmpegExpression:
         assert expr.endswith(")")
 
 
+class TestEasing:
+    def test_spring_overshoots_and_settles(self):
+        kfs = [
+            Keyframe(t_s=0.0, value=0.0, easing="spring"),
+            Keyframe(t_s=1.0, value=1.0, easing="spring"),
+        ]
+        samples = [sample(kfs, t / 100.0) for t in range(101)]
+        assert max(samples) > 1.0, "spring curve must overshoot the target"
+        assert samples[-1] == pytest.approx(1.0, abs=0.02)
+        assert samples[0] == pytest.approx(0.0, abs=1e-6)
+
+    def test_spring_ffmpeg_expression_contains_oscillation(self):
+        kfs = [
+            Keyframe(t_s=0.0, value=0.0, easing="spring"),
+            Keyframe(t_s=1.0, value=1.0, easing="spring"),
+        ]
+        expr = ffmpeg_expression(kfs)
+        assert "exp" in expr
+        assert "sin" in expr
+        assert "cos" in expr
+
+    def test_default_easing_fills_missing_keyframe_easing(self):
+        kfs = [Keyframe(t_s=0.0, value=0.0), Keyframe(t_s=1.0, value=1.0)]
+        out = normalize_track(kfs, 1.0, default_easing="spring")
+        assert all(k.easing == "spring" for k in out)
+
+
 class TestNormalizeTrack:
     def test_adds_endpoints(self):
         kfs = [Keyframe(t_s=1.0, value=5.0)]

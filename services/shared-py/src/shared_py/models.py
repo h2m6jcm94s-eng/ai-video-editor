@@ -344,7 +344,7 @@ class Keyframe(EffectParams):
 
     t_s: float = Field(ge=0.0)
     value: float
-    easing: Literal["linear", "ease_in", "ease_out", "ease_in_out"] = "linear"
+    easing: Literal["linear", "ease_in", "ease_out", "ease_in_out", "spring"] = "linear"
 
 
 class CameraMotionParams(EffectParams):
@@ -418,10 +418,10 @@ class RecordScratchSfxParams(SfxParams):
 
 
 class Layer(BaseModelCamel):
-    """A single compositing layer applied on top of a slot."""
+    """A single compositing layer applied on top of (or behind) a slot."""
 
     id: str
-    type: Literal["image", "video", "color"]
+    type: Literal["image", "video", "color", "text"]
     source: Optional[str] = None
     z_index: int = 0
     transform: Dict[str, Any] = Field(default_factory=dict)
@@ -430,6 +430,11 @@ class Layer(BaseModelCamel):
     in_s: float = 0.0
     out_s: float = 0.0
     keyframes: Dict[str, List[Keyframe]] = Field(default_factory=dict)
+    # Text-layer styling (used when type == "text").
+    font_size: int = Field(default=48, ge=8, le=200)
+    font_color: str = "#FFFFFF"
+    stroke_color: Optional[str] = "#000000"
+    font_file: Optional[str] = None
 
 
 class Effect(BaseModelCamel):
