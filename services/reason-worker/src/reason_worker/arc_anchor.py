@@ -242,6 +242,135 @@ def _anchor_beat_rms(
     )
 
 
+_BEAT_KEYWORDS: dict[str, List[str]] = {
+    "PEACE": ["calm", "quiet", "still", "soft", "gentle"],
+    "HOPE": ["hope", "dream", "wish", "light", "begin"],
+    "LONGING": ["longing", "yearn", "want", "miss", "wish"],
+    "DREAM": ["dream", "hope", "promise", "future"],
+    "WORLD": ["world", "place", "space", "around"],
+    "RISE": ["rise", "climb", "grow", "build"],
+    "CRACK": ["break", "crack", "split", "distance", "apart"],
+    "CONFLICT": ["fight", "conflict", "tension", "clash", "struggle"],
+    "FALL": ["fall", "drop", "lose", "fail", "break"],
+    "LOSS": ["loss", "gone", "empty", "hollow", "missing"],
+    "GRIEF": ["grief", "sorrow", "cry", "tears", "pain"],
+    "ACCEPTANCE": ["accept", "let go", "peace", "release", "free"],
+    "RESOLUTION": ["resolve", "peace", "calm", "after", "end"],
+    "CLIMAX": ["peak", "climax", "high", "top"],
+    "VICTORY": ["triumph", "win", "rise", "victory", "found"],
+    "HOOK": ["start", "begin", "open", "hook"],
+    "INCITING_INCIDENT": ["spark", "start", "turn", "incite"],
+    "RISING_ACTION": ["chase", "run", "build", "rise", "tension"],
+}
+
+
+def _beat_section_score(beat: ArcBeat, section: "SongSectionSemantics") -> float:
+    """Score how well a narrative section serves a given arc beat."""
+    score = 0.0
+    sentiment = section.lyric_sentiment.lower()
+
+    # Keyword overlap between beat and lyric sentiment.
+    keywords = _BEAT_KEYWORDS.get(beat.name, [])
+    score += sum(0.5 for kw in keywords if kw in sentiment)
+
+    # Story role alignment.
+    role = section.story_role
+    if beat.name in {"PEACE", "HOPE", "HOOK", "WORLD"} and role == "setup":
+        score += 1.0
+    if beat.name in {"RISE", "CONFLICT", "RISING_ACTION", "CRACK"} and role == "reveal":
+        score += 1.0
+    if beat.name in {"CLIMAX", "VICTORY"} and role == "climax":
+        score += 1.5
+    if beat.name in {"LOSS", "GRIEF", "FALL"} and role == "climax":
+        score += 1.0
+    if beat.name in {"ACCEPTANCE", "RESOLUTION"} and role == "resolution":
+        score += 1.5
+
+    # Emotional intensity alignment.
+    if section.emotional_intensity >= 0.7 and beat.energy_target >= 0.7:
+        score += 0.5
+    if section.emotional_intensity <= 0.4 and beat.energy_target <= 0.4:
+        score += 0.5
+
+    # Gemma arc_beat_hint direct match.
+    if section.arc_beat_hint and section.arc_beat_hint.upper() == beat.name.upper():
+        score += 2.0
+
+    return score
+
+
+def _map_arc_to_song_semantic(
+    arc_template: ArcTemplate,
+    song_meaning: SongMeaning,
+    energy_curve: List[float],
+    beat_grid: BeatGrid,
+    duration_s: float,
+) -> List[ArcBeatAnchor]:
+    """Map any arc template to narrative sections using semantic alignment."""
+    narrative = song_meaning.narrative
+    downbeats = sorted(b for b in beat_grid.downbeats if b <= duration_s)
+    sections = list(narrative.sections) if narrative else []
+
+    def _snap(t: float) -> float:
+        return nearest_downbeat(t, downbeats)
+
+    # Fallback to RMS if we don't have enough sections.
+    if len(sections) < len(arc_template.beats):
+        logger.warning(
+            "arc_anchor_falling_back_to_rms",
+            reason="too_few_narrative_sections",
+            section_count=len(sections),
+            beat_count=len(arc_template.beats),
+        )
+        return _map_arc_to_song_rms(arc_template, energy_curve, beat_grid, duration_s)
+
+    # Greedy assignment: for each beat, pick the best remaining section.
+    available = list(sections)
+    assignments: List[tuple[ArcBeat, "SongSectionSemantics", float]] = []
+    for beat in arc_template.beats:
+        if not available:
+            break
+        scored = [(s, _beat_section_score(beat, s)) for s in available]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        best_section, best_score = scored[0]
+        available.remove(best_section)
+        assignments.append((beat, best_section, best_score))
+
+    # Sort assignments by section start time to maintain chronological order.
+    assignments.sort(key=lambda x: x[1].start_s)
+
+    anchors: List[ArcBeatAnchor] = []
+    for i, (beat, section, score) in enumerate(assignments):
+        # Determine end time: next section start, or song end.
+        if i + 1 < len(assignments):
+            end_s = assignments[i + 1][1].start_s
+        else:
+            end_s = duration_s
+
+        start_s = max(0.0, min(section.start_s, end_s - 0.5))
+        end_s = max(start_s + 0.5, min(duration_s, end_s))
+
+        anchors.append(
+            ArcBeatAnchor(
+                name=beat.name,
+                start_s=round(_snap(start_s), 3),
+                end_s=round(_snap(end_s), 3),
+                energy_target=beat.energy_target,
+                emotion_target=beat.emotion_target,
+                preferred_shots=beat.preferred_shots,
+                text_archetype=beat.text_archetype,
+                reason=f"section_role={section.story_role},sentiment='{section.lyric_sentiment}',score={score:.1f}",
+            )
+        )
+
+    logger.info(
+        "arc_anchors_from_semantic",
+        arc=arc_template.name,
+        anchors=[(a.name, a.start_s, a.end_s, a.reason) for a in anchors],
+    )
+    return anchors
+
+
 def map_arc_to_song(
     arc_template: ArcTemplate,
     energy_curve: List[float],
@@ -257,122 +386,9 @@ def map_arc_to_song(
         logger.warning("arc_anchor_falling_back_to_rms", reason="song_meaning_missing")
         return _map_arc_to_song_rms(arc_template, energy_curve, beat_grid, duration_s)
 
-    narrative = song_meaning.narrative
-    section_moods = song_meaning.section_moods
-    downbeats = sorted(b for b in beat_grid.downbeats if b <= duration_s)
-    sections = narrative.sections
-
-    if len(sections) < 3:
-        logger.warning(
-            "arc_anchor_falling_back_to_rms",
-            reason="too_few_narrative_sections",
-            section_count=len(sections),
-        )
-        return _map_arc_to_song_rms(arc_template, energy_curve, beat_grid, duration_s)
-
-    # HOOK: first section with story_role == setup OR emotional_intensity < 0.4.
-    hook_section = _find_first(
-        sections,
-        lambda s: s.story_role == "setup" or s.emotional_intensity < 0.4,
-        default=sections[0],
+    return _map_arc_to_song_semantic(
+        arc_template, song_meaning, energy_curve, beat_grid, duration_s
     )
-
-    # CRISIS: sentiment matching crisis keywords, else energy trough.
-    crisis_scores = [_sentiment_score(s.lyric_sentiment, _CRISIS_KEYWORDS) for s in sections]
-    if max(crisis_scores) > 0:
-        crisis_section = sections[int(np.argmax(crisis_scores))]
-        crisis_reason = f"lyric_sentiment='{crisis_section.lyric_sentiment}'"
-    else:
-        crisis_section = _energy_trough_section(song_meaning, energy_curve, duration_s)
-        crisis_reason = "energy_trough_fallback"
-
-    # VICTORY: sentiment + mood triumphant/uplifting, else Gemma hint, else last section.
-    victory_candidates = [
-        s
-        for s in sections
-        if _sentiment_score(s.lyric_sentiment, _VICTORY_KEYWORDS) > 0
-        and any(m in ("triumphant", "uplifting", "hopeful") for m, _ in _section_top_moods(section_moods, s.start_s, s.end_s))
-    ]
-    if victory_candidates:
-        victory_section = victory_candidates[-1]
-        victory_reason = "lyric+mood confirmed"
-    else:
-        victory_hints = [s for s in sections if s.arc_beat_hint == "VICTORY"]
-        if victory_hints:
-            victory_section = victory_hints[-1]
-            victory_reason = "gemma_arc_beat_hint"
-        else:
-            victory_section = sections[-1]
-            victory_reason = "last_section_fallback"
-
-    # WORLD / CONFLICT fill between HOOK and CRISIS proportionally.
-    world_start = hook_section.end_s
-    conflict_end = crisis_section.start_s
-    gap = max(0.0, conflict_end - world_start)
-    world_end = world_start + gap * 0.6
-    conflict_start = world_end
-
-    def _snap(t: float) -> float:
-        return nearest_downbeat(t, downbeats)
-
-    anchors = [
-        ArcBeatAnchor(
-            "HOOK",
-            round(_snap(hook_section.start_s), 3),
-            round(_snap(hook_section.end_s), 3),
-            energy_target=0.3,
-            emotion_target="calm",
-            preferred_shots=["wide", "medium_wide"],
-            text_archetype="The world before the story",
-            reason=f"section_role={hook_section.story_role}",
-        ),
-        ArcBeatAnchor(
-            "WORLD",
-            round(_snap(world_start), 3),
-            round(_snap(world_end), 3),
-            energy_target=0.4,
-            emotion_target="intrigue",
-            preferred_shots=["wide", "medium"],
-            text_archetype="Establishing the world",
-            reason="filled between HOOK and CRISIS",
-        ),
-        ArcBeatAnchor(
-            "CONFLICT",
-            round(_snap(conflict_start), 3),
-            round(_snap(conflict_end), 3),
-            energy_target=0.6,
-            emotion_target="tension",
-            preferred_shots=["medium", "medium_close_up"],
-            text_archetype="The conflict escalates",
-            reason="pre-CRISIS ramp",
-        ),
-        ArcBeatAnchor(
-            "CRISIS",
-            round(_snap(crisis_section.start_s), 3),
-            round(_snap(crisis_section.end_s), 3),
-            energy_target=0.3,
-            emotion_target="grief",
-            preferred_shots=["close_up", "extreme_close_up"],
-            text_archetype="The darkest moment",
-            reason=crisis_reason,
-        ),
-        ArcBeatAnchor(
-            "VICTORY",
-            round(_snap(victory_section.start_s), 3),
-            round(_snap(duration_s), 3),
-            energy_target=0.9,
-            emotion_target="triumph",
-            preferred_shots=["wide", "medium_wide"],
-            text_archetype="The triumph",
-            reason=victory_reason,
-        ),
-    ]
-
-    logger.info(
-        "arc_anchors_from_semantic",
-        anchors=[(a.name, a.start_s, a.end_s, a.reason) for a in anchors],
-    )
-    return anchors
 
 
 def anchor_for_time(anchors: List[ArcBeatAnchor], time_s: float) -> Optional[ArcBeatAnchor]:

@@ -467,21 +467,23 @@ def _ollama_generate_sync(
     max_tokens: int = 256,
     temperature: float = 0.0,
 ) -> str:
-    """Synchronous Ollama /api/generate call."""
+    """Synchronous Ollama /api/chat call with keep_alive=-1."""
     payload = {
         "model": model,
-        "prompt": prompt,
+        "messages": [{"role": "user", "content": prompt}],
         "stream": False,
         "format": "json",
+        "keep_alive": -1,
         "options": {
             "temperature": temperature,
             "num_predict": max_tokens,
         },
     }
-    resp = httpx.post(f"{base_url}/api/generate", json=payload, timeout=60.0)
+    resp = httpx.post(f"{base_url}/api/chat", json=payload, timeout=60.0)
     resp.raise_for_status()
     data = resp.json()
-    text = data.get("response", "")
+    message = data.get("message") or {}
+    text = message.get("content", "") if isinstance(message, dict) else ""
     return text if isinstance(text, str) else json.dumps(text)
 
 

@@ -17,9 +17,10 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-# Keep TensorFlow/DeepFace on CPU and suppress its verbose C++ logging.
+# Suppress TensorFlow/DeepFace verbose C++ logging. Do NOT hide CUDA here;
+# that would prevent downstream PyTorch modules (e.g. SigLIP-2) from using the
+# GPU in the same process.
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", "-1")
 
 from shared_py.feature_tracer import FeatureTracer
 from shared_py.models import ClipEmotionProfile, EmotionSample, EmotionLabel
@@ -515,6 +516,7 @@ def compute_clip_emotion_profile(
             f"primary={primary},face_conf={face_confidence:.2f},audio_conf={audio_confidence:.2f},"
             f"motion={motion_vibe:.2f},warmth={color_warmth:.2f}"
         )
+        ft.real()
         _write_emotion_cache(effective_cache_path, profile)
         return profile
 

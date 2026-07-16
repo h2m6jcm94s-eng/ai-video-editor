@@ -151,15 +151,15 @@ def _dominant_motion(flows: List[np.ndarray]) -> str:
 def _stability_score(flows: List[np.ndarray]) -> float:
     """High-frequency motion = shake (bad); low-frequency = intentional camera move (good)."""
     if not flows or len(flows) < 4:
-        return 0.5
+        return 0.0
     magnitudes = np.array([np.sqrt(flow[..., 0] ** 2 + flow[..., 1] ** 2).mean() for flow in flows])
     if magnitudes.std() < 1e-6:
-        return 0.5
+        return 0.0
     fft = np.fft.rfft(magnitudes - magnitudes.mean())
     power = np.abs(fft) ** 2
     total = power.sum()
     if total == 0:
-        return 0.5
+        return 0.0
     freqs = np.fft.rfftfreq(len(magnitudes))
     # Low frequencies (< 0.25 of Nyquist) are good; high frequencies are shake.
     low_freq_power = power[freqs <= 0.25].sum()
@@ -168,14 +168,14 @@ def _stability_score(flows: List[np.ndarray]) -> float:
 
 def _sharpness_score(frame: np.ndarray) -> float:
     if cv2 is None:
-        return 0.5
+        return 0.0
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     return float(np.clip(cv2.Laplacian(gray, cv2.CV_64F).var() / 500.0, 0.0, 1.0))
 
 
 def _audio_onset_score(audio_path: str, start_s: float, end_s: float) -> float:
     if not _HAS_LIBROSA or librosa is None:
-        return 0.5
+        return 0.0
     try:
         y, sr = librosa.load(audio_path, sr=22050, mono=True, offset=start_s, duration=end_s - start_s)
         if y.size == 0:
@@ -184,7 +184,7 @@ def _audio_onset_score(audio_path: str, start_s: float, end_s: float) -> float:
         return float(np.clip(onset_env.mean() / onset_env.max() if onset_env.max() > 0 else 0.0, 0.0, 1.0))
     except Exception as e:
         logger.warning("Audio onset scoring failed", error=str(e))
-        return 0.5
+        return 0.0
 
 
 def _cache_key(video_path: str, window_s: float, stride_s: float, target_height: int) -> str:
@@ -257,7 +257,7 @@ def compute_clip_heatmap(
                 "motion": _motion_energy(window_flows),
                 "aesthetic": score_image(frame),
                 "sharpness": _sharpness_score(frame),
-                "audio": _audio_onset_score(audio_path, start_s, end_s) if audio_path else 0.5,
+                "audio": _audio_onset_score(audio_path, start_s, end_s) if audio_path else 0.0,
                 "stability": _stability_score(flows[max(0, i - 2) : i + 2]),
             }
 
@@ -382,21 +382,20 @@ def compute_clip_heatmaps_batch(
                 logger.warning("Heatmap cache read failed, recomputing", error=str(e))
         to_compute.append(path)
 
+    def _compute_one_safe(video_path: str) -> List[ClipWindow]:
+        try:
+            return compute_clip_heatmap_cached(
+                video_path, audio_path, window_s, stride_s, target_height, cache_dir
+            )
+        except Exception as e:
+            logger.warning("Heatmap computation failed for clip", clip=video_path, error=str(e))
+            return []
+
     if to_compute:
         workers = max_workers if max_workers is not None else _default_max_workers()
         logger.info("Computing heatmaps in parallel", clips=len(to_compute), workers=workers)
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            computed = list(
-                pool.map(
-                    compute_clip_heatmap_cached,
-                    to_compute,
-                    [audio_path] * len(to_compute),
-                    [window_s] * len(to_compute),
-                    [stride_s] * len(to_compute),
-                    [target_height] * len(to_compute),
-                    [cache_dir] * len(to_compute),
-                )
-            )
+            computed = list(pool.map(_compute_one_safe, to_compute))
         computed_count = 0
         empty_count = 0
         for path, windows in zip(to_compute, computed):
@@ -409,6 +408,7 @@ def compute_clip_heatmaps_batch(
             from_cache=from_cache,
             computed=computed_count,
             empty=empty_count,
+            failed=len(to_compute) - computed_count,
             total=len(video_paths),
         )
     else:

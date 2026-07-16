@@ -10,7 +10,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from reason_worker.iconic_quotes import (
     TranscriptSegment,
+    _is_latin_script,
+    _language_agnostic_salience,
     _llm_cache_key,
+    _repetition_score,
     _text_emotional_intensity,
     detect_iconic_quotes,
     should_detect_iconic_quotes,
@@ -160,3 +163,58 @@ def test_detect_iconic_quotes_scales_llm_budget_with_likeness():
         assert client.call_count <= 20
 
     _with_fake_client(_run)
+
+
+def test_repetition_score_boosts_repeated_phrases():
+    segments = [
+        TranscriptSegment(start_s=0.0, end_s=1.0, text="君の名は"),
+        TranscriptSegment(start_s=1.0, end_s=2.0, text="もう一度"),
+        TranscriptSegment(start_s=2.0, end_s=3.0, text="君の名は"),
+        TranscriptSegment(start_s=3.0, end_s=4.0, text="君の名は"),
+    ]
+    assert _repetition_score("君の名は", segments) == 1.0
+    assert _repetition_score("もう一度", segments) == 0.0
+
+
+def test_is_latin_script_detects_japanese():
+    assert _is_latin_script("I want to be a legend") is True
+    assert _is_latin_script("君の名は") is False
+    assert _is_latin_script("中文歌词") is False
+
+
+def test_detect_iconic_quotes_non_latin_uses_llm_and_salience():
+    def _run(client):
+        segments = [
+            TranscriptSegment(start_s=0.0, end_s=1.75, text="君の名は"),
+            TranscriptSegment(start_s=1.75, end_s=3.5, text="もう一度"),
+            TranscriptSegment(start_s=3.5, end_s=5.25, text="君の名は"),
+            TranscriptSegment(start_s=5.25, end_s=7.0, text="君の名は"),
+        ]
+        # Without a clip path salience is shape/repetition only.
+        quotes = detect_iconic_quotes(
+            segments,
+            source_ip_hint="Kimi No Nawa",
+            iconic_weights={
+                "emotional_intensity": 0.0,
+                "loudness_normalized": 0.0,
+                "iconic_llm_score": 0.0,
+                "vocal_uniqueness": 0.0,
+                "isolation": 0.0,
+                "language_agnostic_salience": 1.0,
+            },
+        )
+        # The language-agnostic path now calls the LLM for non-Latin text too.
+        assert client.call_count > 0
+        # Repeated Japanese phrase should surface.
+        texts = [q.segment.text for q in quotes]
+        assert any("君の名は" in t for t in texts)
+
+    _with_fake_client(_run)
+
+
+def test_language_agnostic_salience_zero_for_invalid_shape():
+    segments = [
+        TranscriptSegment(start_s=0.0, end_s=0.2, text="a"),
+    ]
+    score = _language_agnostic_salience(segments[0], segments, None, None)
+    assert score == 0.0

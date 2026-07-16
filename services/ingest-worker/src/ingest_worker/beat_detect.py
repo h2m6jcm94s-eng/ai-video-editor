@@ -181,12 +181,20 @@ def detect_beats_madmom(audio_path: str) -> Optional[BeatGrid]:
         return None
 
 
-def _label_structure_segments(boundary_times: List[float], energies: List[float]) -> List[str]:
+def _label_structure_segments(
+    boundary_times: List[float],
+    energies: List[float],
+    is_calm: bool = False,
+) -> List[str]:
     """Assign conventional song-section labels to detected boundaries.
 
     Labels are inferred from the relative energy and temporal order of each
     segment. This is a heuristic fallback; when allin1 is available it provides
     real section labels from a trained model.
+
+    When ``is_calm`` is true (e.g. piano ballad / acoustic), the highest-energy
+    segment is treated as a ``chorus`` rather than a ``drop`` so calm songs are
+    not falsely described as EDM-style drops.
     """
     n = len(energies)
     labels = [""] * n
@@ -196,8 +204,8 @@ def _label_structure_segments(boundary_times: List[float], energies: List[float]
     # Energy-ranked candidates among interior segments.
     ranked = sorted(((energies[i], i) for i in range(1, n - 1)), reverse=True)
     if ranked:
-        labels[ranked[0][1]] = "drop"
-    if len(ranked) > 1:
+        labels[ranked[0][1]] = "chorus" if is_calm else "drop"
+    if len(ranked) > 1 and not is_calm:
         labels[ranked[1][1]] = "chorus"
 
     drop_idx = next((i for i, l in enumerate(labels) if l == "drop"), None)
@@ -210,6 +218,32 @@ def _label_structure_segments(boundary_times: List[float], energies: List[float]
         labels[i] = "verse" if ref is None or i < ref else "bridge"
 
     return labels
+
+
+def _is_calm_ballad(
+    energies: List[float],
+    zcrs: List[float],
+    centroids: List[float],
+) -> bool:
+    """Return True if the segment statistics describe a calm/acoustic song.
+
+    Calm songs have low absolute energy, a small dynamic range, low spectral
+    centroid (dark/warm), and low zero-crossing rate (sustained tones).
+    """
+    if len(energies) < 3:
+        return False
+    arr = np.asarray(energies, dtype=float)
+    lo, hi = float(np.min(arr)), float(np.max(arr))
+    if hi <= 0:
+        return False
+    norm_range = (hi - lo) / hi
+    norm_max = hi / (np.mean(arr) + 1e-9)
+    # Energy is low and fairly flat across segments.
+    low_energy = norm_max < 4.0 and norm_range < 0.55
+    # Warm/dark spectrum + sustained notes (piano/strings/voice).
+    warm = float(np.mean(centroids)) < 1600.0
+    sustained = float(np.mean(zcrs)) < 0.08
+    return low_energy and warm and sustained
 
 
 def _detect_structure_librosa(audio_path: str, beat_times: np.ndarray) -> List[BeatSegment]:
@@ -237,10 +271,14 @@ def _detect_structure_librosa(audio_path: str, beat_times: np.ndarray) -> List[B
         mel = librosa.feature.melspectrogram(y=y, sr=sr, hop_length=hop)
         logmel = librosa.power_to_db(mel, ref=np.max)
         rms = librosa.feature.rms(y=y, hop_length=hop)[0]
+        zcr = librosa.feature.zero_crossing_rate(y, hop_length=hop)
+        centroid = librosa.feature.spectral_centroid(y=y, sr=sr, hop_length=hop)
 
         chroma_sync = _sync(chroma, beat_frames)
         logmel_sync = _sync(logmel, beat_frames)
         rms_sync = _sync(rms.reshape(1, -1), beat_frames)
+        zcr_sync = _sync(zcr, beat_frames)
+        centroid_sync = _sync(centroid, beat_frames)
 
         # Weight RMS so energy influences the clustering while still respecting
         # harmonic similarity via chroma/log-mel.
@@ -261,7 +299,16 @@ def _detect_structure_librosa(audio_path: str, beat_times: np.ndarray) -> List[B
             float(np.mean(rms_sync[0, s:e]))
             for s, e in zip(boundary_indices[:-1], boundary_indices[1:])
         ]
-        labels = _label_structure_segments(boundary_times, seg_energy)
+        seg_zcr = [
+            float(np.mean(zcr_sync[0, s:e]))
+            for s, e in zip(boundary_indices[:-1], boundary_indices[1:])
+        ]
+        seg_centroid = [
+            float(np.mean(centroid_sync[0, s:e]))
+            for s, e in zip(boundary_indices[:-1], boundary_indices[1:])
+        ]
+        is_calm = _is_calm_ballad(seg_energy, seg_zcr, seg_centroid)
+        labels = _label_structure_segments(boundary_times, seg_energy, is_calm=is_calm)
 
         return [
             BeatSegment(start=start, end=end, label=label)

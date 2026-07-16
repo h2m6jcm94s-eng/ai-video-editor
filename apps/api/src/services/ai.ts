@@ -75,7 +75,7 @@ Rules:
 - NEVER delete or remove slots. The slot count must stay the same. If a prompt asks to drop a clip, change selectedClipId or targetShotType instead of removing the slot.
 - NEVER set slot durations to 0 or remove required fields (index, startS, durationS, beatIndex, section, targetShotType, subjectHint, motionHint).
 - Duration changes must keep total within the song length and every slot durationS must be >= 0.5 seconds.
-- If you add visual/audio effects, you MUST use only these effect types: zoom_punch_in, focus_pull, freeze_frame, speed_ramp, shake, glitch, vignette, film_grain, color_pop, text_kinetic, lower_third, callout_arrow, whoosh_sfx, ding_sfx, record_scratch_sfx.
+- If you add visual/audio effects, you MUST use only these effect types: zoom_punch_in, focus_pull, freeze_frame, speed_ramp, shake, glitch, vignette, film_grain, color_pop, chromatic_aberration, hm_mvgd_hm, text_kinetic, lower_third, callout_arrow, whoosh_sfx, ding_sfx, record_scratch_sfx.
 - To append an effect to a slot, use op "add" with path "/slots/N/effects/-". Never use "-/" as the operation value.
 - Do not add new top-level keys to globals or the cutlist. Only modify existing fields or use allowed effect types.
 - Transition values are free strings, but prefer common transitions like hard_cut, fade, crossfade, wipe, zoom, dissolve.

@@ -159,6 +159,8 @@ export type EffectParams = {
   vignette: { intensity: number; color: string };
   film_grain: { intensity: number };
   color_pop: { hueShift: number; saturation: number };
+  chromatic_aberration: { shiftX: number; shiftY: number; intensity: number };
+  hm_mvgd_hm: { strength: number; warmth: number; tint: number };
   text_kinetic: {
     text: string;
     animation: "fade_up" | "typewriter" | "pop" | "slide_left";

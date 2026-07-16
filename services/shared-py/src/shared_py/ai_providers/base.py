@@ -29,8 +29,8 @@ class AIProvider(ABC):
         "Match energy_curve: low energy = wide/establishing shots, high energy = close-ups/action. "
         "Do not request shot types the user doesn't have. Keep total duration under 60 seconds for the MVP. "
         "Populate slot.effects[] and overlays[] to make the edit feel alive, not like a slideshow. "
-        "Effects: zoom_punch_in on high-energy downbeats, vignette on the highest-energy slot, "
-        "film_grain at section boundaries, focus_pull on long low-energy slots. "
+        "Effects: zoom_punch_in on high-energy downbeats/kicks, vignette on the highest-energy slot or CRISIS/VICTORY beats, "
+        "film_grain at section boundaries, focus_pull on long low-energy slots, chromatic_aberration on aggressive beats, hm_mvgd_hm for stylised colour grade. "
         "Overlays: add 1-3 short text overlays (hook, section labels, call-to-action) timed to energy peaks. "
         "Do not stack more than 2 effects per slot."
     )
@@ -134,10 +134,12 @@ class AIProvider(ABC):
             "",
             "## Effects and Overlays (MANDATORY — do not leave empty)",
             "For each slot, decide if it needs effects in slot.effects[]:",
-            "- zoom_punch_in: on downbeats where energyLevel > 0.7 (targetScale 1.15-1.3, durationMs 200-300, easing easeOut).",
+            "- zoom_punch_in: on downbeats/kicks where energyLevel > 0.5 (targetScale 1.15-1.3, durationMs 200-300, easing easeOut).",
             "- focus_pull: on slots where energyLevel < 0.4 and durationS > 1.5 (targetBlur 0→6, durationMs 600-1000).",
             "- film_grain: on the first slot after a section boundary (intensity 0.15).",
-            "- vignette: on the single highest-energy slot in the song (intensity 0.3-0.5).",
+            "- vignette: on the single highest-energy slot or CRISIS/VICTORY beats (intensity 0.3-0.5).",
+            "- chromatic_aberration: on aggressive high-energy beats (shiftX 2-6, intensity 0.2-0.5).",
+            "- hm_mvgd_hm: on the strongest slot for stylised colour grade (strength 0.4-0.7).",
             "- Do not add more than 2 effects per slot.",
             "",
             "Add 1-3 text overlays in overlays[]:",

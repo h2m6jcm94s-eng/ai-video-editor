@@ -95,12 +95,16 @@ async def test_generate_from_reference_workflow_success(minimal_cutlist):
                 ]
             }
 
+        @activity.defn(name="ensure_song_meaning")
+        async def _ensure_song_meaning(_song_asset_id: str, _metadata: dict, _storage_key: str):
+            return {"song_meaning": None}
+
         @activity.defn(name="generate_cutlist_activity")
         async def _generate_cutlist_activity(*_args, **_kwargs):
-            return minimal_cutlist
+            return {"cutlist": minimal_cutlist, "behavior": {}}
 
         @activity.defn(name="rank_clips_activity")
-        async def _rank_clips_activity(cutlist_raw: dict, clip_asset_ids: list, clip_metadata: dict):
+        async def _rank_clips_activity(cutlist_raw: dict, clip_asset_ids: list, clip_metadata: dict, *_args, **_kwargs):
             cutlist_raw["slots"][0]["selectedClipId"] = clip_id
             cutlist_raw["slots"][0]["rankedClipIds"] = [clip_id]
             cutlist_raw["slots"][0]["confidence"] = 0.95
@@ -126,6 +130,7 @@ async def test_generate_from_reference_workflow_success(minimal_cutlist):
                 _fetch_project_context,
                 _ensure_beat_grid,
                 _ensure_shot_boundaries,
+                _ensure_song_meaning,
                 _generate_cutlist_activity,
                 _rank_clips_activity,
                 _save_generated_cutlist,

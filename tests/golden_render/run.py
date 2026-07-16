@@ -19,6 +19,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SUITE = REPO_ROOT / "scripts" / "golden-render-suite.py"
 EXPECTED = Path(__file__).resolve().parent / "expected" / "expected_signatures.json"
 
+WAVE10_CRITERIA = {
+    "zoom_punch_ins_on_kicks",
+    "vignette_on_crisis_or_victory",
+    "hm_mvgd_hm_shipped",
+}
+
 
 def _load_expected() -> Dict[str, Any]:
     with open(EXPECTED, "r", encoding="utf-8") as f:
@@ -121,22 +127,31 @@ def main(argv: List[str] | None = None) -> int:
     )
     parser.add_argument(
         "--feature-wave-8",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Apply Wave 8 criteria.",
     )
     parser.add_argument(
         "--feature-wave-9",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Apply Wave 9 criteria.",
     )
     parser.add_argument(
         "--feature-wave-10",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Apply Wave 10 criteria.",
     )
     args = parser.parse_args(argv)
 
     expected = _load_expected()
+    if not args.feature_wave_10:
+        expected = {
+            name: spec
+            for name, spec in expected.items()
+            if name not in WAVE10_CRITERIA
+        }
     suite_cmd = [sys.executable, str(SUITE), "--json"]
     if args.feature_emotion_led_cuts:
         suite_cmd.append("--feature-emotion-led-cuts")

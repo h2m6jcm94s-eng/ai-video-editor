@@ -229,6 +229,30 @@ class TestSongStructure:
         assert "chorus" in labels
         assert "drop" in labels
 
+    def test_calm_ballad_labels_avoid_drop(self):
+        times = [0.0, 10.0, 20.0, 30.0, 40.0, 50.0]
+        energies = [0.04, 0.05, 0.06, 0.05, 0.07, 0.04]
+        labels = beat_detect_module._label_structure_segments(
+            times, energies, is_calm=True
+        )
+        assert labels[0] == "intro"
+        assert labels[-1] == "outro"
+        assert "drop" not in labels
+        assert "chorus" in labels
+        assert "verse" in labels
+
+    def test_is_calm_ballad_detects_piano_ballad(self):
+        energies = [0.04, 0.05, 0.06, 0.05, 0.07, 0.04]
+        zcrs = [0.02] * 6
+        centroids = [900.0] * 6
+        assert beat_detect_module._is_calm_ballad(energies, zcrs, centroids)
+
+    def test_is_calm_ballad_rejects_edm_drop(self):
+        energies = [0.1, 0.3, 0.8, 0.2, 0.9, 0.1]
+        zcrs = [0.02] * 6
+        centroids = [900.0] * 6
+        assert not beat_detect_module._is_calm_ballad(energies, zcrs, centroids)
+
     @pytest.mark.slow
     @pytest.mark.skipif(not os.path.exists("test files/batch 2/Let You Down - Dawid Podsiadło.mp3"), reason="Batch 2 song not present")
     def test_librosa_structure_is_not_equal_chunks(self):

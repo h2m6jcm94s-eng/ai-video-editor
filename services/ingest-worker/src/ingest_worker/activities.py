@@ -25,6 +25,7 @@ from ingest_worker.stem_separate import separate_song_stems
 from ingest_worker.vocal_emotion import analyze_vocal_stem
 from ingest_worker.clip_emotion import compute_clip_emotion_profile
 from ingest_worker.clip_semantic import embed_clip
+from ingest_worker.clip_capability import compute_clip_capability_profile
 from ingest_worker.probe import probe_asset_remote
 from style_worker.siglip2 import embed_video_frames as siglip2_embed_video_frames
 from ingest_worker.shot_detect import detect_shot_boundaries
@@ -262,6 +263,25 @@ async def compute_siglip2_embedding_activity(asset_id: str, storage_key: str) ->
         metadata = {"siglip2EmbeddingPath": cache_path}
         await _patch_asset_metadata(asset_id, metadata)
         return {"asset_id": asset_id, "siglip2_embedding": metadata}
+    finally:
+        try:
+            os.remove(local_path)
+        except OSError:
+            pass
+
+
+@activity.defn
+async def compute_clip_capability_activity(asset_id: str, storage_key: str) -> dict:
+    """Download a clip asset, compute its intent capability map, and persist metadata."""
+    local_path = download_asset(storage_key, _local_clip_path(asset_id, storage_key))
+    try:
+        cache_dir = Path(os.environ.get("STORAGE_ROOT", r"E:\ai-video-editor-storage")) / "clip_capability"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_path = str(cache_dir / f"{asset_id}.json")
+        profile = compute_clip_capability_profile(local_path, clip_id=asset_id, cache_path=cache_path)
+        metadata = {"clipCapability": profile.model_dump(by_alias=True)}
+        await _patch_asset_metadata(asset_id, metadata)
+        return {"asset_id": asset_id, "clip_capability": metadata["clipCapability"]}
     finally:
         try:
             os.remove(local_path)

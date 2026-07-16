@@ -21,14 +21,15 @@ class RankTuning:
     MOMENTUM_WEIGHT: float = 0.3
 
     # Score component weights in ``_score_clip``.  Sum == 1.0.
-    SIGLIP_SEMANTIC_WEIGHT: float = 0.18
-    EMOTION_MATCH_WEIGHT: float = 0.25
-    MOOD_MOTION_WEIGHT: float = 0.12
-    HEATMAP_WEIGHT: float = 0.15
-    SHOT_TYPE_WEIGHT: float = 0.10
-    AESTHETIC_WEIGHT: float = 0.08
+    SIGLIP_SEMANTIC_WEIGHT: float = 0.15
+    EMOTION_MATCH_WEIGHT: float = 0.23
+    MOOD_MOTION_WEIGHT: float = 0.10
+    HEATMAP_WEIGHT: float = 0.14
+    SHOT_TYPE_WEIGHT: float = 0.09
+    AESTHETIC_WEIGHT: float = 0.07
     MOTION_ENERGY_WEIGHT: float = 0.05
     DURATION_MATCH_WEIGHT: float = 0.07
+    INTENT_MATCH_WEIGHT: float = 0.10
 
     # Backwards-compatible aliases for old weight names (deprecated).
     SEMANTIC_WEIGHT: float = SIGLIP_SEMANTIC_WEIGHT
@@ -49,8 +50,6 @@ class RankTuning:
     EXHAUST_FAIR_BONUS: float = -0.4
     USAGE_CAP_OVERFLOW_FACTOR: float = 1.2
 
-    # Semantic fallback when no embeddings are available.
-    DEFAULT_SEMANTIC_SCORE: float = 0.7
     # Rescale cosine similarity from [-1, 1] to [0, 1].
     COSINE_RESCALE_OFFSET: float = 0.5
     COSINE_RESCALE_SCALE: float = 0.5

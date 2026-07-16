@@ -16,6 +16,11 @@ from shared_py.models import CutList, Slot, RenderConfig, AudioTrack, Overlay, W
 from shared_py.tuning import COMPILER
 from shared_py.logging_config import StructuredLogger
 from render_worker.edits.flash_frame import flash_frame_filter
+from render_worker.edits.zoom_punch import zoom_punch_filter
+from render_worker.edits.focus_pull import focus_pull_filter
+from render_worker.edits.vignette import vignette_filter
+from render_worker.edits.chromatic_aberration import chromatic_aberration_filter
+from render_worker.edits.hm_mvgd_hm import hm_mvgd_hm_filter
 from render_worker.kinetic_animations import default_for_style, preset as _kinetic_preset
 from render_worker.reframe import reframe_filter
 from render_worker.stabilize import stabilization_filter
@@ -1036,26 +1041,25 @@ def _apply_video_effects(
             )
 
         elif etype == "zoom_punch_in":
-            scale = _get_param(params, "target_scale", 1.3)
-            dur = min(_get_param(params, "duration_ms", 300) / 1000.0, rel_end - rel_start)
-            center_x = _get_param(params, "center_x", 0.5)
-            center_y = _get_param(params, "center_y", 0.5)
-            # Use a time-varying crop window to simulate a zoom/punch-in.
-            # ``n`` is the frame index relative to the start of the segment.
-            fps = config.fps or 30
-            start_frame = int(rel_start * fps)
-            end_frame = start_frame + max(1, int(dur * fps))
-            ramp_expr = f"max(0\\,min(1\\,(n-{start_frame})/({end_frame}-{start_frame})))"
             filters.append(
-                f"crop='iw/(1+({scale}-1)*{ramp_expr})':"
-                f"'ih/(1+({scale}-1)*{ramp_expr})':"
-                f"(iw-ow)*{center_x}:(ih-oh)*{center_y}"
+                zoom_punch_filter(
+                    rel_start,
+                    rel_end,
+                    target_scale=_get_param(params, "target_scale", 1.3),
+                    duration_ms=_get_param(params, "duration_ms", 300),
+                    center_x=_get_param(params, "center_x", 0.5),
+                    center_y=_get_param(params, "center_y", 0.5),
+                    fps=config.fps or 30.0,
+                )
             )
 
         elif etype == "vignette":
-            intensity = _get_param(params, "intensity", 0.4)
             filters.append(
-                f"vignette=PI/{max(0.01, 1 - intensity)}:enable='{_enable_expr(rel_start, rel_end)}'"
+                vignette_filter(
+                    rel_start,
+                    rel_end,
+                    intensity=_get_param(params, "intensity", 0.4),
+                )
             )
 
         elif etype == "film_grain":
@@ -1078,19 +1082,14 @@ def _apply_video_effects(
             )
 
         elif etype == "focus_pull":
-            target_blur = _get_param(params, "target_blur", 4.0)
-            dur = min(_get_param(params, "duration_ms", 600) / 1000.0, rel_end - rel_start)
-            # Apply a Gaussian blur ramped up over the effect window.  gblur's
-            # sigma is constant, so we simulate a ramp with a short fade-in by
-            # chaining two blur passes of increasing strength.
-            mid = rel_start + dur * 0.5
-            filters.append(
-                f"gblur=sigma={target_blur * 0.4:.2f}:steps=1:"
-                f"enable='{_enable_expr(rel_start, mid)}'"
-            )
-            filters.append(
-                f"gblur=sigma={target_blur:.2f}:steps=2:"
-                f"enable='{_enable_expr(mid, rel_start + dur)}'"
+            filters.extend(
+                focus_pull_filter(
+                    rel_start,
+                    rel_end,
+                    target_blur=_get_param(params, "target_blur", 4.0),
+                    duration_ms=_get_param(params, "duration_ms", 600),
+                    fps=config.fps or 30.0,
+                )
             )
 
         elif etype == "glitch":
@@ -1116,6 +1115,28 @@ def _apply_video_effects(
                 filters.append(
                     f"hue=h={hue_shift}:enable='{_enable_expr(rel_start, rel_end)}'"
                 )
+
+        elif etype == "chromatic_aberration":
+            filters.append(
+                chromatic_aberration_filter(
+                    rel_start,
+                    rel_end,
+                    shift_x=_get_param(params, "shift_x", 3),
+                    shift_y=_get_param(params, "shift_y", 0),
+                    intensity=_get_param(params, "intensity", 0.3),
+                )
+            )
+
+        elif etype == "hm_mvgd_hm":
+            filters.append(
+                hm_mvgd_hm_filter(
+                    rel_start,
+                    rel_end,
+                    strength=_get_param(params, "strength", 0.5),
+                    warmth=_get_param(params, "warmth", 0.0),
+                    tint=_get_param(params, "tint", 0.0),
+                )
+            )
 
         elif etype in ("text_kinetic", "lower_third", "callout_arrow"):
             text = _get_param(params, "text", "")

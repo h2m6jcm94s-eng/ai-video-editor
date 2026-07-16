@@ -158,7 +158,8 @@ def _extract_lut_reinhard(
     )
 
     frames_arr = np.stack(frames).reshape(-1, 3).astype(np.float32)
-    sample_idx = np.random.choice(len(frames_arr), min(100000, len(frames_arr)), replace=False)
+    n_samples = min(100000, len(frames_arr))
+    sample_idx = np.linspace(0, len(frames_arr) - 1, n_samples, dtype=int)
     samples = frames_arr[sample_idx]
 
     mean_color = samples.mean(axis=0)
@@ -201,7 +202,8 @@ def _build_style_analysis(
 ) -> StyleAnalysis:
     """Compute style metadata from sampled frames."""
     frames_arr = np.stack(frames).reshape(-1, 3).astype(np.float32)
-    sample_idx = np.random.choice(len(frames_arr), min(100000, len(frames_arr)), replace=False)
+    n_samples = min(100000, len(frames_arr))
+    sample_idx = np.linspace(0, len(frames_arr) - 1, n_samples, dtype=int)
     samples = frames_arr[sample_idx]
 
     mean_color = samples.mean(axis=0)

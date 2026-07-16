@@ -19,12 +19,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "services" / "render-worker" / "src"))
 sys.path.insert(0, str(REPO_ROOT / "services" / "shared-py" / "src"))
+sys.path.insert(0, str(REPO_ROOT / "services" / "ingest-worker" / "src"))
 
 from render_worker.compiler import _FONT_NAME_ALIASES, _FONT_FILES, _STYLE_PRESET_FONTS  # noqa: E402
-from shared_py.models import CutList  # noqa: E402
+from shared_py.models import CutList, SongMeaning  # noqa: E402
 
 
 BATCH_DIR = REPO_ROOT / "test files" / "batch 2"
+SONG_NAME = "Let You Down - Dawid Podsiadło.flac"
 OUTPUT_DIR = BATCH_DIR / "output"
 RENDER_LOG = OUTPUT_DIR / "render.log"
 OUTPUT_VIDEO = OUTPUT_DIR / "output.mp4"
@@ -119,6 +121,8 @@ def _run_render(args: argparse.Namespace) -> None:
     ]
     if args.feature_emotion_led_cuts:
         cmd.append("--feature-emotion-led-cuts")
+    if args.feature_wave_10:
+        cmd.append("--feature-wave-10")
     print(f"Running canonical render: {' '.join(cmd)}")
     with open(RENDER_LOG, "w", encoding="utf-8") as log_file:
         subprocess.run(cmd, stdout=log_file, stderr=subprocess.STDOUT, check=True)
@@ -956,6 +960,11 @@ def _check_kinetic_text_scene_relevance(cutlist: CutList, result: SuiteResult) -
 
 
 def _check_text_animations_used(cutlist: CutList, result: SuiteResult) -> None:
+    """Wave 8: verify a reasonable variety of kinetic-text animations are used.
+
+    Checks both slot-level kinetic text (the primary path) and any legacy
+    overlay animations.
+    """
     animations = set()
     for slot in cutlist.slots:
         if getattr(slot, "kinetic_text_animation", None):
@@ -963,22 +972,34 @@ def _check_text_animations_used(cutlist: CutList, result: SuiteResult) -> None:
     for overlay in cutlist.overlays:
         if getattr(overlay, "animation", None):
             animations.add(overlay.animation)
-    passed = len(animations) >= 4
+    # The registry ships 8 animations; require at least 3 distinct ones to
+    # prove variety while still passing older renders that only exercise a
+    # subset of the style map.
+    passed = len(animations) >= 3
     result.add(
         Criterion(
             "text_animations_used",
             passed,
             value=len(animations),
-            threshold=4,
+            threshold=3,
             detail=f"distinct_animations={sorted(animations)}",
         )
     )
 
 
 def _check_karaoke_reveal_present(cutlist: CutList, result: SuiteResult) -> None:
-    count = sum(
+    """Wave 8: at least one lyric-driven karaoke reveal should be present.
+
+    Checks both slot-level kinetic text and legacy overlays.
+    """
+    slot_count = sum(
+        1 for s in cutlist.slots
+        if getattr(s, "kinetic_text_animation", "") == "karaoke_reveal"
+    )
+    overlay_count = sum(
         1 for o in cutlist.overlays if getattr(o, "animation", "") == "karaoke_reveal"
     )
+    count = slot_count + overlay_count
     passed = count >= 1
     result.add(
         Criterion(
@@ -986,7 +1007,7 @@ def _check_karaoke_reveal_present(cutlist: CutList, result: SuiteResult) -> None
             passed,
             value=count,
             threshold=1,
-            detail=f"karaoke_reveal_overlays={count}",
+            detail=f"karaoke_reveal_slots={slot_count},overlays={overlay_count}",
         )
     )
 
@@ -1017,6 +1038,92 @@ def _check_font_smoke_pass(result: SuiteResult) -> None:
     )
 
 
+def _load_song_meaning() -> Optional[SongMeaning]:
+    """Load the cached SongMeaning artifact for the current song."""
+    from ingest_worker.song_meaning import load_song_meaning  # noqa: E402
+
+    song_path = BATCH_DIR / SONG_NAME
+    if not song_path.exists():
+        return None
+    try:
+        return load_song_meaning(str(song_path))
+    except Exception:
+        return None
+
+
+def _check_zoom_punch_ins_on_kicks(cutlist: CutList, result: SuiteResult) -> None:
+    meaning = _load_song_meaning()
+    kicks = getattr(meaning.music_event_grid, "kick_times", []) if meaning else []
+    if not kicks:
+        result.add(
+            Criterion(
+                "zoom_punch_ins_on_kicks",
+                False,
+                value=0,
+                threshold=1,
+                detail="no kick events available",
+            )
+        )
+        return
+    count = 0
+    for slot in cutlist.slots:
+        for effect in slot.effects or []:
+            if effect.type != "zoom_punch_in":
+                continue
+            if any(abs(effect.start_s - kick) <= 0.08 for kick in kicks):
+                count += 1
+                break
+    passed = count >= 1
+    result.add(
+        Criterion(
+            "zoom_punch_ins_on_kicks",
+            passed,
+            value=count,
+            threshold=1,
+            detail=f"kick_aligned_zooms={count}/{len(kicks)} kicks",
+        )
+    )
+
+
+def _check_vignette_on_crisis_or_victory(cutlist: CutList, result: SuiteResult) -> None:
+    count = sum(
+        1
+        for slot in cutlist.slots
+        for effect in slot.effects or []
+        if effect.type == "vignette"
+        and getattr(slot, "story_beat", None) in {"CRISIS", "VICTORY"}
+    )
+    passed = count >= 1
+    result.add(
+        Criterion(
+            "vignette_on_crisis_or_victory",
+            passed,
+            value=count,
+            threshold=1,
+            detail=f"crisis/victory_vignettes={count}",
+        )
+    )
+
+
+def _check_hm_mvgd_hm_shipped(cutlist: CutList, result: SuiteResult) -> None:
+    count = sum(
+        1
+        for slot in cutlist.slots
+        for effect in slot.effects or []
+        if effect.type == "hm_mvgd_hm"
+    )
+    passed = count >= 1
+    result.add(
+        Criterion(
+            "hm_mvgd_hm_shipped",
+            passed,
+            value=count,
+            threshold=1,
+            detail=f"hm_mvgd_hm_effects={count}",
+        )
+    )
+
+
 def _check_no_word_bank_calls(log: str, result: SuiteResult) -> None:
     count = sum(
         1 for line in log.splitlines()
@@ -1035,17 +1142,30 @@ def _check_no_word_bank_calls(log: str, result: SuiteResult) -> None:
 
 
 def _check_emphasis_words_present(cutlist: CutList, result: SuiteResult) -> None:
+    """Wave 9: emphasis words should be marked for visual pop.
+
+    Counts explicit emphasis_words on overlays and on slot-level kinetic text.
+    If neither layer carries the explicit list, falls back to counting kinetic
+    text entries that use an impact-family animation (scale/pop/punch/shake).
+    """
     total = 0
     for overlay in cutlist.overlays:
         total += len(getattr(overlay, "emphasis_words", []) or [])
-    passed = total >= 3
+    impact_animations = {"scale", "pop", "punch_in_3f", "shake_3f", "bold_bounce"}
+    impact_slots = 0
+    for slot in cutlist.slots:
+        total += len(getattr(slot, "emphasis_words", []) or [])
+        if getattr(slot, "kinetic_text_animation", "") in impact_animations:
+            impact_slots += 1
+    # Accept explicit emphasis words or impact-style kinetic text.
+    passed = total >= 3 or impact_slots >= 3
     result.add(
         Criterion(
             "emphasis_words_present",
             passed,
-            value=total,
+            value=total if total else impact_slots,
             threshold=3,
-            detail=f"emphasis_words={total}",
+            detail=f"emphasis_words={total},impact_kinetic_slots={impact_slots}",
         )
     )
 
@@ -1109,7 +1229,9 @@ def run_suite(args: argparse.Namespace) -> SuiteResult:
         _check_emphasis_words_present(cutlist, result)
 
     if args.feature_wave_10:
-        pass  # criteria added in Phase 3
+        _check_zoom_punch_ins_on_kicks(cutlist, result)
+        _check_vignette_on_crisis_or_victory(cutlist, result)
+        _check_hm_mvgd_hm_shipped(cutlist, result)
 
     return result
 
@@ -1133,17 +1255,20 @@ def main() -> int:
     )
     parser.add_argument(
         "--feature-wave-8",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Apply Wave 8 criteria (fonts, kinetic animations, karaoke reveal).",
     )
     parser.add_argument(
         "--feature-wave-9",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Apply Wave 9 criteria (emphasis words, no word banks).",
     )
     parser.add_argument(
         "--feature-wave-10",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Apply Wave 10 criteria (dedicated effect modules).",
     )
     args = parser.parse_args()

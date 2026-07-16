@@ -49,9 +49,10 @@ from reason_worker.transition_stage import apply_semantic_transition_stage
 from reason_worker.audio_mix import build_audio_tracks
 from reason_worker.audio_scoring import ScoringConfig
 from reason_worker.save_the_cat import apply_save_the_cat_beats
+from render_worker.fcpxml_export import export_cutlist_to_fcpxml
 
 from shared_py.models import RenderConfig, AdaptiveFeatures, ClipEmotionProfile
-from shared_py.feature_tracer import get_and_clear_traces
+from shared_py.feature_tracer import get_and_clear_traces, FeaturePathReport
 from shared_py.logging_config import StructuredLogger
 
 logger = StructuredLogger("batch2_offline_render")
@@ -160,9 +161,24 @@ def main():
         help="Apply Save-the-Cat 15-beat story structure to slot sections",
     )
     parser.add_argument(
+        "--feature-wave-10",
+        action="store_true",
+        help="Apply Wave 10 dedicated effect modules (kick zooms, crisis/victory vignettes, hm_mvgd_hm)",
+    )
+    parser.add_argument(
         "--skip-song-analysis",
         action="store_true",
         help="Skip Whisper lyric transcription and Demucs stem separation",
+    )
+    parser.add_argument(
+        "--use-whisperx",
+        action="store_true",
+        help="Use WhisperX for lyric transcription (more accurate word-level alignment)",
+    )
+    parser.add_argument(
+        "--export-fcpxml",
+        action="store_true",
+        help="Also export an FCPXML timeline for DaVinci Resolve",
     )
     parser.add_argument(
         "--source-ip-hint",
@@ -178,6 +194,10 @@ def main():
         help="Override the clip audio inclusion strategy derived from the reference",
     )
     args = parser.parse_args()
+
+    if args.use_whisperx:
+        os.environ["USE_WHISPERX"] = "1"
+        logger.info("whisperx_enabled")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     ref_path = BATCH_DIR / REFERENCE_NAME
@@ -253,9 +273,11 @@ def main():
     # 5. Compute heatmaps in parallel with disk caching.
     clip_metadata = {}
     clip_path_map = {}
+    skipped_clips: list[str] = []
     cache_dir = OUTPUT_DIR / ".heatmap-cache"
     if args.skip_heatmap:
         log_progress("heatmap", 0.40, "Skipping heatmap computation")
+        heatmaps: Dict[str, Any] = {}
     else:
         log_progress("heatmap", 0.40, f"Computing heatmaps for {len(clip_paths)} clips (cached/parallel)")
         heatmaps = compute_clip_heatmaps_batch(
@@ -293,7 +315,21 @@ def main():
             f"This will cause clip repeats. Delete {cache_dir} or fix inputs and rerun."
         )
 
-    for idx, cp in enumerate(clip_paths):
+    # Probe clips individually and skip any that fail (corrupt files).
+    valid_clip_paths: list[Path] = []
+    for cp in clip_paths:
+        try:
+            probe_video(str(cp))
+            valid_clip_paths.append(cp)
+        except Exception as e:
+            logger.warning("Skipping corrupt clip", clip=cp.name, error=str(e))
+            skipped_clips.append(cp.name)
+            print(f"⚠️  SKIPPING corrupt clip: {cp.name} ({e})")
+
+    if skipped_clips:
+        print(f"Skipped {len(skipped_clips)} corrupt clip(s): {', '.join(skipped_clips)}")
+
+    for idx, cp in enumerate(valid_clip_paths):
         info = probe_video(str(cp))
         meta = {
             "shot_type": "medium",
@@ -309,9 +345,13 @@ def main():
         clip_path_map[clip_id] = str(cp)
 
     # 5b. Compute per-clip emotion profiles when the narrative feature is on.
-    if args.feature_emotion_led_cuts:
+    if args.feature_emotion_led_cuts and clip_path_map:
         log_progress("emotion_profiles", 0.45, "Computing per-clip emotion profiles")
-        emotion_profiles = compute_clip_emotion_profiles(clip_path_map)
+        try:
+            emotion_profiles = compute_clip_emotion_profiles(clip_path_map)
+        except Exception as e:
+            logger.warning("Emotion-profile computation failed, continuing without emotion profiles", error=str(e))
+            emotion_profiles = {}
         for clip_id, profile in emotion_profiles.items():
             clip_metadata[clip_id]["emotion_profile"] = profile.model_dump(by_alias=False, mode="json")
         print(f"Emotion profiles: {len(emotion_profiles)} computed/cached")
@@ -330,6 +370,7 @@ def main():
         use_adaptive_audio_policy=args.feature_adaptive_audio,
         use_iconic_quote_detection=args.feature_iconic_quotes,
         use_emotion_led_cuts=args.feature_emotion_led_cuts,
+        use_wave_10_effects=args.feature_wave_10,
     )
     behavior = _behavior_from_style_analysis(style_analysis)
     if args.clip_audio_strategy:
@@ -338,6 +379,9 @@ def main():
             behavior.clip_audio_min_importance = 0.3
         elif args.clip_audio_strategy == "always":
             behavior.clip_audio_min_importance = 0.0
+    music_event_grid = (
+        song_meaning.music_event_grid if song_meaning is not None else None
+    )
     cutlist = generate_cutlist_programmatic(
         beat_grid=beat_grid,
         shot_boundaries=shot_boundaries,
@@ -351,7 +395,20 @@ def main():
         behavior=behavior,
         features=features,
         song_meaning=song_meaning,
+        music_event_grid=music_event_grid,
     )
+    if skipped_clips:
+        cutlist.feature_runtime_report.append(
+            FeaturePathReport(
+                feature="clip_ingest_skipped",
+                gated_in=True,
+                real_path_ran=False,
+                fallback_reason=f"skipped={','.join(skipped_clips)}",
+                elapsed_ms=0.0,
+                output_signature=f"count={len(skipped_clips)}",
+            )
+        )
+
     if args.feature_save_the_cat:
         cutlist = apply_save_the_cat_beats(cutlist, target_duration)
         print(f"Cutlist: {len(cutlist.slots)} slots, {len(cutlist.overlays)} overlays (Save-the-Cat applied)")
@@ -527,6 +584,17 @@ def main():
 
     log_progress("complete", 1.0, f"Render complete in {render_time:.1f}s")
     print(f"Output: {result_path}")
+
+    if args.export_fcpxml:
+        fcpxml_path = OUTPUT_DIR / ("preview.fcpxml" if args.preview else "edit.fcpxml")
+        export_cutlist_to_fcpxml(
+            cutlist,
+            str(fcpxml_path),
+            clip_path_map,
+            render_config=config,
+            song_path=str(song_path),
+        )
+        print(f"FCPXML: {fcpxml_path}")
 
     # Collect feature runtime traces and compute the demo grade.
     traces = get_and_clear_traces()

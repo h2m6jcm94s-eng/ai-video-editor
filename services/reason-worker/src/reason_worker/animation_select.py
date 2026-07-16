@@ -18,6 +18,10 @@ def choose_kinetic_animation(
     face_present: bool = False,
 ) -> str:
     """Return the canonical animation name for this slot's kinetic text."""
+    # Lyric-driven karaoke reveal is selected explicitly by the composer.
+    if style_preset == "lyric_karaoke":
+        return "karaoke_reveal"
+
     energy = float(getattr(slot, "energy_level", 0.5) or 0.5)
     section = (getattr(slot, "section", "") or "").lower()
     is_drop = section in ("drop", "chorus", "bridge")

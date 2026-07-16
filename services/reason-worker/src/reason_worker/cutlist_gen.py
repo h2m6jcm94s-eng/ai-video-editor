@@ -3,7 +3,9 @@
 # Commercial SaaS use is prohibited without written permission.
 """Generate cut-list using AI Provider abstraction layer."""
 
+import json
 import os
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 # Add shared-py to path
@@ -20,13 +22,17 @@ from shared_py.models import (
     CutList, CutListGlobals, Slot, Overlay, Effect, BeatGrid, BeatSegment, ShotBoundary, SectionMarker, AudioTrack,
     ZoomPunchInParams, FocusPullParams, FilmGrainParams, VignetteParams, ColorPopParams,
     BehaviorVector, AdaptiveFeatures, MusicEventGrid, LoudnessMeasurement, SongMeaning,
+    WordTiming,
 )
 from reason_worker.kinetic_compose import assign_kinetic_text_to_slots
 from reason_worker.speed_ramps import assign_speed_ramps_to_slots
 from reason_worker.face_safe import choose_text_z_layer
+from reason_worker.wave10_effects import apply_wave_10_effects
 from reason_worker.slot_generator import generate_slots_adaptive
 from reason_worker.narrative_arcs import select_arc
 from reason_worker.arc_anchor import map_arc_to_song, anchor_for_time
+from reason_worker.intent_composer import assign_intents_to_slots
+from reason_worker.intent_technique_mapper import apply_techniques_from_intents
 
 # Maximum contiguous slot length.  Trailer-style / AMV edits need longer holds
 # (5-8s) than the old 4.0s beat-slot cap; otherwise adaptive-density cuts leave
@@ -51,6 +57,24 @@ def _energy_at_time(time_s: float, energy_curve: List[float], content_end: float
     progress = time_s / content_end
     energy_idx = min(int(progress * len(energy_curve)), len(energy_curve) - 1)
     return energy_curve[energy_idx]
+
+
+def _load_lyrics_for_song_hash(song_hash: str) -> Optional[List[WordTiming]]:
+    """Load cached Whisper word timings for a song hash, if available."""
+    storage_root = Path(os.environ.get("STORAGE_ROOT", r"E:\ai-video-editor-storage"))
+    cache_file = storage_root / "lyrics" / song_hash / "lyrics.json"
+    if not cache_file.exists():
+        return None
+    try:
+        data = json.loads(cache_file.read_text(encoding="utf-8"))
+        words = [
+            WordTiming(text=str(w.get("text", "")), start_s=float(w.get("start", 0)), end_s=float(w.get("end", 0)))
+            for w in data.get("words", [])
+            if w.get("text", "").strip()
+        ]
+        return words if words else None
+    except Exception:
+        return None
 
 
 def _apply_slot_style(
@@ -283,7 +307,7 @@ CUTLIST_SCHEMA = {
                         "items": {
                             "type": "object",
                             "properties": {
-                                "type": {"type": "string", "enum": ["zoom_punch_in", "focus_pull", "freeze_frame", "speed_ramp", "shake", "glitch", "vignette", "film_grain", "color_pop", "text_kinetic", "lower_third", "callout_arrow", "whoosh_sfx", "ding_sfx", "record_scratch_sfx"]},
+                                "type": {"type": "string", "enum": ["zoom_punch_in", "focus_pull", "freeze_frame", "speed_ramp", "shake", "glitch", "vignette", "film_grain", "color_pop", "chromatic_aberration", "hm_mvgd_hm", "text_kinetic", "lower_third", "callout_arrow", "whoosh_sfx", "ding_sfx", "record_scratch_sfx"]},
                                 "startS": {"type": "number", "minimum": 0},
                                 "durationS": {"type": "number", "minimum": 0},
                                 "params": {"type": "object"},
@@ -442,6 +466,55 @@ def _snap_slots_to_shots_and_beats(
     slots[:] = snapped
     if not slots:
         return
+
+    # Ensure every shot boundary is represented by a slot start. If a boundary
+    # falls inside a slot with no nearby existing start, split that slot so the
+    # edit can switch clips at the shot change.
+    SHOT_BOUNDARY_TOLERANCE = 0.5
+    shot_starts = sorted({round(s.start_s, 3) for s in slots})
+    split_slots: List[Slot] = list(slots)
+    for shot in shot_boundaries:
+        t = round(shot.start_s, 3)
+        if t <= 0.0 or t >= content_end - 1e-4:
+            continue
+        if any(abs(s - t) <= SHOT_BOUNDARY_TOLERANCE for s in shot_starts):
+            continue
+        for slot in split_slots:
+            if slot.start_s < t < slot.start_s + slot.duration_s - 1e-4:
+                kept_effects: List[Effect] = []
+                moved_effects: List[Effect] = []
+                for e in slot.effects:
+                    if e.start_s >= t:
+                        moved_effects.append(e)
+                    elif e.start_s + e.duration_s > t:
+                        truncated = e.model_copy()
+                        truncated.duration_s = round(t - e.start_s, 3)
+                        kept_effects.append(truncated)
+                    else:
+                        kept_effects.append(e)
+                slot.effects = kept_effects
+                slot.transition_out = "hard_cut"
+                new_slot = Slot(
+                    index=0,
+                    start_s=t,
+                    duration_s=round(slot.start_s + slot.duration_s - t, 3),
+                    beat_index=slot.beat_index,
+                    section=slot.section,
+                    transition_in="hard_cut",
+                    transition_out=slot.transition_out,
+                    target_shot_type=slot.target_shot_type,
+                    subject_hint=slot.subject_hint,
+                    motion_hint=slot.motion_hint,
+                    energy_level=slot.energy_level,
+                    required_tags=list(slot.required_tags),
+                    avoid_tags=list(slot.avoid_tags),
+                    effects=moved_effects,
+                )
+                slot.duration_s = round(t - slot.start_s, 3)
+                split_slots.append(new_slot)
+                shot_starts.append(t)
+                break
+    slots[:] = split_slots
 
     # Sort by start time and make slots contiguous up to the next slot or
     # content end, while respecting shot boundaries and a 4.0s max slot length.
@@ -610,6 +683,7 @@ def generate_cutlist(
     music_event_grid: Optional[MusicEventGrid] = None,
     loudness_measurement: Optional["LoudnessMeasurement"] = None,
     song_meaning: Optional[SongMeaning] = None,
+    reference_intent_profile: Optional[Dict[str, Any]] = None,
 ) -> CutList:
     """Generate a cut-list using the configured AI provider chain.
 
@@ -633,6 +707,7 @@ def generate_cutlist(
                 music_event_grid=music_event_grid,
                 loudness_measurement=loudness_measurement,
                 song_meaning=song_meaning,
+                reference_intent_profile=reference_intent_profile,
             )
 
         try:
@@ -662,6 +737,7 @@ def generate_cutlist(
         behavior=behavior,
         features=features,
         song_meaning=song_meaning,
+        reference_intent_profile=reference_intent_profile,
     )
 
 
@@ -680,6 +756,7 @@ def generate_cutlist_programmatic(
     music_event_grid: Optional[MusicEventGrid] = None,
     loudness_measurement: Optional[LoudnessMeasurement] = None,
     song_meaning: Optional[SongMeaning] = None,
+    reference_intent_profile: Optional[Dict[str, Any]] = None,
 ) -> CutList:
     """Generate a cut-list programmatically without LLM."""
     enable_text = _tier_index(style_tier) >= _tier_index("with_text")
@@ -727,8 +804,10 @@ def generate_cutlist_programmatic(
 
     # Phase 2: when emotion-led cuts are enabled, select a narrative arc and map
     # its beats to concrete song time windows using energy valleys/peaks.
+    arc_template = None
+    arc_anchors = None
     if features.use_emotion_led_cuts:
-        arc_template = select_arc(energy_curve, style_analysis, key=None)
+        arc_template = select_arc(energy_curve, style_analysis, key=None, song_meaning=song_meaning)
         arc_anchors = map_arc_to_song(arc_template, energy_curve, beat_grid, content_end, song_meaning=song_meaning)
         state["arc_template"] = arc_template
         state["arc_anchors"] = arc_anchors
@@ -853,6 +932,29 @@ def generate_cutlist_programmatic(
         event_snap_radius=settings.beat_snap_event_radius,
     )
 
+    # T5: assign a viewer intent to every slot.
+    assign_intents_to_slots(
+        slots,
+        arc_template=arc_template,
+        arc_anchors=arc_anchors,
+        reference_intent_profile=reference_intent_profile,
+        song_meaning=song_meaning,
+        energy_curve=energy_curve,
+    )
+
+    # T6: map each intent to concrete editing techniques.
+    detected_transitions = (
+        style_analysis.get("detectedTransitions")
+        or style_analysis.get("detected_transitions")
+        or []
+    )
+    apply_techniques_from_intents(
+        slots,
+        reference_transitions=detected_transitions,
+        style_analysis=style_analysis,
+        available_shot_types=shot_pool,
+    )
+
     # Cap slot count to prevent over-cutting when the user has few clips.
     # Users can add as many clips as they want; the cap only limits slots per clip.
     if user_clip_count:
@@ -882,6 +984,9 @@ def generate_cutlist_programmatic(
     # This replaces the old lyric-overlay stub with LLM-composed or word-bank
     # phrases that actually match the edit's mood.
     source_ip_hint = style_analysis.get("source_ip_hint") if isinstance(style_analysis, dict) else None
+    lyrics: Optional[List[WordTiming]] = None
+    if song_meaning is not None and song_meaning.song_hash:
+        lyrics = _load_lyrics_for_song_hash(song_meaning.song_hash)
     if enable_text:
         # Re-enable LLM composition by default. Override with KINETIC_TEXT_LLM=0
         # only for explicit debugging of the deterministic fallback path.
@@ -892,6 +997,7 @@ def generate_cutlist_programmatic(
             source_ip_hint=source_ip_hint,
             use_llm=use_llm,
             max_text_count=max(3, int(0.1 * len(slots))),
+            lyrics=lyrics,
         )
         for slot in slots:
             if slot.enable_kinetic_text:
@@ -910,14 +1016,19 @@ def generate_cutlist_programmatic(
     # Overlays must not extend past the actual rendered content.
     actual_content_end = max(s.start_s + s.duration_s for s in slots) if slots else content_end
 
-    # Add vignette to the highest-energy slot (only when tier allows effects)
+    # Add vignette to the highest-energy slot (only when tier allows effects).
+    # Insert at the front so it survives the two-effect cap when the slot already
+    # has mood effects like zoom_punch_in or speed_ramp.
     if enable_effects and max_energy_slot is not None:
-        max_energy_slot.effects.append(Effect(
-            type="vignette",
-            start_s=max_energy_slot.start_s,
-            duration_s=max_energy_slot.duration_s,
-            params=VignetteParams(intensity=0.4).model_dump(by_alias=True),
-        ))
+        max_energy_slot.effects.insert(
+            0,
+            Effect(
+                type="vignette",
+                start_s=max_energy_slot.start_s,
+                duration_s=max_energy_slot.duration_s,
+                params=VignetteParams(intensity=0.4).model_dump(by_alias=True),
+            ),
+        )
         # Re-apply cap in case we pushed it over 2
         if len(max_energy_slot.effects) > 2:
             max_energy_slot.effects = max_energy_slot.effects[:2]
@@ -971,7 +1082,7 @@ def generate_cutlist_programmatic(
         else None
     )
 
-    return CutList(
+    cutlist = CutList(
         globals=CutListGlobals(
             total_duration_s=final_duration_s,
             tempo_bpm=beat_grid.bpm,
@@ -987,4 +1098,16 @@ def generate_cutlist_programmatic(
         slots=slots,
         overlays=overlays,
         audio_tracks=audio_tracks,
+        narrative_mode=arc_template.name if arc_template else None,
     )
+
+    # Wave 10: dedicated effect modules for kick-locked zooms, crisis/victory
+    # vignettes, and stylised colour-transfer grading.
+    if enable_effects:
+        apply_wave_10_effects(
+            cutlist,
+            music_event_grid=music_event_grid,
+            features=features,
+        )
+
+    return cutlist

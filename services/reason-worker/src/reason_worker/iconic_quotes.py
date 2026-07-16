@@ -33,27 +33,160 @@ from reason_worker.narrative_mode import determine_narrative_mode
 from shared_py.feature_tracer import FeatureTracer
 from shared_py.llm_client import LLMClient, LLMTask
 from shared_py.logging_config import StructuredLogger
+from shared_py.models import MusicEventGrid
+
+
+def _is_latin_script(text: str) -> bool:
+    """Return True if the text is predominantly Latin script."""
+    if not text:
+        return True
+    letters = [c for c in text if c.isalpha()]
+    if not letters:
+        return True
+    latin = sum(1 for c in letters if ord(c) < 0x300)
+    return latin / len(letters) >= 0.7
+
+
+def _romanize(text: str) -> Optional[str]:
+    """Best-effort romanization for Japanese / Chinese lyrics."""
+    try:
+        # Japanese
+        import pykakasi
+        kks = pykakasi.kakasi()
+        result = kks.convert(text)
+        return " ".join(r.get("hepburn", r.get("passport", "")) for r in result)
+    except Exception:
+        pass
+    try:
+        # Chinese
+        import pypinyin
+        return " ".join(pypinyin.lazy_pinyin(text))
+    except Exception:
+        return None
+
+
+def _prosody_peak_score(clip_path: str, start_s: float, end_s: float) -> float:
+    """RMS peak within 200ms of the phrase midpoint."""
+    y, sr = _load_audio_segment(clip_path, 0.0, None)
+    if y is None or sr is None or len(y) == 0:
+        logger.warning("prosody_peak_missing_audio", clip_path=clip_path)
+        return 0.0
+
+    midpoint_s = (start_s + end_s) / 2.0
+    midpoint_sample = int(midpoint_s * sr)
+    window_samples = int(0.2 * sr)
+    half_window = window_samples // 2
+    start_sample = max(0, midpoint_sample - half_window)
+    end_sample = min(len(y), midpoint_sample + half_window)
+    window = y[start_sample:end_sample]
+    if len(window) == 0:
+        return 0.0
+
+    peak_rms = float(np.sqrt(np.max(window**2)))
+    clip_rms = float(np.sqrt(np.mean(y**2))) or 1e-9
+    ratio = peak_rms / clip_rms
+    return min(1.0, max(0.0, ratio / 2.0))
+
+
+def _music_event_alignment(
+    start_s: float,
+    end_s: float,
+    music_event_grid: Optional[MusicEventGrid],
+) -> float:
+    """Distance from phrase midpoint to nearest kick or snare."""
+    if music_event_grid is None:
+        return 0.0
+    midpoint = (start_s + end_s) / 2.0
+    events = []
+    if hasattr(music_event_grid, "kick_times") and music_event_grid.kick_times:
+        events.extend(music_event_grid.kick_times)
+    if hasattr(music_event_grid, "snare_times") and music_event_grid.snare_times:
+        events.extend(music_event_grid.snare_times)
+    if not events:
+        return 0.0
+    nearest = min(events, key=lambda t: abs(t - midpoint))
+    distance = abs(nearest - midpoint)
+    # Strong alignment within 100ms; decays to no bonus at 500ms.
+    return max(0.0, 1.0 - distance / 0.5)
+
+
+def _repetition_score(text: str, all_segments: List[TranscriptSegment]) -> float:
+    """Count how many times this exact text appears across all segments."""
+    if not text:
+        return 0.0
+    text_norm = text.strip().lower()
+    count = sum(1 for s in all_segments if s.text.strip().lower() == text_norm)
+    if count >= 3:
+        return 1.0
+    if count == 2:
+        return 0.7
+    return 0.0
+
+
+def _phrase_shape_score(text: str, duration_s: float) -> float:
+    """Reward phrases that are 2-8 words long and 0.5-4s in duration."""
+    if not text:
+        return 0.0
+    if _is_latin_script(text):
+        word_count = len(text.split())
+    else:
+        word_count = sum(1 for c in text.strip() if c.isalnum())
+    if word_count < 2 or word_count > 8:
+        return 0.0
+    if duration_s < 0.5 or duration_s > 4.0:
+        return 0.0
+    # Ideal: 3-5 words, 1-2.5s.
+    word_score = 1.0 - abs(word_count - 4) / 3.0
+    dur_score = 1.0 - abs(duration_s - 1.75) / 1.75
+    return min(1.0, max(0.0, (word_score + dur_score) / 2.0))
+
+
+def _language_agnostic_salience(
+    seg: TranscriptSegment,
+    all_segments: List[TranscriptSegment],
+    clip_path: Optional[str],
+    music_event_grid: Optional[MusicEventGrid],
+) -> float:
+    """Score a phrase using only audio/structural signals, no language model."""
+    duration_s = seg.end_s - seg.start_s
+    shape = _phrase_shape_score(seg.text, duration_s)
+    if shape == 0.0:
+        return 0.0
+
+    prosody = _prosody_peak_score(clip_path, seg.start_s, seg.end_s) if clip_path else 0.0
+    alignment = _music_event_alignment(seg.start_s, seg.end_s, music_event_grid)
+    repetition = _repetition_score(seg.text, all_segments)
+
+    # Weighted sum tuned so a repeated, on-beat, loud phrase scores high.
+    return (
+        0.25 * shape
+        + 0.30 * prosody
+        + 0.25 * alignment
+        + 0.20 * repetition
+    )
 
 logger = StructuredLogger("reason_worker.iconic_quotes")
 
 # Default component weights. Tuned so a clear, loud, emotionally delivered,
 # culturally resonant line in isolation scores >= 0.7.
 DEFAULT_ICONIC_WEIGHTS = {
-    "emotional_intensity": 0.20,
-    "loudness_normalized": 0.15,
-    "iconic_llm_score": 0.40,
-    "vocal_uniqueness": 0.10,
-    "isolation": 0.15,
+    "emotional_intensity": 0.15,
+    "loudness_normalized": 0.10,
+    "iconic_llm_score": 0.35,
+    "vocal_uniqueness": 0.05,
+    "isolation": 0.10,
+    "language_agnostic_salience": 0.25,
 }
 
 # Trailer-style / AMV content relies much more on the LLM judgement because the
 # text-keyword and isolation heuristics are tuned for podcast/documentary speech.
 TRAILER_STYLE_ICONIC_WEIGHTS = {
-    "emotional_intensity": 0.10,
+    "emotional_intensity": 0.05,
     "loudness_normalized": 0.10,
-    "iconic_llm_score": 0.70,
+    "iconic_llm_score": 0.55,
     "vocal_uniqueness": 0.05,
     "isolation": 0.05,
+    "language_agnostic_salience": 0.20,
 }
 
 # Inclusion floor. 0.60 was mathematically unreachable for short AMV fragments
@@ -151,7 +284,7 @@ def _loudness_normalized(clip_path: str, start_s: float, end_s: float) -> float:
     """Return RMS loudness of the segment normalized against the whole clip."""
     y, sr = _load_audio_segment(clip_path, 0.0, None)
     if y is None or sr is None or len(y) == 0:
-        return 0.5
+        return 0.0
 
     # Segment window in samples.
     seg_start = int(start_s * sr)
@@ -161,7 +294,7 @@ def _loudness_normalized(clip_path: str, start_s: float, end_s: float) -> float:
     segment = y[seg_start:seg_end]
 
     if len(segment) == 0:
-        return 0.5
+        return 0.0
 
     seg_rms = float(np.sqrt(np.mean(segment**2)))
     clip_rms = float(np.sqrt(np.mean(y**2))) or 1e-9
@@ -174,18 +307,18 @@ def _vocal_uniqueness(clip_path: str, start_s: float, end_s: float) -> float:
     """Measure how distinct the vocal delivery is using spectral centroid variance."""
     y, sr = _load_audio_segment(clip_path, start_s, end_s)
     if y is None or sr is None or len(y) < 512:
-        return 0.5
+        return 0.0
 
     try:
         import librosa
         centroid = librosa.feature.spectral_centroid(y=y, sr=sr)[0]
         if len(centroid) < 2:
-            return 0.5
+            return 0.0
         std = float(np.std(centroid))
         # Human voice with expressive delivery shows moderate variance.
         return min(1.0, max(0.0, std / 1500.0))
     except Exception:
-        return 0.5
+        return 0.0
 
 
 def _isolation_score(seg: TranscriptSegment, all_segments: List[TranscriptSegment]) -> float:
@@ -193,7 +326,7 @@ def _isolation_score(seg: TranscriptSegment, all_segments: List[TranscriptSegmen
     sorted_segs = sorted(all_segments, key=lambda s: s.start_s)
     idx = next((i for i, s in enumerate(sorted_segs) if s is seg), -1)
     if idx < 0:
-        return 0.5
+        return 0.0
 
     gap_before = seg.start_s - (sorted_segs[idx - 1].end_s if idx > 0 else 0.0)
     gap_after = (sorted_segs[idx + 1].start_s if idx + 1 < len(sorted_segs) else seg.end_s + 1.0) - seg.end_s
@@ -223,12 +356,19 @@ def _score_iconic_with_llm(text: str, ip_hint: Optional[str]) -> float:
         return _LLM_ICONIC_CACHE[cache_key]
 
     system = (
-        "You rate how iconic or quote-worthy a line of dialogue is for a video edit. "
-        "Consider emotional impact, cultural resonance, clarity, and relevance. "
+        "You rate how iconic or quote-worthy a line of dialogue or lyrics is for a video edit. "
+        "The line may be in any language. Consider emotional impact, clarity, and relevance. "
         "Respond with ONLY a number from 0.0 to 1.0."
     )
     context = f" Source inspiration: {ip_hint}." if ip_hint else ""
-    user = f'Rate how iconic/quote-worthy this line is:{context}\n\n"{text}"\n\nRespond with only a number 0.0-1.0.'
+    romanized = _romanize(text)
+    original_line = f'Original: "{text}"'
+    roman_line = f'\nRomanization: "{romanized}"' if romanized else ""
+    user = (
+        f"Rate how iconic/quote-worthy this line is:{context}\n\n"
+        f"{original_line}{roman_line}\n\n"
+        "Respond with only a number 0.0-1.0."
+    )
     prompt = f"SYSTEM: {system}\nUSER: {user}"
 
     # Preserve the original no-LLM fallback behavior: use the cheap text heuristic.
@@ -266,6 +406,7 @@ def detect_iconic_quotes(
     iconic_weights: Optional[dict[str, float]] = None,
     max_llm_candidates: int = 20,
     content_embedding: Optional[dict] = None,
+    music_event_grid: Optional[MusicEventGrid] = None,
 ) -> List[ScoredQuote]:
     """Score transcript segments and return those that qualify as iconic quotes.
 
@@ -313,17 +454,34 @@ def detect_iconic_quotes(
         else:
             weights = DEFAULT_ICONIC_WEIGHTS
 
+        def _segment_word_count(text: str) -> int:
+            """Word count that works for space-separated and CJK scripts."""
+            if not text:
+                return 0
+            if _is_latin_script(text):
+                return len(text.split())
+            # For CJK and similar, count alphanumeric/ideographic characters
+            # as words (each character carries roughly a word's worth of info).
+            return sum(1 for c in text.strip() if c.isalnum())
+
         # First pass: compute cheap non-LLM components for every segment.
         pre_scored: List[Tuple[TranscriptSegment, dict[str, float], float]] = []
         for seg in transcript_segments:
-            if not seg.text or len(seg.text.split()) < min_words:
+            if not seg.text:
+                continue
+            word_count = _segment_word_count(seg.text)
+            if word_count < min_words:
                 continue
 
+            salience = _language_agnostic_salience(
+                seg, transcript_segments, clip_path, music_event_grid
+            )
             components: dict[str, float] = {
                 "emotional_intensity": _text_emotional_intensity(seg.text),
-                "loudness_normalized": _loudness_normalized(clip_path, seg.start_s, seg.end_s) if clip_path else 0.5,
-                "vocal_uniqueness": _vocal_uniqueness(clip_path, seg.start_s, seg.end_s) if clip_path else 0.5,
+                "loudness_normalized": _loudness_normalized(clip_path, seg.start_s, seg.end_s) if clip_path else 0.0,
+                "vocal_uniqueness": _vocal_uniqueness(clip_path, seg.start_s, seg.end_s) if clip_path else 0.0,
                 "isolation": _isolation_score(seg, transcript_segments),
+                "language_agnostic_salience": salience,
             }
             # Placeholder for LLM component; will be filled for top-K.
             components["iconic_llm_score"] = 0.0
@@ -350,6 +508,9 @@ def detect_iconic_quotes(
             return []
 
         # Second pass: call LLM only for the adaptive budget of top candidates.
+        # The LLM prompt is language-agnostic and includes romanization for CJK
+        # scripts when available, so non-Latin lyrics are scored by the same
+        # judgement signal rather than being silently downgraded.
         pre_scored.sort(key=lambda x: x[2], reverse=True)
         llm_candidates = pre_scored[:llm_budget]
         llm_scores: dict[int, float] = {}

@@ -10,6 +10,11 @@ export const EFFECT_TYPE = [
   "vignette",
   "film_grain",
   "color_pop",
+  "chromatic_aberration",
+  "hm_mvgd_hm",
+  "flash_frame",
+  "reframe",
+  "stabilize",
   "text_kinetic",
   "lower_third",
   "callout_arrow",
@@ -35,6 +40,8 @@ const zoomPunchInSchema = baseEffectSchema.extend({
     targetScale: z.number().min(1).max(3).default(1.3),
     durationMs: z.number().int().min(50).max(2000).default(300),
     easing: z.enum(EASING).default("easeOut"),
+    centerX: z.number().min(0).max(1).default(0.5),
+    centerY: z.number().min(0).max(1).default(0.5),
   }),
 });
 
@@ -98,6 +105,43 @@ const colorPopSchema = baseEffectSchema.extend({
   }),
 });
 
+const chromaticAberrationSchema = baseEffectSchema.extend({
+  type: z.literal("chromatic_aberration"),
+  params: z.object({
+    shiftX: z.number().int().min(0).max(20).default(3),
+    shiftY: z.number().int().min(0).max(20).default(0),
+    intensity: z.number().min(0).max(1).default(0.3),
+  }),
+});
+
+const hmMvgdHmSchema = baseEffectSchema.extend({
+  type: z.literal("hm_mvgd_hm"),
+  params: z.object({
+    strength: z.number().min(0).max(1).default(0.5),
+    warmth: z.number().min(-1).max(1).default(0),
+    tint: z.number().min(-1).max(1).default(0),
+  }),
+});
+
+const flashFrameSchema = baseEffectSchema.extend({
+  type: z.literal("flash_frame"),
+  params: z.object({}).default({}),
+});
+
+const reframeSchema = baseEffectSchema.extend({
+  type: z.literal("reframe"),
+  params: z.object({
+    targetAspect: z.string().default("9:16"),
+  }),
+});
+
+const stabilizeSchema = baseEffectSchema.extend({
+  type: z.literal("stabilize"),
+  params: z.object({
+    method: z.enum(["deshake", "vidstab"]).default("deshake"),
+  }),
+});
+
 const textKineticSchema = baseEffectSchema.extend({
   type: z.literal("text_kinetic"),
   params: z.object({
@@ -155,6 +199,11 @@ export const effectSchema = z.union([
   vignetteSchema,
   filmGrainSchema,
   colorPopSchema,
+  chromaticAberrationSchema,
+  hmMvgdHmSchema,
+  flashFrameSchema,
+  reframeSchema,
+  stabilizeSchema,
   textKineticSchema,
   lowerThirdSchema,
   calloutArrowSchema,

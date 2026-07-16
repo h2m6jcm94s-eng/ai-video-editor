@@ -25,6 +25,7 @@ from shared_py.logging_config import StructuredLogger
 from shared_py.models import BeatGrid, ShotBoundary, StyleAnalysis, StyleGenome
 from style_worker.genome.extract import extract_genome
 from style_worker.lut_extract import extract_lut_from_reference, sample_frames
+from style_worker.reference_intent import ReferenceIntentProfile, extract_reference_intent_profile
 
 logger = StructuredLogger("style_worker.reference_analysis")
 
@@ -64,6 +65,7 @@ class ReferenceAnalysis:
     color_variance_across_shots: float
     technical_quality: TechnicalQuality
     warnings: List[str] = field(default_factory=list)
+    intent_profile: Optional[ReferenceIntentProfile] = None
 
     def model_dump(self) -> dict:
         """Serialize to a dict suitable for JSONB metadata storage."""
@@ -80,6 +82,7 @@ class ReferenceAnalysis:
             "colorVarianceAcrossShots": self.color_variance_across_shots,
             "technicalQuality": asdict(self.technical_quality),
             "warnings": list(self.warnings),
+            "intentProfile": self.intent_profile.model_dump() if self.intent_profile else None,
         }
 
     @classmethod
@@ -98,6 +101,11 @@ class ReferenceAnalysis:
             color_variance_across_shots=float(data.get("colorVarianceAcrossShots", 0.0)),
             technical_quality=TechnicalQuality(**data.get("technicalQuality", {})),
             warnings=list(data.get("warnings", [])),
+            intent_profile=(
+                ReferenceIntentProfile.from_cache_dict(data["intentProfile"])
+                if data.get("intentProfile")
+                else None
+            ),
         )
 
 
@@ -340,6 +348,15 @@ def analyze_reference(
         sample_frame_count=len(frames),
     )
 
+    # Intent pattern profile: what does this reference editor tend to DO?
+    intent_profile = extract_reference_intent_profile(
+        reference_path,
+        shot_boundaries=shot_boundaries,
+        style_analysis=style_analysis,
+        music_event_grid=beat_grid if hasattr(beat_grid, "downbeats") else None,
+        max_shots=40,
+    )
+
     return ReferenceAnalysis(
         asset_id=asset_id,
         extractor_version=EXTRACTOR_VERSION,
@@ -353,6 +370,7 @@ def analyze_reference(
         color_variance_across_shots=color_variance,
         technical_quality=technical_quality,
         warnings=warnings,
+        intent_profile=intent_profile,
     )
 
 

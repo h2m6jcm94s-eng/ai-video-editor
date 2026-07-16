@@ -172,6 +172,7 @@ async def generate_cutlist_activity(
     music_event_grid_raw: Optional[dict] = None,
     loudness_measurement_raw: Optional[dict] = None,
     song_meaning_raw: Optional[dict] = None,
+    reference_intent_profile_raw: Optional[dict] = None,
 ) -> dict:
     """Generate a cutlist from beats, shots, and style analysis."""
     beat_grid = BeatGrid(**beat_grid_raw)
@@ -213,6 +214,7 @@ async def generate_cutlist_activity(
         music_event_grid=music_event_grid,
         loudness_measurement=loudness_measurement,
         song_meaning=song_meaning,
+        reference_intent_profile=reference_intent_profile_raw,
     )
     return {
         "cutlist": cutlist.model_dump(by_alias=True),
@@ -317,14 +319,38 @@ async def rank_clips_activity(
     # Ensure every clip has a metadata entry with sensible defaults.
     populated_metadata: Dict[str, dict] = {}
     clip_emotion_profiles: Dict[str, ClipEmotionProfile] = {}
+    fallback_counts = {"motion_energy": 0, "aesthetic_score": 0, "duration_sec": 0, "clip_capability": 0}
     for clip_id in clip_asset_ids:
         meta = clip_metadata.get(clip_id) or {}
+
+        motion_energy = meta.get("motionEnergy") or meta.get("motion_energy")
+        if motion_energy is None:
+            # Anti-decoration: missing metadata should not pretend to be average.
+            motion_energy = 0.0
+            fallback_counts["motion_energy"] += 1
+
+        aesthetic_score = meta.get("aestheticScore") or meta.get("aesthetic_score")
+        if aesthetic_score is None:
+            aesthetic_score = 0.0
+            fallback_counts["aesthetic_score"] += 1
+
+        duration_sec = meta.get("durationSec") or meta.get("duration_sec")
+        if duration_sec is None:
+            duration_sec = 5.0
+            fallback_counts["duration_sec"] += 1
+
+        clip_capability = meta.get("clipCapability") or meta.get("clip_capability")
+        if clip_capability is None:
+            clip_capability = {}
+            fallback_counts["clip_capability"] += 1
+
         populated_metadata[clip_id] = {
             "shot_type": meta.get("shotType") or meta.get("shot_type") or "medium",
-            "motion_energy": meta.get("motionEnergy") or meta.get("motion_energy") or 0.5,
-            "aesthetic_score": meta.get("aestheticScore") or meta.get("aesthetic_score") or 0.5,
-            "duration_sec": meta.get("durationSec") or meta.get("duration_sec") or 5.0,
+            "motion_energy": motion_energy,
+            "aesthetic_score": aesthetic_score,
+            "duration_sec": duration_sec,
             "heatmap": meta.get("heatmap") or [],
+            "clip_capability": clip_capability,
         }
         emotion_raw = meta.get("emotionProfile") or meta.get("emotion_profile")
         if emotion_raw:
@@ -332,6 +358,13 @@ async def rank_clips_activity(
                 clip_emotion_profiles[clip_id] = ClipEmotionProfile.model_validate(emotion_raw)
             except Exception:
                 logger.warning("Invalid emotion_profile for clip %s", clip_id)
+
+    if any(fallback_counts.values()):
+        logger.warning(
+            "clip_metadata_fallbacks_used",
+            clip_count=len(clip_asset_ids),
+            fallbacks=fallback_counts,
+        )
 
     # Download clips when storage keys are available so SigLIP-2 and optical-flow
     # features can run during ranking.
@@ -384,7 +417,7 @@ async def rank_clips_activity(
                 slot.selected_clip_id = top.clip_id
                 slot.ranked_clip_ids = [s.clip_id for s in scores[:3]]
                 # Clamp confidence to the valid API range [0, 0.99].
-                slot.confidence = max(0.0, min(0.99, confidences.get(slot.index, 0.5)))
+                slot.confidence = max(0.0, min(0.99, confidences.get(slot.index, 0.0)))
                 # Carry the heatmap-best window into the slot so the compiler seeks
                 # to the interesting part of the clip instead of the reference time.
                 if top.window_start_s is not None:
@@ -503,7 +536,7 @@ async def save_render_behavior_activity(
     render_id: str,
     behavior: dict,
     predictor_version: str = "heuristic-v1",
-    predictor_confidence: float = 0.5,
+    predictor_confidence: float = 0.0,
     predictor_reasoning: Optional[dict] = None,
 ) -> dict:
     """Persist the behavior vector applied to a render."""

@@ -95,3 +95,13 @@ tmp_frames/
 tmp_outfine/
 tmp_seg/
 tmp_src/
+PROJECT_GUIDE.md
+
+# Generated T.13 validation / spike artifacts (regeneratable)
+_t13_audit/
+_t13_checklist/
+_t13_smoke/
+T13_*.md
+reference_library/
+tech0_spike/
+test folder 2/output/

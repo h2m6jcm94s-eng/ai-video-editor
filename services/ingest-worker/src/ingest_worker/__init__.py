@@ -22,5 +22,8 @@ def __getattr__(name):
     if name == "ensure_faces":
         from ingest_worker.identity import ensure_faces
         return ensure_faces
+    if name == "compute_clip_capability_profile":
+        from ingest_worker.clip_capability import compute_clip_capability_profile
+        return compute_clip_capability_profile
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

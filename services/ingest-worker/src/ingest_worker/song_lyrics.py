@@ -111,6 +111,34 @@ def transcribe_song_lyrics(
         except Exception as e:
             logger.warning("lyrics cache corrupt; recomputing", error=str(e))
 
+    # T10: optional WhisperX backend for more accurate word-level alignment.
+    use_whisperx = os.environ.get("USE_WHISPERX", "0").lower() in ("1", "true", "on")
+    if use_whisperx:
+        from ingest_worker.whisperx_transcribe import transcribe_with_whisperx, whisperx_available
+
+        if whisperx_available():
+            logger.info("transcribing lyrics with whisperx", path=audio_path, model=model_size)
+            try:
+                wx_words = transcribe_with_whisperx(
+                    audio_path, model_size=model_size, language=language, min_word_probability=min_word_probability
+                )
+                if wx_words:
+                    words = [
+                        LyricWord(
+                            text=w["text"],
+                            start_s=w["start"],
+                            end_s=w["end"],
+                            probability=w["probability"],
+                        )
+                        for w in wx_words
+                    ]
+                    _write_lyrics_cache(cache_file, song_hash, model_size, language=language, words=words)
+                    return words
+            except Exception as e:
+                logger.warning("whisperx_transcription_failed", path=audio_path, error=str(e))
+        else:
+            logger.warning("whisperx requested but not installed, falling back to faster-whisper")
+
     model = _load_whisper_model(model_size)
     if model is None:
         logger.warning("lyrics transcription unavailable: no whisper model")
@@ -128,6 +156,12 @@ def transcribe_song_lyrics(
         logger.warning("lyrics transcription failed", path=audio_path, error=str(e))
         return []
 
+    words = _words_from_faster_whisper_segments(segments, min_word_probability)
+    _write_lyrics_cache(cache_file, song_hash, model_size, language=info.language if info else None, words=words)
+    return words
+
+
+def _words_from_faster_whisper_segments(segments, min_word_probability: float) -> List[LyricWord]:
     words: List[LyricWord] = []
     for segment in segments:
         for word in segment.words or []:
@@ -145,7 +179,16 @@ def transcribe_song_lyrics(
                     probability=prob,
                 )
             )
+    return words
 
+
+def _write_lyrics_cache(
+    cache_file: Path,
+    song_hash: str,
+    model_size: str,
+    language: Optional[str],
+    words: List[LyricWord],
+) -> None:
     try:
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         tmp = cache_file.with_suffix(".tmp")
@@ -154,7 +197,7 @@ def transcribe_song_lyrics(
                 {
                     "song_hash": song_hash,
                     "model": model_size,
-                    "language": info.language if info else None,
+                    "language": language,
                     "words": [asdict(w) for w in words],
                 },
                 indent=2,
@@ -165,8 +208,6 @@ def transcribe_song_lyrics(
         logger.info("lyrics cached", song_hash=song_hash, words=len(words))
     except Exception as e:
         logger.warning("failed to write lyrics cache", error=str(e))
-
-    return words
 
 
 def get_lyrics_cache_path(audio_path: str, cache_dir: Optional[Path] = None) -> Path:

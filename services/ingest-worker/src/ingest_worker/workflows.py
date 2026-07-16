@@ -96,6 +96,14 @@ class ProbeAssetWorkflow:
                     retry_policy=RetryPolicy(maximum_attempts=2),
                 )
             )
+            futures.append(
+                workflow.execute_activity(
+                    "compute_clip_capability_activity",
+                    args=(input.asset_id, input.storage_key),
+                    start_to_close_timeout=timedelta(seconds=600),
+                    retry_policy=RetryPolicy(maximum_attempts=2),
+                )
+            )
 
         results = await asyncio.gather(*futures) if futures else []
 

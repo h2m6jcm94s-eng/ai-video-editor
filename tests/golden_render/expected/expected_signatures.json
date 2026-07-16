@@ -31,5 +31,8 @@
   "karaoke_reveal_present": { "min": 1, "required": false },
   "font_smoke_pass": { "required": false },
   "no_word_bank_calls": { "required": false },
-  "emphasis_words_present": { "min": 3, "required": false }
+  "emphasis_words_present": { "min": 3, "required": false },
+  "zoom_punch_ins_on_kicks": { "min": 1, "required": true },
+  "vignette_on_crisis_or_victory": { "min": 1, "required": true },
+  "hm_mvgd_hm_shipped": { "min": 1, "required": true }
 }

@@ -147,9 +147,9 @@ class TestRankClipsForSlots:
         rankings = rank_clips_for_slots(slots, clips, force_exhaust=False)
 
         score = rankings[0][0]
-        # When no emotion profile is available, mood-motion consistency falls back
-        # to the neutral midpoint (0.5).
-        mood_motion_score = 0.5 if score.emotion_profile is None else score.emotion_profile.motion_vibe
+        # When no emotion profile is available, mood-motion consistency is an
+        # honest missing signal (0.0), not a decorated midpoint.
+        mood_motion_score = 0.0 if score.emotion_profile is None else score.emotion_profile.motion_vibe
         expected = (
             RANK.SIGLIP_SEMANTIC_WEIGHT * score.semantic_score +
             RANK.SHOT_TYPE_WEIGHT * score.shot_type_score +
@@ -349,7 +349,9 @@ class TestComputeConfidence:
             0: [ClipScore(clip_id="A", total_score=0.5)],
         }
         confidences = compute_confidence(rankings)
-        assert confidences[0] == 0.5
+        # A single candidate carries no comparative signal, so confidence is 0.0
+        # (honest missing signal) rather than a fake midpoint.
+        assert confidences[0] == 0.0
 
     def test_empty_rankings(self):
         rankings = {}
@@ -627,10 +629,10 @@ class TestMarengoSemanticScoring:
 
         rankings = rank_clips_for_slots(slots, clips, embeddings, marengo_client=client)
 
-        assert rankings[0][0].semantic_score == pytest.approx(0.7)
+        assert rankings[0][0].semantic_score == pytest.approx(0.0)
 
     def test_no_video_embeddings_uses_fallback(self):
-        """When clip embeddings are missing, semantic score stays at fallback."""
+        """When clip embeddings are missing, semantic score is an honest 0.0."""
         slots = [make_slot(index=0, shot_type="wide")]
         clips = {"C01": make_clip_meta(shot_type="wide")}
         client = FakeMarengoClient(
@@ -639,7 +641,7 @@ class TestMarengoSemanticScoring:
 
         rankings = rank_clips_for_slots(slots, clips, {}, marengo_client=client)
 
-        assert rankings[0][0].semantic_score == pytest.approx(0.7)
+        assert rankings[0][0].semantic_score == pytest.approx(0.0)
 
 
 

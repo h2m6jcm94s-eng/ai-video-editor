@@ -216,6 +216,9 @@ class GenerateFromReferenceWorkflow:
             song_meaning_raw = meaning_result.get("song_meaning") or {}
             music_event_grid_raw = song_meaning_raw.get("musicEventGrid")
             loudness_measurement_raw = song_meaning_raw.get("loudness")
+            reference_metadata = reference_asset.get("metadata") or {}
+            reference_analysis = reference_metadata.get("referenceAnalysis") or reference_metadata.get("reference_analysis") or {}
+            reference_intent_profile_raw = reference_analysis.get("intentProfile") or reference_analysis.get("intent_profile")
             generation_result = await workflow.execute_activity(
                 "generate_cutlist_activity",
                 args=(
@@ -231,6 +234,7 @@ class GenerateFromReferenceWorkflow:
                     music_event_grid_raw,
                     loudness_measurement_raw,
                     song_meaning_raw,
+                    reference_intent_profile_raw,
                 ),
                 start_to_close_timeout=timedelta(seconds=300),
                 retry_policy=RetryPolicy(maximum_attempts=2),
@@ -285,12 +289,14 @@ class GenerateFromReferenceWorkflow:
             music_event_grid_raw = song_meaning_raw.get("musicEventGrid")
             ranked_cutlist = await workflow.execute_activity(
                 "rank_clips_activity",
-                args=(cutlist_raw, clip_asset_ids, clip_metadata),
-                kwargs={
-                    "clip_storage_keys": clip_storage_keys,
-                    "music_event_grid_raw": music_event_grid_raw,
-                    "song_meaning_raw": song_meaning_raw,
-                },
+                args=(
+                    cutlist_raw,
+                    clip_asset_ids,
+                    clip_metadata,
+                    clip_storage_keys,
+                    music_event_grid_raw,
+                    song_meaning_raw,
+                ),
                 start_to_close_timeout=timedelta(seconds=120),
                 retry_policy=retry,
             )

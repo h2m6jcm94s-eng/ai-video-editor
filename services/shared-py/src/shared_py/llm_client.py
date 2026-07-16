@@ -9,6 +9,7 @@ Responses are cached on disk by content hash so repeated prompts are free.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -31,6 +32,7 @@ class LLMTask(str, Enum):
 
     ICONIC_QUOTE_SCORE = "iconic_quote_score"
     EDIT_INTENT_CLASSIFY = "edit_intent_classify"
+    REFERENCE_INTENT = "reference_intent"
     BRAND_IP_CHECK = "brand_ip_check"
     TOPIC_STRUCTURE = "topic_structure"
     PEGASUS_FALLBACK = "pegasus_fallback"
@@ -53,6 +55,12 @@ def _default_local_model(task: LLMTask) -> str:  # noqa: ARG001
 def _default_cloud_model(task: LLMTask) -> str:  # noqa: ARG001
     """Return the cloud Anthropic model for a task."""
     return "claude-3-5-haiku-20241022"
+
+
+def _encode_image(path: str) -> str:
+    """Read an image file and return a base64-encoded JPEG data URI payload."""
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
 
 
 class LLMClient:
@@ -94,9 +102,16 @@ class LLMClient:
         """Resolve the effective cloud model for a task."""
         return self.cloud_model or _default_cloud_model(task)
 
-    def _cache_path(self, task: LLMTask, prompt: str, model: str) -> Path:
+    def _cache_path(
+        self,
+        task: LLMTask,
+        prompt: str,
+        model: str,
+        images: Optional[list[str]] = None,
+    ) -> Path:
         """Stable disk location for a cached response."""
-        payload = f"{task.value}|{prompt}|{model}"
+        image_key = "|".join(sorted(images or []))
+        payload = f"{task.value}|{prompt}|{model}|{image_key}"
         cache_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
         return self.cache_root / task.value / f"{cache_hash}.json"
 
@@ -134,8 +149,15 @@ class LLMClient:
         max_tokens: int,
         temperature: float,
         json_schema: Optional[dict[str, Any]],
+        images: Optional[list[str]] = None,
     ) -> str:
-        """Call Ollama /api/generate and return the response text."""
+        """Call Ollama /api/chat and return the response text.
+
+        Gemma 4 (vision) reliably returns empty responses via ``/api/generate``;
+        the chat endpoint works for both text and vision prompts. ``keep_alive``
+        is set to ``-1`` so the local model stays loaded across the many small
+        calls in a render.
+        """
         full_prompt = prompt
         if json_schema:
             full_prompt = (
@@ -143,20 +165,28 @@ class LLMClient:
                 f"Respond ONLY with valid JSON matching this schema:\n{json.dumps(json_schema, indent=2)}"
             )
 
-        payload = {
+        # Ollama's native /api/chat endpoint expects `content` as a string and
+        # optional `images` as a list of base64-encoded image strings. The
+        # OpenAI-compatible content-list format is not accepted here.
+        encoded_images: list[str] = [_encode_image(p) for p in images] if images else []
+
+        payload: dict[str, Any] = {
             "model": model,
-            "prompt": full_prompt,
+            "messages": [{"role": "user", "content": full_prompt}],
             "stream": False,
+            "keep_alive": -1,
             "options": {
                 "temperature": temperature,
                 "num_predict": max_tokens,
             },
         }
+        if encoded_images:
+            payload["messages"][0]["images"] = encoded_images
         if json_schema:
             # Constrain local models to JSON output when a schema is requested.
             payload["format"] = "json"
 
-        url = f"{self.ollama_base_url}/api/generate"
+        url = f"{self.ollama_base_url}/api/chat"
         try:
             resp = httpx.post(url, json=payload, timeout=self.timeout)
             resp.raise_for_status()
@@ -164,7 +194,8 @@ class LLMClient:
         except Exception as e:
             raise RuntimeError(f"Ollama request failed: {e}") from e
 
-        text = data.get("response", "")
+        message = data.get("message") or {}
+        text = message.get("content", "") if isinstance(message, dict) else ""
         if not isinstance(text, str):
             text = json.dumps(text)
 
@@ -187,14 +218,15 @@ class LLMClient:
                 "REMEMBER: Return ONLY raw JSON. No markdown fences. No explanation. "
                 "No prose before or after."
             )
-            payload["prompt"] = stricter_prompt
+            payload["messages"][0]["content"] = stricter_prompt
             try:
                 resp = httpx.post(url, json=payload, timeout=self.timeout)
                 resp.raise_for_status()
                 data = resp.json()
             except Exception as e:
                 raise RuntimeError(f"Ollama request failed: {e}") from e
-            text = data.get("response", "")
+            message = data.get("message") or {}
+            text = message.get("content", "") if isinstance(message, dict) else ""
             if not isinstance(text, str):
                 text = json.dumps(text)
 
@@ -279,6 +311,7 @@ class LLMClient:
         temperature: float = 0.0,
         json_schema: Optional[dict[str, Any]] = None,
         fallback_response: Optional[str] = None,
+        images: Optional[list[str]] = None,
     ) -> str | dict[str, Any]:
         """Complete a single-turn LLM task.
 
@@ -292,12 +325,14 @@ class LLMClient:
                 the response is parsed as JSON and returned as a dict.
             fallback_response: Value returned if both backends fail and no key
                 is configured. If omitted, failures raise.
+            images: Optional list of image file paths for vision prompts. Only
+                supported by the Ollama backend.
 
         Returns:
             Response text, or parsed JSON dict when ``json_schema`` is given.
         """
         model = self._model_for_task(task)
-        cache_path = self._cache_path(task, prompt, model)
+        cache_path = self._cache_path(task, prompt, model, images=images)
         cached = self._load_cache(cache_path)
         if cached is not None:
             logger.debug("LLM cache hit", task=task.value, model=model)
@@ -312,6 +347,7 @@ class LLMClient:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 json_schema=json_schema,
+                images=images,
             )
             self._save_cache(cache_path, task, prompt, model, response_text)
             return self._maybe_parse_json(response_text, json_schema)

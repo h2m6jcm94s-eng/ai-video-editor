@@ -205,6 +205,7 @@ export const adaptiveFeaturesSchema = z
     useEmotionLedCuts: z.boolean().optional(),
     useCorpusKnn: z.boolean().optional(),
     usePerUserBias: z.boolean().optional(),
+    useWave10Effects: z.boolean().optional(),
   })
   .strict()
   .optional();

@@ -24,6 +24,25 @@ EmotionLabel = Literal[
     "awe",
 ]
 
+# The 15 viewer/editor intents used by the intent-first architecture (T.11).
+EDIT_INTENT_LABELS: List[str] = [
+    "BREATHE",
+    "PUNCTUATE",
+    "RAMP_UP",
+    "RELEASE",
+    "REVEAL",
+    "WITHHOLD",
+    "CONNECT",
+    "ISOLATE",
+    "SHOCK",
+    "CARRY",
+    "LINGER",
+    "JAB",
+    "LAYER",
+    "STRIP_DOWN",
+    "AMPLIFY",
+]
+
 
 class BaseModelCamel(BaseModel):
     model_config = ConfigDict(
@@ -215,6 +234,35 @@ class ClipEmotionProfile(BaseModelCamel):
         )
 
 
+class ClipCapabilityProfile(BaseModelCamel):
+    """Per-clip capability map: how well this clip can serve each edit intent.
+
+    Produced by the ingest worker and consumed by the intent composer / ranker
+    to match clips to the emotional demands of each song moment.
+    """
+
+    clip_id: str
+    duration_sec: float = Field(default=0.0, ge=0.0)
+    shot_type: Literal["wide", "medium", "close_up", "unknown"] = "unknown"
+    motion_energy: float = Field(default=0.0, ge=0.0, le=1.0)
+    motion_trend: Literal["increasing", "decreasing", "static", "variable"] = "static"
+    dominant_motion: str = "still"
+    stability: float = Field(default=0.0, ge=0.0, le=1.0)
+    aesthetic_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    sharpness: float = Field(default=0.0, ge=0.0, le=1.0)
+    face_area_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    face_count_mode: int = Field(default=0, ge=0)
+    dino_first_last_similarity: float = Field(default=0.0, ge=-1.0, le=1.0)
+    audio_arousal: float = Field(default=0.0, ge=0.0, le=1.0)
+    intent_scores: Dict[str, float] = Field(default_factory=dict)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    def top_intents(self, n: int = 3) -> List[Tuple[str, float]]:
+        """Return the top-n intents by score."""
+        scored = sorted(self.intent_scores.items(), key=lambda kv: kv[1], reverse=True)
+        return scored[:n]
+
+
 class ClipIdentityInfo(BaseModelCamel):
     clip_id: str
     identity_ids: List[int] = Field(default_factory=list)
@@ -235,6 +283,8 @@ class ZoomPunchInParams(EffectParams):
     target_scale: float = Field(default=1.3, ge=1.0, le=3.0)
     duration_ms: int = Field(default=300, ge=50, le=2000)
     easing: Literal["linear", "easeIn", "easeOut", "easeInOut"] = "easeOut"
+    center_x: float = Field(default=0.5, ge=0.0, le=1.0)
+    center_y: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
 class FocusPullParams(EffectParams):
@@ -275,6 +325,18 @@ class FilmGrainParams(EffectParams):
 class ColorPopParams(EffectParams):
     hue_shift: float = Field(default=0.0, ge=-180.0, le=180.0)
     saturation: float = Field(default=1.5, ge=0.0, le=3.0)
+
+
+class ChromaticAberrationParams(EffectParams):
+    shift_x: int = Field(default=3, ge=0, le=20)
+    shift_y: int = Field(default=0, ge=0, le=20)
+    intensity: float = Field(default=0.3, ge=0.0, le=1.0)
+
+
+class HmMvgdHmParams(EffectParams):
+    strength: float = Field(default=0.5, ge=0.0, le=1.0)
+    warmth: float = Field(default=0.0, ge=-1.0, le=1.0)
+    tint: float = Field(default=0.0, ge=-1.0, le=1.0)
 
 
 class TextKineticParams(EffectParams):
@@ -322,6 +384,11 @@ class Effect(BaseModelCamel):
         "vignette",
         "film_grain",
         "color_pop",
+        "chromatic_aberration",
+        "hm_mvgd_hm",
+        "flash_frame",
+        "reframe",
+        "stabilize",
         "text_kinetic",
         "lower_third",
         "callout_arrow",
@@ -380,6 +447,7 @@ class Slot(BaseModelCamel):
     kinetic_text_style: Optional[str] = None
     kinetic_text_color: Optional[str] = None
     kinetic_text_animation: Optional[str] = None
+    emphasis_words: List[str] = Field(default_factory=list)
     effects: List[Effect] = Field(default_factory=list)
     source_window_start_s: Optional[float] = None
     anticipation_offset_s: float = 0.0
@@ -389,6 +457,7 @@ class Slot(BaseModelCamel):
     arc_beat_preferred_shots: List[str] = Field(default_factory=list)
     is_glimpse: bool = False
     emotion_match_score: float = 0.0
+    intent: Optional[str] = None
 
 
 class WordTiming(BaseModelCamel):
@@ -460,6 +529,7 @@ class CutList(BaseModelCamel):
     real_path_ratio: float = 0.0
     demo_grade: bool = False
     slot_window_fallback_count: Optional[int] = None
+    narrative_mode: Optional[str] = None
 
 
 class ShotBoundary(BaseModelCamel):
@@ -668,6 +738,7 @@ class AdaptiveFeatures(BaseModelCamel):
     use_stabilization: bool = False
     use_auto_reframe: bool = False
     use_text_based_edits: bool = False
+    use_wave_10_effects: bool = False
 
 
 class ContentSignals(BaseModelCamel):
@@ -714,6 +785,7 @@ class ClipScore(BaseModelCamel):
     repetition_penalty: float = 0.0
     total_score: float = 0.0
     emotion_match_score: float = 0.0
+    intent_match_score: float = 0.0
     arc_beat_name: Optional[str] = None
     emotion_profile: Optional[ClipEmotionProfile] = None
 

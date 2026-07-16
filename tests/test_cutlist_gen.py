@@ -806,11 +806,18 @@ class TestSlotContiguityAndDurationCap:
         last_slot = cutlist.slots[-1]
         assert last_slot.start_s + last_slot.duration_s >= content_end - 1.0
 
-    def test_reference_shorter_than_song_caps_duration(self):
+    def test_reference_shorter_than_song_honors_requested_duration(self):
+        # Reference (shot boundaries) is shorter than the requested output, but
+        # user clips are the actual content source, so the cutlist should span
+        # the requested total_duration rather than being truncated to the
+        # reference length.
         beats = make_beat_grid(bpm=120, beats=[i * 0.5 for i in range(125)])
         shots = [ShotBoundary(start_frame=0, end_frame=300, start_s=0.0, end_s=10.0, is_gradual=False)]
         energy = [0.5] * 10
         cutlist = generate_cutlist_programmatic(beats, shots, energy, ["wide"], total_duration=30.0)
 
-        assert cutlist.globals.total_duration_s <= 10.0
-        assert all(s.start_s + s.duration_s <= 10.0 + 1e-3 for s in cutlist.slots)
+        assert cutlist.globals.total_duration_s <= 30.0
+        assert all(s.start_s + s.duration_s <= 30.0 + 1e-3 for s in cutlist.slots)
+        # The edit should actually use most of the requested duration.
+        last_end = cutlist.slots[-1].start_s + cutlist.slots[-1].duration_s
+        assert last_end >= 29.0, f"expected cutlist to reach ~30s, got {last_end}s"

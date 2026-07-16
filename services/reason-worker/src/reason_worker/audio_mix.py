@@ -190,6 +190,7 @@ def _dialogue_segments_for_slot(
     behavior: BehaviorVector,
     source_ip_hint: Optional[str] = None,
     content_embedding: Optional[dict] = None,
+    music_event_grid: Optional[Any] = None,
 ) -> List[DialogueSegment]:
     """Find dialogue segments inside the selected window of a clip.
 
@@ -218,6 +219,7 @@ def _dialogue_segments_for_slot(
             clip_path=clip_path,
             max_llm_candidates=20,
             content_embedding=content_embedding,
+            music_event_grid=music_event_grid,
         )
     }
 
@@ -401,7 +403,7 @@ def build_audio_tracks(
     line within Windows' length limit; only the highest-scoring segments are kept.
     """
     with FeatureTracer("dialogue", gated_in=True) as ft:
-        return _build_audio_tracks(
+        tracks = _build_audio_tracks(
             cutlist,
             beat_grid,
             song_asset_id,
@@ -415,6 +417,11 @@ def build_audio_tracks(
             features,
             ft,
         )
+        music_count = sum(1 for t in tracks if t.role == "music")
+        dialogue_count = sum(1 for t in tracks if t.role == "dialogue")
+        ft.signature(f"tracks={len(tracks)},music={music_count},dialogue={dialogue_count}")
+        ft.real()
+        return tracks
 
 
 def _build_audio_tracks(
@@ -471,7 +478,15 @@ def _build_audio_tracks(
             if slot.source_window_start_s is not None
             else 0.0
         )
-        segs = _dialogue_segments_for_slot(slot, clip_paths[clip_id], scoring_cfg, behavior, source_ip_hint=source_ip_hint, content_embedding=content_embedding)
+        segs = _dialogue_segments_for_slot(
+            slot,
+            clip_paths[clip_id],
+            scoring_cfg,
+            behavior,
+            source_ip_hint=source_ip_hint,
+            content_embedding=content_embedding,
+            music_event_grid=song_meaning.music_event_grid if song_meaning else None,
+        )
         if segs:
             slot_dialogue_segments.append((slot.index, clip_id, window_start, slot.start_s, segs))
         if not segs:
@@ -693,7 +708,7 @@ def _vocal_arousal_at_time(t: float, song_meaning: SongMeaning, window_s: float 
         if abs(s.t_center_s - t) <= window_s
     ]
     if not samples:
-        return 0.5
+        return 0.0
     arousal_map = {"happy": 0.8, "angry": 0.8, "excited": 0.9, "neutral": 0.4, "sad": 0.2, "fear": 0.6, "calm": 0.2}
     total = 0.0
     weight = 0.0

@@ -67,7 +67,7 @@ This guarantees downstream components always have beat anchors.
    ```
 6. Run agglomerative segmentation: `boundary_indices = librosa.segment.agglomerative(features, k)`.
 7. Choose `k = max(3, min(6, duration // 20))`, clamped to at most half the number of beats.
-8. `_label_structure_segments` assigns labels heuristically from segment energy: highest-energy segment is `drop`, second highest is `chorus`, first is `intro`, last is `outro`, and remaining segments are `verse` or `bridge` depending on position relative to the drop/chorus.
+8. `_label_structure_segments` assigns labels heuristically from segment energy: highest-energy segment is `drop`, second highest is `chorus`, first is `intro`, last is `outro`, and remaining segments are `verse` or `bridge` depending on position relative to the drop/chorus. When the song is detected as calm/acoustic (low energy, low dynamic range, warm spectrum, sustained tones), the highest-energy segment is labelled `chorus` instead of `drop` so piano-ballad sections are not falsely described as EDM drops.
 
 ### 1.6 Energy curve
 

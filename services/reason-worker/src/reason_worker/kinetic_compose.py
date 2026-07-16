@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -65,8 +65,8 @@ def _style_preset_for_context(mood: Optional[str], energy: float) -> str:
 def _lyric_stamp_for_slot(
     slot: Slot,
     lyrics: List[WordTiming],
-) -> Optional[str]:
-    """Return a short lyric phrase inside the slot window, or None."""
+) -> tuple[Optional[str], Optional[List[WordTiming]]]:
+    """Return a short lyric phrase + word timings inside the slot window, or None."""
     window_start = slot.start_s
     window_end = slot.start_s + slot.duration_s
     in_window = [
@@ -74,13 +74,14 @@ def _lyric_stamp_for_slot(
         if window_start <= w.start_s < window_end
     ]
     if not in_window:
-        return None
+        return None, None
     # Pick the 1-4 most central words.
     centre = (window_start + window_end) / 2
     in_window.sort(key=lambda w: abs((w.start_s + w.end_s) / 2 - centre))
     chosen = in_window[:4]
     chosen.sort(key=lambda w: w.start_s)
-    return " ".join(w.text.upper() for w in chosen).strip()
+    text = " ".join(w.text.upper() for w in chosen).strip()
+    return text, chosen
 
 
 KT3_PEAK_BEATS = {
@@ -103,6 +104,8 @@ class KineticText:
     animation_in: str = ""
     animation_out: str = ""
     hold_duration_s: float = 0.0
+    emphasis_words: List[str] = field(default_factory=list)
+    words: Optional[List[WordTiming]] = None
 
 
 def _style_for_preset(preset_key: str, energy: float) -> Dict[str, Any]:
@@ -307,19 +310,25 @@ def compose_kinetic_text_for_slot(
     is_peak = story_beat in KT3_PEAK_BEATS
     is_high_energy = slot.energy_level >= 0.75 and slot.section in ("chorus", "drop", "bridge")
     if lyrics and (is_peak or is_high_energy):
-        stamp = _lyric_stamp_for_slot(slot, lyrics)
+        stamp, stamp_words = _lyric_stamp_for_slot(slot, lyrics)
         if stamp and stamp not in previous_texts:
-            preset = _style_preset_for_context(section_mood, slot.energy_level)
-            style = _style_for_preset(preset, slot.energy_level)
+            # Wave 8 / Wave 9: lyric stamps use the karaoke reveal animation and
+            # mark the last lyrical word as the emphasis pop.
+            emphasis_words = []
+            if stamp_words:
+                # Mark the last content word and any word that is visually punchy.
+                emphasis_words = [stamp_words[-1].text.upper()]
             return KineticText(
                 text=stamp,
                 tier="KT1",
-                style_preset=preset,
-                color_hex=style["color"],
-                outline=style["outline"],
-                size_pct=style["size_pct"],
-                animation=style["animation"],
+                style_preset="lyric_karaoke",
+                color_hex="#FFFFFF",
+                outline=True,
+                size_pct=0.45,
+                animation="karaoke_reveal",
                 rationale="lyric_stamp",
+                emphasis_words=emphasis_words,
+                words=stamp_words,
             )
 
     # KT3 — generated phrase for peak narrative beats.
@@ -407,6 +416,7 @@ def assign_kinetic_text_to_slots(
             slot.kinetic_text_style = kt.style_preset  # type: ignore[attr-defined]
             slot.kinetic_text_color = kt.color_hex  # type: ignore[attr-defined]
             slot.kinetic_text_animation = animation  # type: ignore[attr-defined]
+            slot.emphasis_words = kt.emphasis_words  # type: ignore[attr-defined]
             previous_texts.append(kt.text)
             last_text_index = slot.index
             produced_tiers.append(kt.tier)

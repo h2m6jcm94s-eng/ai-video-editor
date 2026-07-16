@@ -31,14 +31,14 @@ def test_emotion_match_score_default_without_target():
 
 
 def test_emotion_match_score_default_without_profile():
-    assert _emotion_match_score(None, "grief") == 0.5
+    assert _emotion_match_score(None, "grief") == 0.0
 
 
 def test_mood_motion_consistency_hits_table():
     assert _mood_motion_consistency("aggressive", "frantic") == 1.0
     assert _mood_motion_consistency("melancholic", "frantic") == 0.0
-    assert _mood_motion_consistency("unknown", "fluid") == 0.5
-    assert _mood_motion_consistency("uplifting", None) == 0.5
+    assert _mood_motion_consistency("unknown", "fluid") == 0.0
+    assert _mood_motion_consistency("uplifting", None) == 0.0
 
 
 def test_motion_vibe_label_buckets():

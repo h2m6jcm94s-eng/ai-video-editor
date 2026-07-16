@@ -79,9 +79,15 @@ def _semantic_score(
         except Exception as e:
             logger.warning("siglip2_fallback_failed", clip_id=clip_id, error=str(e))
 
-    # Tier 3: default.
-    logger.warning("semantic_score_default_used", clip_id=clip_id, slot_index=slot.index)
-    return RANK.DEFAULT_SEMANTIC_SCORE
+    # Tier 3: no semantic signal available. Return 0.0 (honest missing signal,
+    # not a fake medium score) so the weighted ranker does not pretend it matched.
+    logger.warning(
+        "semantic_score_missing",
+        clip_id=clip_id,
+        slot_index=slot.index,
+        reason="no_marengo_or_siglip2_embedding",
+    )
+    return 0.0
 
 
 def _window_motion(window: dict) -> Optional[float]:
@@ -158,10 +164,10 @@ def _best_window(
     """
     heatmap = meta.get("heatmap", [])
     if not heatmap:
-        # No heatmap = no motion information; keep the legacy neutral score so
-        # the ranker can still use the clip. This is different from "every
-        # window failed the guard", which returns -inf.
-        return None, 0.5, "still"
+        # No heatmap = no motion information. Anti-decoration: do not award a
+        # fake average score; return 0.0 so missing data does not boost the clip.
+        # This is different from "every window failed the guard", which returns -inf.
+        return None, 0.0, "still"
 
     clip_dur = meta.get("duration_sec", 5.0)
 
@@ -282,9 +288,27 @@ _MOOD_MOTION_TABLE = {
 
 def _mood_motion_consistency(section_mood: Optional[str], clip_motion_vibe: Optional[str]) -> float:
     """Score how well a clip's motion vibe matches the song section's mood."""
-    if section_mood is None or clip_motion_vibe is None:
-        return 0.5
-    return _MOOD_MOTION_TABLE.get(section_mood, {}).get(clip_motion_vibe, 0.5)
+    if clip_motion_vibe is None:
+        # Per-clip motion vibe is unavailable; log at debug because this is
+        # called for every candidate and would drown the ranker logs.
+        logger.debug("mood_motion_consistency_missing", section_mood=section_mood, clip_motion_vibe=clip_motion_vibe)
+        return 0.0
+    if section_mood is None:
+        # No section mood available for this slot: neutral contribution rather
+        # than a fake penalty. This is common for instrumental/uncategorized
+        # sections and avoids drowning the logs with warnings.
+        return 0.0
+    return _MOOD_MOTION_TABLE.get(section_mood, {}).get(clip_motion_vibe, 0.0)
+
+
+def _intent_match_score(slot: Slot, meta: dict) -> float:
+    """Return the clip's capability score for the slot's assigned intent."""
+    if not slot.intent:
+        return 0.0
+    capability = meta.get("clip_capability") or meta.get("clipCapability") or {}
+    intent_scores = capability.get("intentScores") or capability.get("intent_scores") or {}
+    score = intent_scores.get(slot.intent)
+    return float(score) if score is not None else 0.0
 
 
 def _emotion_match_score(
@@ -296,7 +320,13 @@ def _emotion_match_score(
         # No arc target on this slot: do not inject a neutral emotion match score.
         return 0.0
     if emotion_profile is None:
-        return 0.5
+        # Log at debug to avoid one warning per candidate clip during ranking.
+        logger.debug(
+            "emotion_match_missing",
+            reason="no_emotion_profile",
+            arc_beat=arc_beat_emotion_target,
+        )
+        return 0.0
     clip_vec = _emotion_label_to_vector(emotion_profile.primary_emotion)
     clip_vec[9] = emotion_profile.arousal
     clip_vec[10] = 0.5 + emotion_profile.valence * 0.5
@@ -354,7 +384,7 @@ def _score_clip(
 
     # If this clip has no non-frozen window for this slot, kill its total score
     # so the ranker skips it. window_score is -inf only when the guard rejected
-    # every available window. Missing heatmap (window_score == 0.5) is not a
+    # every available window. Missing heatmap (window_score == 0.0) is not a
     # rejection.
     if window_start_s is None and window_score == float("-inf"):
         total = float("-inf")
@@ -372,6 +402,7 @@ def _score_clip(
             repetition_penalty=0.0,
             total_score=total,
             emotion_match_score=0.0,
+            intent_match_score=0.0,
             arc_beat_name=slot.story_beat,
             emotion_profile=emotion_profile,
         )
@@ -392,6 +423,9 @@ def _score_clip(
     if at_usage_cap:
         repetition_penalty += RANK.USAGE_CAP_PENALTY
 
+    # T7: capability-aware intent matching.
+    intent_match_score = _intent_match_score(slot, meta)
+
     # T.9.C.3 emotion/arc matching.
     emotion_match_score = _emotion_match_score(
         emotion_profile, slot.arc_beat_emotion_target
@@ -408,6 +442,7 @@ def _score_clip(
     total = (
         RANK.SIGLIP_SEMANTIC_WEIGHT * semantic
         + RANK.EMOTION_MATCH_WEIGHT * emotion_match_score
+        + RANK.INTENT_MATCH_WEIGHT * intent_match_score
         + RANK.MOOD_MOTION_WEIGHT * mood_motion_score
         + RANK.HEATMAP_WEIGHT * window_score
         + RANK.SHOT_TYPE_WEIGHT * shot_type_score
@@ -433,6 +468,7 @@ def _score_clip(
         repetition_penalty=repetition_penalty,
         total_score=total,
         emotion_match_score=emotion_match_score,
+        intent_match_score=intent_match_score,
         arc_beat_name=slot.story_beat,
         emotion_profile=emotion_profile,
     )
@@ -990,5 +1026,9 @@ def compute_confidence(rankings: Dict[int, List[ClipScore]]) -> Dict[int, float]
             gap = scores[0].total_score - scores[-1].total_score
             confidences[slot_idx] = max(0.0, min(1.0, gap * RANK.CONFIDENCE_TAIL_MULTIPLIER))
         else:
-            confidences[slot_idx] = 0.5
+            # Only one candidate: gap is undefined. Anti-decoration: confidence
+            # must not pretend to be moderate; 0.0 marks the measurement as
+            # unavailable.
+            logger.warning("confidence_fallback_single_candidate", slot_index=slot_idx)
+            confidences[slot_idx] = 0.0
     return confidences

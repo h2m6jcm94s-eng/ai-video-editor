@@ -18,9 +18,9 @@ PROMPT = "Rate how iconic this line is: 'I want to be a legend'"
 
 
 def _fake_ollama_response(text: str):
-    """Build a minimal httpx.Response-like object for Ollama."""
+    """Build a minimal httpx.Response-like object for Ollama /api/chat."""
     resp = MagicMock()
-    resp.json.return_value = {"response": text}
+    resp.json.return_value = {"message": {"role": "assistant", "content": text}}
     resp.raise_for_status.return_value = None
     return resp
 
