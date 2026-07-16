@@ -1229,6 +1229,54 @@ def _apply_video_effects(
                 )
             )
 
+        elif etype in ("depth_push", "depth_parallax_left", "depth_parallax_right"):
+            # S3 depth verbs: camera motion driven by depth intent.
+            motion_map = {
+                "depth_push": "depth_push",
+                "depth_parallax_left": "depth_parallax_left",
+                "depth_parallax_right": "depth_parallax_right",
+            }
+            intensity = _get_param(params, "intensity", 0.3)
+            filters.append(
+                camera_motion_filter(
+                    width=config.width,
+                    height=config.height,
+                    motion=motion_map[etype],
+                    intensity=intensity,
+                    duration_s=rel_end - rel_start,
+                )
+            )
+
+        elif etype == "world_text":
+            # S4 world text: renders as text with a depth cue stored in params.
+            # True world-space occlusion and perspective projection are deferred
+            # to T20.7; the depth value is preserved in the decision log.
+            text = _get_param(params, "text", "")
+            if not text:
+                continue
+            depth = _get_param(params, "depth", 0.5)
+            font_size_px = int(_get_param(params, "font_size", 48) * (0.6 + 0.4 * depth))
+            fontfile = font_map.get(_get_param(params, "font", ""), font_map.get("", ""))
+            if not fontfile:
+                fallback = _find_font(_get_param(params, "font", "") or "")
+                if fallback:
+                    fontfile = _copy_font_to_temp(temp_dir, _get_param(params, "font", "") or "")
+            filters.append(
+                _drawtext_filter(
+                    text=text,
+                    start_s=rel_start,
+                    end_s=rel_end,
+                    position="center",
+                    font_size_px=font_size_px,
+                    color="#FFFFFF",
+                    stroke="#000000",
+                    fontfile=fontfile,
+                    animation="pop",
+                    fps=config.fps or 30.0,
+                )
+            )
+            logger.info("world_text_depth_cue", slot_index=slot.index, depth=depth, text=text)
+
         elif etype == "speed_ramp":
             # Time-remapping was already applied to the base stream above.
             pass

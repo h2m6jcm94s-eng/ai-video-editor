@@ -189,6 +189,23 @@ const recordScratchSfxSchema = baseEffectSchema.extend({
   params: z.object({ gainDb: z.number().min(-60).max(12).default(-3) }),
 });
 
+const depthVerbSchema = baseEffectSchema.extend({
+  type: z.enum(["depth_push", "depth_parallax_left", "depth_parallax_right"]),
+  params: z.object({
+    intensity: z.number().min(0).max(1).default(0.3),
+  }),
+});
+
+const worldTextSchema = baseEffectSchema.extend({
+  type: z.literal("world_text"),
+  params: z.object({
+    text: z.string().min(1).max(200),
+    depth: z.number().min(0).max(1).default(0.5),
+    animation: z.enum(["fade_up", "typewriter", "pop", "slide_left"]).default("pop"),
+    fontSize: z.number().int().min(8).max(200).default(48),
+  }),
+});
+
 export const effectSchema = z.union([
   zoomPunchInSchema,
   focusPullSchema,
@@ -210,6 +227,8 @@ export const effectSchema = z.union([
   whooshSfxSchema,
   dingSfxSchema,
   recordScratchSfxSchema,
+  depthVerbSchema,
+  worldTextSchema,
 ]);
 
 export type Effect = z.infer<typeof effectSchema>;

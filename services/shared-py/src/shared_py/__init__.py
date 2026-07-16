@@ -19,6 +19,14 @@ from shared_py.models import (
 )
 from shared_py.config import Settings
 from shared_py.identity_cluster import Identity, cluster_project_identities, pick_protagonists
+from shared_py.viewer_state import (
+    ViewerState,
+    OperationEffect,
+    OperationLedger,
+    RegisteredOperation,
+    ViewerStateSimulator,
+    make_default_ledger,
+)
 
 __all__ = [
     "ClipIdentityInfo",
@@ -39,4 +47,10 @@ __all__ = [
     "Identity",
     "cluster_project_identities",
     "pick_protagonists",
+    "ViewerState",
+    "OperationEffect",
+    "OperationLedger",
+    "RegisteredOperation",
+    "ViewerStateSimulator",
+    "make_default_ledger",
 ]

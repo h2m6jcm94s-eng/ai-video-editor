@@ -385,6 +385,22 @@ class CalloutArrowParams(EffectParams):
     color: str = "#f59e0b"
 
 
+class DepthVerbParams(EffectParams):
+    """Depth-aware camera motion verb."""
+
+    motion: Literal["depth_push", "depth_parallax_left", "depth_parallax_right"] = "depth_push"
+    intensity: float = Field(default=0.3, ge=0.0, le=1.0)
+
+
+class WorldTextParams(EffectParams):
+    """Text placed in world-space with a depth cue."""
+
+    text: str = Field(..., min_length=1, max_length=200)
+    depth: float = Field(default=0.5, ge=0.0, le=1.0)
+    animation: Literal["fade_up", "typewriter", "pop", "slide_left"] = "pop"
+    font_size: int = Field(default=48, ge=8, le=200)
+
+
 class SfxParams(EffectParams):
     gain_db: float = Field(default=-6.0, ge=-60.0, le=12.0)
 
@@ -440,6 +456,10 @@ class Effect(BaseModelCamel):
         "ding_sfx",
         "record_scratch_sfx",
         "camera_motion",
+        "depth_push",
+        "depth_parallax_left",
+        "depth_parallax_right",
+        "world_text",
     ]
     start_s: float = Field(ge=0.0)
     duration_s: float = Field(ge=0.0)

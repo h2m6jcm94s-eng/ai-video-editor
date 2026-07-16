@@ -48,6 +48,16 @@ def _preset_keyframes(
     elif motion == "tilt_down":
         z = [Keyframe(t_s=0.0, value=pan_zoom), Keyframe(t_s=t_end, value=pan_zoom)]
         y = [Keyframe(t_s=0.0, value=pan_reach), Keyframe(t_s=t_end, value=0.0)]
+    elif motion == "depth_push":
+        # Depth-aware push: stronger zoom to emphasize spatial depth.
+        z = [Keyframe(t_s=0.0, value=1.0), Keyframe(t_s=t_end, value=1.0 + intensity * 0.7)]
+    elif motion == "depth_parallax_left":
+        # Simulated parallax: camera orbits left, background layer moves right.
+        z = [Keyframe(t_s=0.0, value=pan_zoom), Keyframe(t_s=t_end, value=pan_zoom)]
+        x = [Keyframe(t_s=0.0, value=0.0), Keyframe(t_s=t_end, value=pan_reach)]
+    elif motion == "depth_parallax_right":
+        z = [Keyframe(t_s=0.0, value=pan_zoom), Keyframe(t_s=t_end, value=pan_zoom)]
+        x = [Keyframe(t_s=0.0, value=pan_reach), Keyframe(t_s=t_end, value=0.0)]
 
     return z, x, y
 
