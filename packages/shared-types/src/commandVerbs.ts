@@ -1,19 +1,8 @@
 import { z } from "zod";
 
-export const EDIT_VERB = [
-  "trim_slot",
-  "cut_slot",
-  "set_transition",
-  "add_effect",
-  "add_text_overlay",
-  "add_subtitle",
-  "set_color_grade",
-  "zoom_in",
-  "apply_filter",
-  "reorder_slots",
-  "remove_overlay",
-  "change_tempo",
-] as const;
+export { EDIT_VERB } from "./verbs.generated";
+
+import { EDIT_VERB } from "./verbs.generated";
 
 export type EditVerb = (typeof EDIT_VERB)[number];
 

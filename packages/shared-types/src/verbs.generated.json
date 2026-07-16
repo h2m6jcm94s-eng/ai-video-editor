@@ -1,0 +1,546 @@
+[
+  {
+    "id": "trim_slot",
+    "category": "edit",
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "slotIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "startS": {
+          "type": "number",
+          "minimum": 0
+        },
+        "durationS": {
+          "type": "number",
+          "minimum": 0.5
+        }
+      },
+      "required": ["slotIndex"]
+    },
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": true,
+    "description": "Change the duration of a cutlist slot."
+  },
+  {
+    "id": "cut_slot",
+    "category": "edit",
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "slotIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "startS": {
+          "type": "number",
+          "minimum": 0
+        },
+        "durationS": {
+          "type": "number",
+          "minimum": 0.5
+        }
+      },
+      "required": ["slotIndex"]
+    },
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": false,
+    "description": "Split or remove a slot (planned)."
+  },
+  {
+    "id": "set_transition",
+    "category": "edit",
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "slotIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "transition": {
+          "type": "string",
+          "enum": ["hard_cut", "fade", "dissolve", "slide", "zoom"]
+        }
+      },
+      "required": ["transition"]
+    },
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": true,
+    "description": "Set the outgoing transition for a slot or the default."
+  },
+  {
+    "id": "add_effect",
+    "category": "edit",
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "slotIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "effectType": {
+          "type": "string",
+          "enum": [
+            "zoom_punch_in",
+            "shake",
+            "glitch",
+            "vignette",
+            "film_grain",
+            "color_pop",
+            "chromatic_aberration",
+            "text_kinetic",
+            "lower_third",
+            "camera_motion"
+          ]
+        },
+        "startS": {
+          "type": "number",
+          "minimum": 0
+        },
+        "durationS": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": ["slotIndex"]
+    },
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": true,
+    "description": "Add an effect to a slot."
+  },
+  {
+    "id": "add_text_overlay",
+    "category": "edit",
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "startS": {
+          "type": "number",
+          "minimum": 0
+        },
+        "durationS": {
+          "type": "number",
+          "minimum": 0.5
+        },
+        "position": {
+          "type": "string",
+          "enum": ["center", "top", "bottom"]
+        }
+      },
+      "required": ["text"]
+    },
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": true,
+    "description": "Add a text overlay to the cutlist."
+  },
+  {
+    "id": "add_subtitle",
+    "category": "edit",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": false,
+    "description": "Add a subtitle track entry (planned)."
+  },
+  {
+    "id": "set_color_grade",
+    "category": "edit",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": false,
+    "description": "Apply a color grade (planned)."
+  },
+  {
+    "id": "zoom_in",
+    "category": "edit",
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "slotIndex": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "prerequisites": [],
+    "ledger_ref": "zoom_in",
+    "implemented": true,
+    "description": "Shorthand for adding a zoom_punch_in effect."
+  },
+  {
+    "id": "apply_filter",
+    "category": "edit",
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "slotIndex": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "effectType": {
+          "type": "string",
+          "enum": ["film_grain", "vignette", "glitch", "shake", "color_pop", "chromatic_aberration"]
+        },
+        "startS": {
+          "type": "number",
+          "minimum": 0
+        },
+        "durationS": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": ["slotIndex"]
+    },
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": true,
+    "description": "Apply a named filter to a slot."
+  },
+  {
+    "id": "reorder_slots",
+    "category": "edit",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": false,
+    "description": "Reorder slots in the cutlist (planned)."
+  },
+  {
+    "id": "remove_overlay",
+    "category": "edit",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": false,
+    "description": "Remove an overlay by id (planned)."
+  },
+  {
+    "id": "change_tempo",
+    "category": "edit",
+    "params_schema": {
+      "type": "object",
+      "properties": {
+        "direction": {
+          "type": "string",
+          "enum": ["faster", "slower"]
+        }
+      },
+      "required": ["direction"]
+    },
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": true,
+    "description": "Request a tempo change (currently falls back to explanation)."
+  },
+  {
+    "id": "zoom_punch_in",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": true,
+    "description": "Scale punch-in effect."
+  },
+  {
+    "id": "focus_pull",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": true,
+    "description": "Blur focus pull."
+  },
+  {
+    "id": "freeze_frame",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": true,
+    "description": "Hold a single frame."
+  },
+  {
+    "id": "speed_ramp",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": true,
+    "description": "Variable speed segment."
+  },
+  {
+    "id": "shake",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": "shake",
+    "implemented": true,
+    "description": "Camera shake."
+  },
+  {
+    "id": "glitch",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": "glitch",
+    "implemented": true,
+    "description": "Digital glitch."
+  },
+  {
+    "id": "vignette",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": "vignette",
+    "implemented": true,
+    "description": "Edge darkening."
+  },
+  {
+    "id": "film_grain",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": "film_grain",
+    "implemented": true,
+    "description": "Film grain texture."
+  },
+  {
+    "id": "color_pop",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": "color_pop",
+    "implemented": true,
+    "description": "Saturation boost."
+  },
+  {
+    "id": "chromatic_aberration",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": "chromatic_aberration",
+    "implemented": true,
+    "description": "RGB split distortion."
+  },
+  {
+    "id": "hm_mvgd_hm",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": "hm_mvgd_hm",
+    "implemented": true,
+    "description": "Heatmap-driven color move."
+  },
+  {
+    "id": "flash_frame",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": "flash_frame",
+    "implemented": true,
+    "description": "Single frame flash."
+  },
+  {
+    "id": "reframe",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": true,
+    "description": "Aspect-ratio reframe."
+  },
+  {
+    "id": "stabilize",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": true,
+    "description": "Motion stabilization."
+  },
+  {
+    "id": "text_kinetic",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": "text_kinetic",
+    "implemented": true,
+    "description": "Animated kinetic text."
+  },
+  {
+    "id": "lower_third",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": "lower_third",
+    "implemented": true,
+    "description": "Lower third graphic."
+  },
+  {
+    "id": "callout_arrow",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": true,
+    "description": "Arrow callout graphic."
+  },
+  {
+    "id": "whoosh_sfx",
+    "category": "audio",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": true,
+    "description": "Whoosh sound effect."
+  },
+  {
+    "id": "ding_sfx",
+    "category": "audio",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": true,
+    "description": "Ding sound effect."
+  },
+  {
+    "id": "record_scratch_sfx",
+    "category": "audio",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": true,
+    "description": "Record scratch sound effect."
+  },
+  {
+    "id": "camera_motion",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": null,
+    "implemented": true,
+    "description": "Preset or keyframe camera move."
+  },
+  {
+    "id": "depth_push",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": ["depth"],
+    "ledger_ref": "depth_push",
+    "implemented": true,
+    "description": "Depth-aware push-in."
+  },
+  {
+    "id": "depth_parallax_left",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": ["depth"],
+    "ledger_ref": "depth_parallax_left",
+    "implemented": true,
+    "description": "Depth-aware parallax left."
+  },
+  {
+    "id": "depth_parallax_right",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": ["depth"],
+    "ledger_ref": "depth_parallax_right",
+    "implemented": true,
+    "description": "Depth-aware parallax right."
+  },
+  {
+    "id": "world_text",
+    "category": "effect",
+    "params_schema": {},
+    "prerequisites": ["depth"],
+    "ledger_ref": "world_text",
+    "implemented": true,
+    "description": "Text placed in world-space behind subject."
+  },
+  {
+    "id": "zoom_out",
+    "category": "camera",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": "zoom_out",
+    "implemented": true,
+    "description": "Pull back; releases tension slightly."
+  },
+  {
+    "id": "pan_left",
+    "category": "camera",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": "pan_left",
+    "implemented": true,
+    "description": "Horizontal camera pan left."
+  },
+  {
+    "id": "pan_right",
+    "category": "camera",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": "pan_right",
+    "implemented": true,
+    "description": "Horizontal camera pan right."
+  },
+  {
+    "id": "hard_cut",
+    "category": "transition",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": "hard_cut",
+    "implemented": true,
+    "description": "Instant cut; attention reset."
+  },
+  {
+    "id": "fade",
+    "category": "transition",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": "fade",
+    "implemented": true,
+    "description": "Fade; lowers arousal and tension."
+  },
+  {
+    "id": "dissolve",
+    "category": "transition",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": "dissolve",
+    "implemented": true,
+    "description": "Dissolve; gentle release."
+  },
+  {
+    "id": "riser",
+    "category": "audio",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": "riser",
+    "implemented": true,
+    "description": "Rising sound effect; builds tension."
+  },
+  {
+    "id": "hit",
+    "category": "audio",
+    "params_schema": {},
+    "prerequisites": [],
+    "ledger_ref": "hit",
+    "implemented": true,
+    "description": "Percussive hit; punctuates moment."
+  }
+]
