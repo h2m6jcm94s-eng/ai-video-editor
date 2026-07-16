@@ -107,6 +107,21 @@ class ProbeAssetWorkflow:
 
         results = await asyncio.gather(*futures) if futures else []
 
+        if asset_type in {"reference_video", "clip"}:
+            fps = probe.get("fps") or 30.0
+            shot_boundaries = []
+            for result in results:
+                if isinstance(result, dict) and "shot_boundaries" in result:
+                    shot_boundaries = result.get("shot_boundaries", []) or []
+                    break
+            scene_depth_result = await workflow.execute_activity(
+                "analyze_scene_depth_activity",
+                args=(input.asset_id, input.storage_key, fps, shot_boundaries),
+                start_to_close_timeout=timedelta(seconds=600),
+                retry_policy=RetryPolicy(maximum_attempts=2),
+            )
+            results.append(scene_depth_result)
+
         # Phase 3: for reference videos, kick off style analysis as an independent
         # child workflow once shot boundaries are known. Using PARENT_CLOSE_POLICY_ABANDON
         # lets the style analysis continue even after this probe workflow finishes.

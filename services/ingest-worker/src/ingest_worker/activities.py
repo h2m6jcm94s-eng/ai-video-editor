@@ -7,10 +7,11 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 import httpx
 from shared_py.config import settings
+from shared_py.logging_config import StructuredLogger
 from shared_py.storage import download_asset
 from temporalio import activity
 
@@ -29,6 +30,8 @@ from ingest_worker.clip_capability import compute_clip_capability_profile
 from ingest_worker.probe import probe_asset_remote
 from style_worker.siglip2 import embed_video_frames as siglip2_embed_video_frames
 from ingest_worker.shot_detect import detect_shot_boundaries
+from ingest_worker.scene_depth import analyze_scenes_and_depth
+from shared_py.models import ShotBoundary
 
 
 def _internal_headers() -> Dict[str, str]:
@@ -98,6 +101,31 @@ async def detect_shot_boundaries_activity(asset_id: str, storage_key: str, fps: 
         }
         await _patch_asset_metadata(asset_id, metadata)
         return {"asset_id": asset_id, "shot_boundaries": metadata["shotBoundaries"]}
+    finally:
+        try:
+            os.remove(local_path)
+        except OSError:
+            pass
+
+
+@activity.defn
+async def analyze_scene_depth_activity(
+    asset_id: str, storage_key: str, fps: float = 30.0, shot_boundaries: Optional[list] = None
+) -> dict:
+    """Download a video asset, estimate depth, group scenes, and persist metadata."""
+    local_path = download_asset(storage_key, _local_clip_path(asset_id, storage_key))
+    try:
+        shots = None
+        if shot_boundaries:
+            try:
+                shots = [ShotBoundary(**s) for s in shot_boundaries]
+            except Exception as exc:
+                logger = StructuredLogger("ingest_worker.activities")
+                logger.warning("shot_boundary_parse_failed", asset_id=asset_id, error=str(exc))
+        analysis = analyze_scenes_and_depth(local_path, asset_id, fps=fps, shot_boundaries=shots)
+        metadata = {"sceneDepthAnalysis": analysis.model_dump(by_alias=True)}
+        await _patch_asset_metadata(asset_id, metadata)
+        return {"asset_id": asset_id, "scene_depth_analysis": metadata["sceneDepthAnalysis"]}
     finally:
         try:
             os.remove(local_path)

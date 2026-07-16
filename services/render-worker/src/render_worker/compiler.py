@@ -21,6 +21,8 @@ from render_worker.edits.focus_pull import focus_pull_filter
 from render_worker.edits.vignette import vignette_filter
 from render_worker.edits.chromatic_aberration import chromatic_aberration_filter
 from render_worker.edits.hm_mvgd_hm import hm_mvgd_hm_filter
+from render_worker.edits.camera_motion import camera_motion_filter
+from render_worker.layers import composite_layers
 from render_worker.kinetic_animations import default_for_style, preset as _kinetic_preset
 from render_worker.reframe import reframe_filter
 from render_worker.stabilize import stabilization_filter
@@ -1206,6 +1208,27 @@ def _apply_video_effects(
                 stacklevel=3,
             )
 
+        elif etype == "camera_motion":
+            motion = _get_param(params, "motion", slot.motion_hint or "zoom_in")
+            intensity = _get_param(params, "intensity", 0.3)
+            keyframes_raw = _get_param(params, "keyframes", None)
+            keyframes = None
+            if keyframes_raw:
+                try:
+                    keyframes = [Keyframe(**k) if isinstance(k, dict) else k for k in keyframes_raw]
+                except Exception:
+                    keyframes = None
+            filters.append(
+                camera_motion_filter(
+                    width=config.width,
+                    height=config.height,
+                    motion=motion,
+                    intensity=intensity,
+                    duration_s=rel_end - rel_start,
+                    keyframes=keyframes,
+                )
+            )
+
         elif etype == "speed_ramp":
             # Time-remapping was already applied to the base stream above.
             pass
@@ -1823,6 +1846,20 @@ def _extract_segment(args) -> Optional[dict]:
         masked_segment_path = os.path.join(temp_dir, f"slot_{slot.index:03d}_masked.mp4")
         _apply_subject_mask(segment_path, mask_path, masked_segment_path, config, temp_dir)
         segment_path = masked_segment_path
+
+    # Phase F: composite per-slot layers on top of the base segment.
+    if getattr(slot, "layers", None):
+        segment_path = composite_layers(
+            base_path=segment_path,
+            layers=slot.layers,
+            duration_s=scaled_duration,
+            width=config.width,
+            height=config.height,
+            fps=config.fps or 30.0,
+            encode_args=_segment_video_args(config),
+            run_ffmpeg=_run_ffmpeg,
+            temp_dir=temp_dir,
+        )
 
     # Kinetic text compositing: behind the subject when a mask exists, otherwise
     # fall back to a global overlay so the render does not fail without SAM3.

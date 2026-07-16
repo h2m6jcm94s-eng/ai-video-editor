@@ -911,7 +911,7 @@ function parseResponse(text: string): PromptEditResult | null {
   };
 }
 
-function applyJsonPatch(target: unknown, patch: unknown[]): unknown {
+export function applyJsonPatch(target: unknown, patch: unknown[]): unknown {
   const obj = JSON.parse(JSON.stringify(target));
 
   for (const [index, op] of patch.entries()) {

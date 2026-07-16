@@ -339,6 +339,35 @@ class HmMvgdHmParams(EffectParams):
     tint: float = Field(default=0.0, ge=-1.0, le=1.0)
 
 
+class Keyframe(EffectParams):
+    """A single keyframe for animating an effect parameter over time."""
+
+    t_s: float = Field(ge=0.0)
+    value: float
+    easing: Literal["linear", "ease_in", "ease_out", "ease_in_out"] = "linear"
+
+
+class CameraMotionParams(EffectParams):
+    """Animated camera move applied to a slot.
+
+    Either provide explicit keyframes for a property (e.g. crop_x) or use a
+    named preset and let the compiler generate the keyframes.
+    """
+
+    motion: Literal[
+        "pan_left",
+        "pan_right",
+        "tilt_up",
+        "tilt_down",
+        "zoom_in",
+        "zoom_out",
+        "push_in",
+        "pull_out",
+    ]
+    intensity: float = Field(default=0.3, ge=0.0, le=1.0)
+    keyframes: Optional[List[Keyframe]] = None
+
+
 class TextKineticParams(EffectParams):
     text: str = Field(..., min_length=1, max_length=200)
     animation: Literal["fade_up", "typewriter", "pop", "slide_left"] = "fade_up"
@@ -372,6 +401,21 @@ class RecordScratchSfxParams(SfxParams):
     pass
 
 
+class Layer(BaseModelCamel):
+    """A single compositing layer applied on top of a slot."""
+
+    id: str
+    type: Literal["image", "video", "color"]
+    source: Optional[str] = None
+    z_index: int = 0
+    transform: Dict[str, Any] = Field(default_factory=dict)
+    opacity: float = Field(default=1.0, ge=0.0, le=1.0)
+    blend_mode: str = "normal"
+    in_s: float = 0.0
+    out_s: float = 0.0
+    keyframes: Dict[str, List[Keyframe]] = Field(default_factory=dict)
+
+
 class Effect(BaseModelCamel):
     id: Optional[str] = None
     type: Literal[
@@ -395,6 +439,7 @@ class Effect(BaseModelCamel):
         "whoosh_sfx",
         "ding_sfx",
         "record_scratch_sfx",
+        "camera_motion",
     ]
     start_s: float = Field(ge=0.0)
     duration_s: float = Field(ge=0.0)
@@ -458,6 +503,7 @@ class Slot(BaseModelCamel):
     is_glimpse: bool = False
     emotion_match_score: float = 0.0
     intent: Optional[str] = None
+    layers: List[Layer] = Field(default_factory=list)
 
 
 class WordTiming(BaseModelCamel):
@@ -541,6 +587,54 @@ class ShotBoundary(BaseModelCamel):
     confidence: float = 1.0
     transition_in: str = "hard_cut"
     transition_out: str = "hard_cut"
+
+
+class DepthSample(BaseModelCamel):
+    """Per-frame (or per-window) depth statistics for a video asset."""
+
+    t_s: float
+    mean_depth: float = Field(ge=0.0, le=1.0)
+    depth_variance: float = Field(ge=0.0, le=1.0)
+    near_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+    far_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class DepthAnalysis(BaseModelCamel):
+    """Depth-estimation summary for an asset."""
+
+    version: str = "1.0"
+    model_name: str = "midas_v2.1_small"
+    sampled_fps: float = 2.0
+    global_mean_depth: float = 0.0
+    global_depth_variance: float = 0.0
+    samples: List[DepthSample] = Field(default_factory=list)
+    depth_map_storage_key: Optional[str] = None
+
+
+class Scene(BaseModelCamel):
+    """A visually coherent scene inside a video asset."""
+
+    scene_id: int
+    start_s: float
+    end_s: float
+    start_frame: int
+    end_frame: int
+    representative_frame_s: float
+    dominant_motion: str = "still"
+    avg_depth: float = 0.0
+    depth_variance: float = 0.0
+    visual_tag: str = ""
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class SceneDepthAnalysis(BaseModelCamel):
+    """Combined scene grouping and depth analysis payload."""
+
+    version: str = "1.0"
+    asset_id: str
+    scenes: List[Scene] = Field(default_factory=list)
+    depth: DepthAnalysis = Field(default_factory=DepthAnalysis)
+    extractor: str = "scene_depth_v1"
 
 
 class BeatSegment(BaseModelCamel):

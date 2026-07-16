@@ -21,6 +21,7 @@ import { requireAuth } from "./middleware/auth";
 import { adminRoutes } from "./routes/admin";
 import { anomalyRoutes } from "./routes/anomaly";
 import { billingRoutes } from "./routes/billing";
+import { commandRoutes } from "./routes/commands";
 import { healthRoutes } from "./routes/health";
 import { internalRoutes } from "./routes/internal";
 import { logRoutes } from "./routes/log";
@@ -172,6 +173,7 @@ export async function buildApp() {
   });
 
   await app.register(billingRoutes, { prefix: "/api/billing" });
+  await app.register(commandRoutes, { prefix: "/api" });
   await app.register(projectRoutes, { prefix: "/api/projects" });
   await app.register(uploadRoutes, { prefix: "/api/uploads" });
   await app.register(renderRoutes, { prefix: "/api/renders" });

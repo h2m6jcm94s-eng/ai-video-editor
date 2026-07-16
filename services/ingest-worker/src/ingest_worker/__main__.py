@@ -11,6 +11,7 @@ from shared_py.worker_runner import run_worker
 from ingest_worker.activities import (
     analyze_clip_emotion_activity,
     analyze_loudness_activity,
+    analyze_scene_depth_activity,
     compute_clip_capability_activity,
     compute_siglip2_embedding_activity,
     analyze_song_meaning_activity,
@@ -35,6 +36,7 @@ async def main() -> None:
             probe_asset,
             detect_beats_activity,
             detect_shot_boundaries_activity,
+            analyze_scene_depth_activity,
             compute_clip_heatmap_activity,
             compute_clip_semantic_activity,
             compute_siglip2_embedding_activity,
