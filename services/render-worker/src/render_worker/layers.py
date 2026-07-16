@@ -5,8 +5,6 @@
 
 import os
 import re
-import subprocess
-import tempfile
 import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -114,17 +112,15 @@ def _transform_filters(
     transform: Dict[str, Any] = layer.transform or {}
     scale = float(transform.get("scale", 1.0))
     rotate = float(transform.get("rotate", 0.0))
-    x = float(transform.get("x", 0.0))
-    y = float(transform.get("y", 0.0))
 
     # Animated opacity uses the dedicated "opacity" keyframe track if present.
     opacity_kf = layer.keyframes.get("opacity") if layer.keyframes else None
     if opacity_kf:
         opacity_kf = normalize_track(opacity_kf, duration_s, default_easing=default_easing)
-        alpha_expr = f"clamp(geq(a='{ffmpeg_expression(opacity_kf)}*255'),0,255)"
+        alpha_expr = f"geq=lum='255':a='clamp({ffmpeg_expression(opacity_kf)}*255,0,255)'"
     else:
         opacity = max(0.0, min(1.0, layer.opacity))
-        alpha_expr = f"geq(a='{opacity}*255')"
+        alpha_expr = f"geq=lum='255':a='{opacity}*255'"
 
     parts: List[str] = []
     if scale != 1.0:
@@ -134,7 +130,6 @@ def _transform_filters(
         parts.append(f"rotate=angle={rotate}*PI/180:fillcolor=0x00000000")
     parts.append("format=yuva420p")
     parts.append(alpha_expr)
-    # Position is handled by the overlay filter using x/y expressions.
     return ",".join(parts)
 
 
@@ -178,7 +173,7 @@ def _position_expressions(layer: Layer, duration_s: float, default_easing: str) 
     return x_expr, y_expr
 
 
-def _blend_filter(mode: str) -> Optional[str]:
+def _blend_mode(mode: str) -> Optional[str]:
     return _BLEND_MODES.get(mode)
 
 
@@ -189,12 +184,7 @@ def _build_layer_filter_complex(
     height: int,
     fps: float,
 ) -> Tuple[List[str], List[str], str]:
-    """Return (extra_inputs, filter_complex_lines, output_label).
-
-    Input 0 is the base segment.  Extra inputs are appended for image/video/text
-    layers that need an external source.  Color layers are generated inside the
-    filter graph with the ``color`` source filter.
-    """
+    """Return (extra_inputs, filter_complex_lines, output_label)."""
     if not layers:
         return [], [], "[0:v]"
 
@@ -203,7 +193,7 @@ def _build_layer_filter_complex(
     lines: List[str] = []
     current_label = "0:v"
     color_count = 0
-    image_input_idx = 1  # input 0 is base
+    next_input_idx = 1  # input 0 is base
 
     for i, layer in enumerate(sorted_layers):
         in_s = max(0.0, layer.in_s)
@@ -212,59 +202,77 @@ def _build_layer_filter_complex(
             continue
 
         default_easing = _default_easing(layer)
+        transform = _transform_filters(layer, width, height, duration_s, default_easing)
         layer_label: str
+
         if layer.type == "color":
             r, g, b = _parse_color(layer.source or "")
             layer_label = f"col_{color_count}"
             color_count += 1
-            transform = _transform_filters(layer, width, height, duration_s, default_easing)
             lines.append(
                 f"color=c=0x{r:02X}{g:02X}{b:02X}:"
                 f"s={width}x{height}:d={duration_s:.3f}:r={fps}[{layer_label}];"
                 f"[{layer_label}]{transform}[{layer_label}_t]"
             )
             layer_label = f"{layer_label}_t"
+
         elif layer.type == "image":
             src = _safe_path(layer.source or "")
             extra_inputs.extend(["-loop", "1", "-t", f"{duration_s:.3f}", "-i", src])
             layer_label = f"img_{i}"
-            transform = _transform_filters(layer, width, height, duration_s, default_easing)
-            lines.append(f"[{image_input_idx}:v]{transform}[{layer_label}]")
-            image_input_idx += 1
+            lines.append(f"[{next_input_idx}:v]{transform}[{layer_label}_t]")
+            next_input_idx += 1
+            layer_label = f"{layer_label}_t"
+
         elif layer.type == "video":
             src = _safe_path(layer.source or "")
             extra_inputs.extend(["-t", f"{duration_s:.3f}", "-i", src])
             layer_label = f"vid_{i}"
-            transform = _transform_filters(layer, width, height, duration_s, default_easing)
-            lines.append(f"[{image_input_idx}:v]{transform}[{layer_label}]")
-            image_input_idx += 1
+            lines.append(f"[{next_input_idx}:v]{transform}[{layer_label}_t]")
+            next_input_idx += 1
+            layer_label = f"{layer_label}_t"
+
         elif layer.type == "text":
             layer_label = f"txt_{i}"
             text_filter = _build_text_filter(layer, width, height, duration_s)
-            transform = _transform_filters(layer, width, height, duration_s, default_easing)
             lines.append(
                 f"color=c=0x00000000:s={width}x{height}:"
                 f"d={duration_s:.3f}:r={fps}[{layer_label}];"
                 f"[{layer_label}]format=yuva420p,{text_filter},{transform}[{layer_label}_t]"
             )
             layer_label = f"{layer_label}_t"
+
         else:
             warnings.warn(f"Unsupported layer type '{layer.type}' on layer {layer.id}")
             continue
+
+        # Apply optional alpha matte.
+        if layer.matte_source:
+            matte_path = _safe_path(layer.matte_source)
+            extra_inputs.extend(["-loop", "1", "-t", f"{duration_s:.3f}", "-i", matte_path])
+            matte_label = f"matte_{i}"
+            merged_label = f"{layer_label}_m"
+            lines.append(
+                f"[{next_input_idx}:v]format=gray,scale={width}:{height}[{matte_label}];"
+                f"[{layer_label}][{matte_label}]alphamerge[{merged_label}]"
+            )
+            next_input_idx += 1
+            layer_label = merged_label
 
         x_expr, y_expr = _position_expressions(layer, duration_s, default_easing)
         enable = _enable_expr(in_s, out_s)
         out_label = f"comp_{i}" if i < len(sorted_layers) - 1 else "outv"
 
-        blend_mode = _blend_filter(layer.blend_mode)
-        if blend_mode and layer.type != "text":
-            # Position the layer on a transparent canvas first, then blend.
+        mode = _blend_mode(layer.blend_mode)
+        if mode:
+            # Position the layer on a transparent canvas, then blend with base.
             positioned_label = f"pos_{i}"
             lines.append(
                 f"color=c=0x00000000:s={width}x{height}:d={duration_s:.3f}[canvas_{i}];"
                 f"[canvas_{i}][{layer_label}]overlay={_escape_expr(x_expr)}:{_escape_expr(y_expr)}:"
                 f"enable='{enable}':format=auto[{positioned_label}];"
-                f"[{current_label}][{positioned_label}]blend=all_mode={blend_mode}:shortest=1[{out_label}]"
+                f"[{current_label}][{positioned_label}]blend=all_mode={mode}:shortest=1,"
+                f"format=yuva420p[{out_label}]"
             )
         else:
             lines.append(
@@ -288,12 +296,7 @@ def composite_layers(
     run_ffmpeg,
     temp_dir: str,
 ) -> str:
-    """Composite ``layers`` on top of ``base_path`` and return the output path.
-
-    ``run_ffmpeg`` is a callable that accepts (cmd, description) and executes
-    FFmpeg, raising on failure.  This avoids a circular import with the
-    compiler module.
-    """
+    """Composite ``layers`` on top of ``base_path`` and return the output path."""
     if not layers:
         return base_path
 

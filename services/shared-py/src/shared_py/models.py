@@ -435,6 +435,8 @@ class Layer(BaseModelCamel):
     font_color: str = "#FFFFFF"
     stroke_color: Optional[str] = "#000000"
     font_file: Optional[str] = None
+    # Alpha matte source (grayscale image/video used to drive layer transparency).
+    matte_source: Optional[str] = None
 
 
 class Effect(BaseModelCamel):
